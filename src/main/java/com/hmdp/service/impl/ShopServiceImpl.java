@@ -161,7 +161,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
 
     /**
-     * 缓存穿透 根据id查询商铺
+     * 缓存穿透 解决方案1 返回空值 根据id查询商铺
      * @param id
      * @return
      */
@@ -189,7 +189,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         }
         //6.存在写入redis
         stringRedisTemplate.opsForValue().set(key,JSONUtil.toJsonStr(shop), RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
-
         return shop;
     }
     private boolean tryLock(String key){
