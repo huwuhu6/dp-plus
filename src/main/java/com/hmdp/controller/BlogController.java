@@ -43,14 +43,26 @@ public class BlogController {
         return Result.ok(blog.getId());
     }
 
+    /**
+     * 用户点赞
+     * @param id
+     * @return
+     */
     @PutMapping("/like/{id}")
     public Result likeBlog(@PathVariable("id") Long id) {
         // 修改点赞数量
-        blogService.update()
-                .setSql("liked = liked + 1").eq("id", id).update();
+        /*blogService.update()
+                .setSql("liked = liked + 1").eq("id", id).update();*/
+        //添加 判断用户 是否已经点赞
+        blogService.likeBlog(id);
         return Result.ok();
     }
 
+    /**
+     * blog的分页查询
+     * @param current
+     * @return
+     */
     @GetMapping("/of/me")
     public Result queryMyBlog(@RequestParam(value = "current", defaultValue = "1") Integer current) {
         // 获取登录用户
