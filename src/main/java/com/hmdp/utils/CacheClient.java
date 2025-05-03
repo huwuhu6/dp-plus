@@ -42,7 +42,7 @@ public class CacheClient {
 
 
     /**
-     * 缓存穿透 根据id查询商铺
+     * 缓存空对象 解决缓存穿透 根据id查询商铺
      * @param id
      * @return
      */
