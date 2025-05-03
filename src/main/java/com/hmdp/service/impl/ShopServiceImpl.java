@@ -42,20 +42,25 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Resource
     private CacheClient cacheClient;
 
+    /**
+     *查询店铺信息
+     * @param id
+     * @return
+     */
     public Result queryById(Long id) {
         //缓存穿透
-        //Shop shop =cacheClient.queryWithPassThrough(CACHE_SHOP_KEY,id,Shop.class,this::getById,CACHE_SHOP_TTL,TimeUnit.MINUTES);
+        Shop shop =cacheClient.queryWithPassThrough(CACHE_SHOP_KEY,id,Shop.class,this::getById,CACHE_SHOP_TTL,TimeUnit.MINUTES);
         //互斥锁解决缓存击穿
         //Shop shop=queryWithMutex(id);
         //逻辑过期 解决缓存击穿
-        Shop shop=cacheClient.queryWithLogicalExpire(CACHE_SHOP_KEY,id,Shop.class,this::getById,CACHE_SHOP_TTL,TimeUnit.MINUTES);
+        //Shop shop=cacheClient.queryWithLogicalExpire(CACHE_SHOP_KEY,id,Shop.class,this::getById,CACHE_SHOP_TTL,TimeUnit.MINUTES);
         if(shop==null){
             return Result.fail("店铺不存在");
         }
         //返回
         return Result.ok(shop);
     }
-    //线程池
+    //TODO 线程池
     private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
 
     /**
@@ -210,7 +215,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         //2.封装逻辑过期时间
         RedisData redisData=new RedisData();
         redisData.setData(shop);
-        redisData.setExpireTime(LocalDateTime.now().plusMinutes(expireSeconds));
+        redisData.setExpireTime(LocalDateTime.now().plusSeconds(expireSeconds));
         //3.写入redis
         stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY+id,JSONUtil.toJsonStr(redisData));
 

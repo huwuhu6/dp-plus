@@ -95,7 +95,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
 
         // 5. 将用户信息保存到 Redis 中
-        // 5.1 生成随机 token 作为登录令牌
+        // 5.1 生成随机 token 作为登录令牌->JWT令牌更安全
         String token = UUID.randomUUID().toString(true);
 
         // 5.2 将 User 对象转为 UserDTO，并转换为 Map 结构存储

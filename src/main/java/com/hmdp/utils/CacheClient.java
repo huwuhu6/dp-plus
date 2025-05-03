@@ -63,7 +63,7 @@ public class CacheClient {
 
         //4.不存在，根据id查询数据库
         R r= dbFallback.apply(id);
-        //5.不存在，返回错误
+        //5.不存在，缓存空对象，并返回错误信息
         if (r==null){
             stringRedisTemplate.opsForValue().set(key,"", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
             return null;

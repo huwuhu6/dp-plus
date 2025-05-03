@@ -33,7 +33,9 @@ public class ShopController {
      */
     @GetMapping("/{id}")
     public Result queryShopById(@PathVariable("id") Long id) {
-
+        //直接查数据库
+        //return Result.ok(shopService.query().eq("id",id).one());
+        //从缓存查
         return shopService.queryById(id);
     }
 
