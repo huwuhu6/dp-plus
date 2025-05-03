@@ -13,4 +13,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
  */
 public interface IBlogService extends IService<Blog> {
 
+    Object queryHotBloyByID(Integer current);
+
+    Object queryBlogById(Long id);
 }
