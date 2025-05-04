@@ -19,4 +19,12 @@ public interface IFollowService extends IService<Follow> {
      * @return
      */
     Result isFollow(Long id);
+
+    /**
+     * 关注或者取关
+     * @param id
+     * @param isFollw
+     * @return
+     */
+    Result follow(Long id, Boolean isFollw);
 }
