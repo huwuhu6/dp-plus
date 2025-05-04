@@ -96,4 +96,13 @@ public class BlogController {
         return Result.ok(blogService.queryBlogById(id));
     }
 
+    /**
+     * 得到blog的点赞top5
+     * @param id
+     * @return
+     */
+    @GetMapping("/likes/{id}")
+    public Result queryBlogLikes(@PathVariable("id") Long id) {
+        return blogService.queryBlogLikes(id);
+    }
 }

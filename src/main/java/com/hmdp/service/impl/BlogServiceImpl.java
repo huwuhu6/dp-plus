@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.BooleanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
@@ -12,13 +13,17 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * <p>
@@ -116,6 +121,31 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             redisTemplate.opsForZSet().add(key,userId.toString(),System.currentTimeMillis());
         }
         return Result.ok();
+    }
+
+    /**
+     * 查询用户点赞top5
+     * @param id
+     * @return
+     */
+    @Override
+    public Result queryBlogLikes(Long id) {
+        String key="blog:liked:"+id;
+        //1.查询top5的点赞用户 zset range key 0 4,得到用户id
+        Set<String> top5=redisTemplate.opsForZSet().range(key,0,4);
+        if(top5==null||top5.isEmpty()){
+            return Result.ok(Collections.emptyList());
+        }
+        //2.解析用户id
+        List<Long> ids=top5.stream().map(Long::valueOf).collect(Collectors.toList());
+        //3.得到用户列表,user转成UserDTO
+        List<UserDTO> users=userService.
+                query().
+                in("id",ids).list()
+                .stream()
+                .map(user -> BeanUtil.copyProperties(user,UserDTO.class))
+                .collect(Collectors.toList());
+        return Result.ok(users);
     }
 
     /**
