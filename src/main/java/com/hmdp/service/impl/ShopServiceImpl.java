@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.annotation.Resource;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -233,5 +234,13 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         //2.删除缓存
         stringRedisTemplate.delete(CACHE_SHOP_KEY+id);
         return Result.ok();
+    }
+
+    @Override
+    public List<Shop> searchByName(String name) {
+        List<Shop> shopList = query()
+                .like("name", name)
+                .list();
+        return shopList;
     }
 }

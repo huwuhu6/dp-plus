@@ -95,4 +95,5 @@ public class BlogController {
     public Result queryBlogById(@PathVariable("id") Long id) {
         return Result.ok(blogService.queryBlogById(id));
     }
+
 }

@@ -2,6 +2,7 @@ package com.hmdp.controller;
 
 
 import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
@@ -10,6 +11,7 @@ import com.hmdp.utils.SystemConstants;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import java.util.List;
 
 /**
  * <p>
@@ -100,5 +102,23 @@ public class ShopController {
                 .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
         // 返回数据
         return Result.ok(page.getRecords());
+    }
+
+    /**
+     * 查询
+     * @param name
+     * @return
+     */
+    @GetMapping("/search")
+    public Result queryShopByName(@RequestParam(value = "name") String name) {
+        // 参数验证
+        if (StringUtils.isBlank(name)) {
+            return Result.fail("搜索关键词不能为空");
+        }
+
+        // 调用服务进行模糊查询
+        List<Shop> shops = shopService.searchByName(name);
+
+        return Result.ok(shops);
     }
 }
