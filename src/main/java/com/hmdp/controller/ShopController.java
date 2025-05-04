@@ -69,16 +69,21 @@ public class ShopController {
      * 根据商铺类型分页查询商铺信息
      * @param typeId 商铺类型
      * @param current 页码
+     * @param sortBy 排序字段
+     * @param sortOrder 排序方向
      * @return 商铺列表
      */
     @GetMapping("/of/type")
     public Result queryShopByType(
             @RequestParam("typeId") Integer typeId,
-            @RequestParam(value = "current", defaultValue = "1") Integer current
+            @RequestParam(value = "current", defaultValue = "1") Integer current,
+            @RequestParam(value = "sortBy", required = false) String sortBy,
+            @RequestParam(value = "sortOrder", required = false) String sortOrder
     ) {
-        // 根据类型分页查询
+        // 多条件分页查询
         Page<Shop> page = shopService.query()
                 .eq("type_id", typeId)
+                .orderBy(sortBy != null && sortOrder != null, "asc".equalsIgnoreCase(sortOrder), sortBy)
                 .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
         // 返回数据
         return Result.ok(page.getRecords());
