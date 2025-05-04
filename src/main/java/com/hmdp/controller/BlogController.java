@@ -1,6 +1,7 @@
 package com.hmdp.controller;
 
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
@@ -42,7 +43,18 @@ public class BlogController {
         // 返回id
         return Result.ok(blog.getId());
     }
-
+    /**
+     * 更新博客
+     * @param id
+     * @param blog
+     * @return
+     */
+    @PutMapping("/{id}")
+    public Result updateBlog(@PathVariable("id") Long id, @RequestBody Blog blog) {
+        blog.setId(id);
+        boolean updated = blogService.updateById(blog);
+        return updated ? Result.ok() : Result.fail("更新失败");
+    }
     /**
      * 用户点赞
      * @param id
@@ -105,4 +117,15 @@ public class BlogController {
     public Result queryBlogLikes(@PathVariable("id") Long id) {
         return blogService.queryBlogLikes(id);
     }
+
+    /**
+     * 删除笔记
+     * @param id
+     * @return
+     */
+    @DeleteMapping("/{id}")
+    public Result deleteBlog(@PathVariable("id") Long id) {
+        return Result.ok(blogService.remove(new QueryWrapper<Blog>().eq("id", id)));
+    }
+
 }

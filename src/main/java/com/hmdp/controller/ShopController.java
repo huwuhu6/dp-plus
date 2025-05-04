@@ -62,7 +62,6 @@ public class ShopController {
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
         // 写入数据库
-
         return shopService.update(shop);
     }
 
@@ -115,10 +114,8 @@ public class ShopController {
         if (StringUtils.isBlank(name)) {
             return Result.fail("搜索关键词不能为空");
         }
-
         // 调用服务进行模糊查询
         List<Shop> shops = shopService.searchByName(name);
-
         return Result.ok(shops);
     }
 }
