@@ -41,4 +41,14 @@ public class FollowController {
     public Result Follow(@PathVariable(value = "id")Long id, @PathVariable(value = "isFollw")Boolean isFollw){
         return followService.follow(id,isFollw);
     }
+
+    /**
+     * 查看共同关注
+     * @param id
+     * @return
+     */
+     @GetMapping("/common/{id}")
+     public Result FollowCommons(@PathVariable(value = "id")Long id){
+        return followService.followCommons(id);
+    }
 }
