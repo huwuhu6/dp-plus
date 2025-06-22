@@ -6,10 +6,12 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
+import com.hmdp.entity.Follow;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.BlogMapper;
 import com.hmdp.service.IBlogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.service.IFollowService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
@@ -39,6 +41,8 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     private IUserService userService;
     @Resource
     private RedisTemplate redisTemplate;
+    @Resource
+    private IFollowService followService;
     /**
      * 分页查询blog数据
      * @param current
@@ -146,6 +150,35 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
                 .map(user -> BeanUtil.copyProperties(user,UserDTO.class))
                 .collect(Collectors.toList());
         return Result.ok(users);
+    }
+
+    /**
+     * 发布blog
+     * @param blog
+     * @return
+     */
+    @Override
+    public Result saveBlog(Blog blog) {
+        // 1.获取登录用户
+        UserDTO user = UserHolder.getUser();
+        blog.setUserId(user.getId());
+        // 2.保存探店博文
+        save(blog);
+        //3.获取用户的粉丝id
+        List<Follow> ids=followService.
+                query().
+                eq("follow_user_id",user.getId())
+                .list();
+        //4.保存到zset里面
+        for (Follow follow : ids) {
+            //粉丝的id
+            Long userId = follow.getUserId();
+            String key = "feed:" + userId;
+            //推模式，key 粉丝 value blog
+            redisTemplate.opsForZSet().add(key, blog.getId(), System.currentTimeMillis());
+        }
+        // 返回id
+        return Result.ok(blog.getId());
     }
 
     /**
