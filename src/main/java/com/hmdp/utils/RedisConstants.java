@@ -20,4 +20,19 @@ public class RedisConstants {
     public static final String SHOP_GEO_KEY = "shop:geo:";
     public static final String USER_SIGN_KEY = "sign:";
 
+    /**
+     * 秒杀相关常量
+     */
+    public static final String SECKILL_REQUEST_QUEUE = "seckill:request:queue:";
+    public static final String SECKILL_RESULT_QUEUE = "seckill:result:queue:";
+    public static final String SECKILL_LOCK_KEY = "seckill:lock:";
+    public static final String SECKILL_USER_ORDER_KEY = "seckill:user:order:";
+    
+    /**
+     * 秒杀配置
+     */
+    public static final long SECKILL_LOCK_TTL = 10L;
+    public static final long SECKILL_REQUEST_TTL = 300L; // 5分钟
+    public static final long SECKILL_RESULT_TTL = 600L; // 10分钟
+
 }

@@ -1,7 +1,11 @@
 package com.hmdp.utils;
 
-import org.springframework.data.redis.core.RedisTemplate;
 
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+
+import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -28,15 +32,19 @@ public class SimpleRedisLock implements  ILock{
         return lock;
     }
 
-    @Override
-    public void unlock() {
-        //获取线程标识
-        String threadId=threadID_prefix+Thread.currentThread().getId();
-        //获取锁中的标识
-        String id= (String) redisTemplate.opsForValue().get(key_prefix+name);
-        if (id.equals(threadId)){
-            redisTemplate.delete(key_prefix+name);
-        }
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
+    static {
+        UNLOCK_SCRIPT = new DefaultRedisScript<>();
+        UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));
+        UNLOCK_SCRIPT.setResultType(Long.class);
+    }
 
+    public void unlock() {
+        // 调用lua脚本
+        redisTemplate.execute(
+                UNLOCK_SCRIPT,
+                Collections.singletonList(key_prefix + name),
+                threadID_prefix
+                        + Thread.currentThread().getId());
     }
 }

@@ -36,8 +36,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     private ISeckillVoucherService seckillVoucherService;
     @Resource
-    private RedisIdWorker redisIdWorker ;
-    private RedisTemplate redisTemplate;
+    private RedisIdWorker redisIdWorker;
+    @Resource
+    private RedisTemplate<String, Object> redisTemplate;
     /**
      * 实现下单功能
      * @param voucherId
@@ -83,7 +84,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         //5一人一单逻辑
         //5.1获取订单
         UserDTO user = UserHolder.getUser();
-        int count=query().eq("user_id",user.getId()).eq("voucher_id",voucherId).count();
+        int count=query().eq("user_id",1010L).eq("voucher_id",voucherId).count();
         //5.2判断是否已经下单过
         if(count>0){
             return Result.fail("用户已经购买过");
@@ -102,7 +103,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         long orderId=redisIdWorker.nextId("order");
         voucherOrder.setId(orderId);
         //7.2用户id
-        Long userId= UserHolder.getUser().getId();
+        Long userId= 1010L;
         voucherOrder.setUserId(userId);
         //7.3代金券id
         voucherOrder.setVoucherId(voucherId);
@@ -111,3 +112,27 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         return Result.ok(orderId);
     }
 }
+/**
+ //6.扣减库存
+ boolean success=seckillVoucherService.update()
+ .setSql("stock=stock-1")
+ .eq("voucher_id",voucherId)
+ .gt("stock", 0)  // 核心防护
+ .update();
+ if(!success){
+ return Result.fail("库存不足！");
+ }
+ //7.创建订单
+ VoucherOrder voucherOrder=new VoucherOrder();
+ //7.1 订单id
+ long orderId=redisIdWorker.nextId("order");
+ voucherOrder.setId(orderId);
+ //7.2用户id
+ Long userId= 1010L;
+ voucherOrder.setUserId(userId);
+ //7.3代金券id
+ voucherOrder.setVoucherId(voucherId);
+ save(voucherOrder);
+
+ return Result.ok(voucherOrder);
+ */
