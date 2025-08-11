@@ -109,7 +109,10 @@ public class SeckillAsyncServiceImpl implements ISeckillAsyncService {
         
         try {
             // 批量获取请求（最多100个）
-            List<Object> requests = redisTemplate.opsForList().leftPop(queueKey, 100);
+           // List<Object> requests = redisTemplate.opsForList().leftPop(queueKey, 100);
+            // 批量弹出（最多100个）
+            List<Object> requests = redisTemplate.opsForList().range(queueKey, 0, 99); // 获取前100个
+            redisTemplate.opsForList().trim(queueKey, 100, -1); // 删除已获取的元素
             if (requests == null || requests.isEmpty()) {
                 return;
             }
