@@ -88,7 +88,7 @@ public class ChatOrchestrationService {
         if (!aiProperties.isConfigured()) return fallbackRoute(message, decisionStatus);
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
-            messages.add(message("system", "你是消费决策 Agent 的对话路由器。根据用户最新一句话选择路由：GENERAL_CHAT=普通闲聊或能力问答；START_DECISION=用户要餐饮推荐或新的消费决策；BUSINESS_FOLLOW_UP=围绕已推荐商户问优惠券、评价、备选或比较；EXIT_DECISION=用户正在补充推荐条件但改为闲聊、拒绝继续或明确结束。不要把普通闲聊路由到消费决策。"));
+            messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择路由：GENERAL_CHAT=普通闲聊、能力问答或非餐饮需求；START_DECISION=用户要找餐厅、吃饭、菜品、订餐或餐饮消费推荐；BUSINESS_FOLLOW_UP=围绕已推荐餐饮商户问优惠券、评价、备选或比较；EXIT_DECISION=用户正在补充推荐条件但改为闲聊、拒绝继续或明确结束。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含“附近”也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
             messages.add(message("system", "当前决策状态=" + decisionStatus));
             messages.add(message("user", message));
             JsonNode result = aiClient.chatCompletion(messages, Arrays.asList(routeTool()), null, "CHAT_ROUTING");
@@ -133,7 +133,9 @@ public class ChatOrchestrationService {
         parameters.put("type", "object"); parameters.put("properties", properties);
         parameters.put("required", Arrays.asList("route")); parameters.put("additionalProperties", false);
         Map<String, Object> function = new LinkedHashMap<String, Object>();
-        function.put("name", "route_chat_message"); function.put("parameters", parameters);
+        function.put("name", "route_chat_message");
+        function.put("description", "仅当用户明确需要餐饮推荐或已推荐餐饮商户的事实查询时，才选择餐饮决策相关路由。");
+        function.put("parameters", parameters);
         Map<String, Object> tool = new LinkedHashMap<String, Object>();
         tool.put("type", "function"); tool.put("function", function);
         return tool;

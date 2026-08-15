@@ -66,6 +66,8 @@ public class ConsumptionDecisionService {
         if (request == null || request.getQuery() == null || request.getQuery().trim().isEmpty()) {
             throw new IllegalArgumentException("query 不能为空");
         }
+        log.info("[AI][decision] event=REQUEST_RECEIVED query={} latitude={} longitude={} maxCandidates={}",
+                compact(request.getQuery()), request.getLatitude(), request.getLongitude(), request.getMaxCandidates());
         AiDecisionSession session = new AiDecisionSession();
         session.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
         session.setQueryText(request.getQuery().trim());
@@ -88,6 +90,10 @@ public class ConsumptionDecisionService {
         if (!"CLARIFYING".equals(session.getStatus()) && !"WAITING_RELAXATION".equals(session.getStatus())) {
             throw new IllegalArgumentException("当前决策不需要补充信息或放宽条件");
         }
+        log.info("[AI][session={}] state={} action=FOLLOW_UP_RECEIVED selectedOptionId={} hasLatitude={} hasLongitude={} message={}",
+                sessionId, session.getStatus(), followUp == null ? null : followUp.getSelectedOptionId(),
+                followUp != null && followUp.getLatitude() != null, followUp != null && followUp.getLongitude() != null,
+                followUp == null ? "" : compact(followUp.getMessage()));
         try {
             if (isEndRequest(followUp)) return cancelPausedDecision(session, followUp);
             DecisionRequest request = objectMapper.readValue(session.getRequestContextJson(), DecisionRequest.class);
@@ -96,6 +102,7 @@ public class ConsumptionDecisionService {
             boolean resumedWithRelaxation = "WAITING_RELAXATION".equals(pausedStatus);
             if ("CLARIFYING".equals(pausedStatus)) {
                 if ("DECLINE_LOCATION".equals(followUp == null ? null : followUp.getSelectedOptionId())) {
+                    log.info("[AI][session={}] state=CLARIFYING action=LOCATION_DECLINED searchScope=CITYWIDE", sessionId);
                     constraints.setNearby(false);
                     constraints.setRadiusKm(-1D);
                     constraints.getSoftPreferences().add("用户未提供位置，按全城搜索");
@@ -106,12 +113,16 @@ public class ConsumptionDecisionService {
                 } else {
                     request.setLatitude(followUp.getLatitude());
                     request.setLongitude(followUp.getLongitude());
+                    log.info("[AI][session={}] state=CLARIFYING action=LOCATION_ACCEPTED latitude={} longitude={}",
+                            sessionId, request.getLatitude(), request.getLongitude());
                 }
             } else {
                 if (followUp == null || followUp.getSelectedOptionId() == null) {
                     throw new IllegalArgumentException("请使用 selectedOptionId 选择一个放宽方案");
                 }
                 applyRelaxation(constraints, followUp.getSelectedOptionId());
+                log.info("[AI][session={}] state=WAITING_RELAXATION action=RELAXATION_SELECTED option={}",
+                        sessionId, followUp.getSelectedOptionId());
             }
             session.setRequestContextJson(objectMapper.writeValueAsString(request));
             session.setPendingType(null);
@@ -341,6 +352,12 @@ public class ConsumptionDecisionService {
     private boolean isEndRequest(DecisionFollowUpRequest followUp) {
         return followUp != null && ("END_DECISION".equals(followUp.getSelectedOptionId())
                 || (followUp.getMessage() != null && !followUp.getMessage().trim().isEmpty()));
+    }
+
+    private String compact(String value) {
+        if (value == null) return "";
+        String result = value.replaceAll("[\\r\\n\\t]+", " ");
+        return result.length() > 800 ? result.substring(0, 800) + "..." : result;
     }
 
     private DecisionResponse cancelPausedDecision(AiDecisionSession session, DecisionFollowUpRequest followUp) throws Exception {
