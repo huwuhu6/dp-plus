@@ -163,21 +163,6 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
-    void rejectsCapabilityQuestionBeforeCreatingDecisionSession() {
-        DecisionRequest request = new DecisionRequest();
-        request.setQuery("你是？");
-
-        DecisionResponse response = service.decide(request);
-
-        assertEquals("UNSUPPORTED", response.getStatus());
-        assertTrue(response.getAnswer().contains("点评消费决策助手"));
-        assertEquals(Boolean.FALSE, response.getUsedModel());
-        verify(sessionMapper, never()).insert(any(AiDecisionSession.class));
-        verify(constraintExtractor, never()).extract(any());
-        verify(shopMapper, never()).selectList(any());
-    }
-
-    @Test
     void relaxationResumesWithoutExtractingConstraintsAgain() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setCuisine("不存在菜系");

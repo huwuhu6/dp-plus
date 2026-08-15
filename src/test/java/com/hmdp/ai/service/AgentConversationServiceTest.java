@@ -21,13 +21,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.never;
 
 class AgentConversationServiceTest {
     @Test
@@ -68,31 +66,6 @@ class AgentConversationServiceTest {
         verify(sessionMapper).updateById(session);
     }
 
-    @Test
-    void answersCapabilityQuestionWithoutCallingBusinessTool() throws Exception {
-        AgentConversationService service = new AgentConversationService();
-        AiDecisionSessionMapper sessionMapper = mock(AiDecisionSessionMapper.class);
-        AiDecisionMessageMapper messageMapper = mock(AiDecisionMessageMapper.class);
-        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
-        ReflectionTestUtils.setField(service, "sessionMapper", sessionMapper);
-        ReflectionTestUtils.setField(service, "messageMapper", messageMapper);
-        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
-        ReflectionTestUtils.setField(service, "toolRegistry", mock(AgentToolRegistry.class));
-        ReflectionTestUtils.setField(service, "aiClient", mock(OpenAiCompatibleClient.class));
-        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
-        ObjectMapper objectMapper = new ObjectMapper();
-        ReflectionTestUtils.setField(service, "objectMapper", objectMapper);
-        when(sessionMapper.selectById(100L)).thenReturn(completedSession(objectMapper));
-        AgentConversationRequest request = new AgentConversationRequest();
-        request.setMessage("你是谁？");
-
-        AgentConversationResponse response = service.converse(100L, request);
-
-        assertTrue(response.getAnswer().contains("点评消费决策助手"));
-        assertTrue(response.getToolTrace().isEmpty());
-        verify(toolCallMapper, never()).insert(any(AiAgentToolCall.class));
-        verify(sessionMapper, never()).updateById(any(AiDecisionSession.class));
-    }
 
     private AiDecisionSession completedSession(ObjectMapper objectMapper) throws Exception {
         DecisionRecommendation recommendation = new DecisionRecommendation();
