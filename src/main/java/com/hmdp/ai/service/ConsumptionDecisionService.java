@@ -66,6 +66,16 @@ public class ConsumptionDecisionService {
         if (request == null || request.getQuery() == null || request.getQuery().trim().isEmpty()) {
             throw new IllegalArgumentException("query 不能为空");
         }
+        ConsumptionIntentGate.Intent intent = ConsumptionIntentGate.classify(request.getQuery());
+        if (intent != ConsumptionIntentGate.Intent.CONSUMPTION) {
+            DecisionResponse response = new DecisionResponse();
+            response.setStatus("UNSUPPORTED");
+            response.setAnswer(ConsumptionIntentGate.reply(intent));
+            response.setUsedModel(false);
+            response.setDegradedReason("该消息未进入消费决策链路，因此没有调用模型、检索或商户工具。");
+            log.info("[AI] action=INITIAL_INTENT_REJECTED intent={}", intent);
+            return response;
+        }
         AiDecisionSession session = new AiDecisionSession();
         session.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
         session.setQueryText(request.getQuery().trim());

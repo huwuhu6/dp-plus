@@ -51,6 +51,16 @@ public class AgentConversationService {
         if (!"COMPLETED".equals(session.getStatus())) {
             throw new IllegalArgumentException("仅已完成推荐的会话支持商户追问");
         }
+        ConsumptionIntentGate.Intent intent = ConsumptionIntentGate.classify(request.getMessage());
+        if (intent != ConsumptionIntentGate.Intent.CONSUMPTION) {
+            saveMessage(sessionId, "USER", "GENERAL_CHAT", request.getMessage().trim());
+            AgentConversationResponse response = new AgentConversationResponse();
+            response.setSessionId(sessionId);
+            response.setUsedModel(false);
+            response.setAnswer(ConsumptionIntentGate.reply(intent));
+            saveMessage(sessionId, "ASSISTANT", "GENERAL_CHAT", response.getAnswer());
+            return response;
+        }
         try {
             AgentSessionContext context = loadContext(session);
             context.setTurnNo(context.getTurnNo() + 1);
