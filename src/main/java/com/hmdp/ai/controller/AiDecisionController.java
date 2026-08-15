@@ -44,4 +44,9 @@ public class AiDecisionController {
     public Result conversation(@PathVariable Long sessionId, @RequestBody AgentConversationRequest request) {
         return Result.ok(agentConversationService.converse(sessionId, request));
     }
+
+    @GetMapping("/{sessionId}/tool-calls")
+    public Result toolCalls(@PathVariable Long sessionId) {
+        return Result.ok(agentConversationService.getToolCalls(sessionId));
+    }
 }

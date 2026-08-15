@@ -75,6 +75,14 @@ public class AgentConversationService {
         }
     }
 
+    public List<AiAgentToolCall> getToolCalls(Long sessionId) {
+        AiDecisionSession session = sessionMapper.selectById(sessionId);
+        if (session == null) throw new IllegalArgumentException("决策记录不存在");
+        ensureOwner(session);
+        return toolCallMapper.selectList(new QueryWrapper<AiAgentToolCall>()
+                .eq("session_id", sessionId).orderByAsc("turn_no").orderByAsc("id"));
+    }
+
     private List<AgentToolResult> runToolLoop(Long sessionId, AgentSessionContext context, String userMessage) {
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         if (!aiProperties.isConfigured()) return results;
