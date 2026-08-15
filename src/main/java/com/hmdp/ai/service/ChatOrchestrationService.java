@@ -11,6 +11,8 @@ import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
@@ -21,6 +23,7 @@ import java.util.Map;
 
 @Service
 public class ChatOrchestrationService {
+    private static final Logger log = LoggerFactory.getLogger(ChatOrchestrationService.class);
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private AiProperties aiProperties;
     @Resource private ConsumptionDecisionService decisionService;
@@ -70,7 +73,11 @@ public class ChatOrchestrationService {
         }
         if ("GENERAL_CHAT".equals(route)) response.setDecisionSessionId(null);
         response.setAnswer(generalReply(message));
-        if (!aiProperties.isConfigured()) response.setDegradedReason("模型未配置，本次使用本地对话降级回复。");
+        if (!aiProperties.isConfigured()) {
+            response.setUsedModel(false);
+            response.setDegradedReason("模型服务未配置：当前后端进程没有读取到 DEEPSEEK_API_KEY，本次使用本地对话降级回复。");
+            log.warn("[AI][chat] action=GENERAL_CHAT event=MODEL_NOT_CONFIGURED");
+        }
         return response;
     }
 
@@ -85,7 +92,8 @@ public class ChatOrchestrationService {
             String arguments = result.path("choices").path(0).path("message").path("tool_calls").path(0)
                     .path("function").path("arguments").asText();
             return objectMapper.readTree(arguments).path("route").asText(fallbackRoute(message, decisionStatus));
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.warn("[AI][chat] action=CHAT_ROUTING event=FALLBACK errorType={}", e.getClass().getSimpleName());
             return fallbackRoute(message, decisionStatus);
         }
     }
@@ -96,7 +104,8 @@ public class ChatOrchestrationService {
             return aiClient.chatText(Arrays.asList(
                     message("system", "你是点评消费决策助手。正常自然地进行简短闲聊；不要主动推荐商户、编造优惠或评价。用户表达消费需求时只提示可以继续描述需求。"),
                     message("user", message)), "GENERAL_CHAT");
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.warn("[AI][chat] action=GENERAL_CHAT event=FALLBACK errorType={}", e.getClass().getSimpleName());
             return "你好，我在。想聊聊吃什么、预算或用餐场景时，随时告诉我。";
         }
     }

@@ -537,3 +537,11 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 新增 `POST /ai/chat/messages` 统一入口。模型通过 Function Call 在 `GENERAL_CHAT`、`START_DECISION`、`BUSINESS_FOLLOW_UP`、`EXIT_DECISION` 之间选择路由：闲聊由模型正常回复；消费需求才创建决策；已完成推荐后的商户问题才调用业务工具；在位置/放宽条件的等待状态中转聊或明确结束，会先取消暂停决策再回到闲聊。模型不可用时保留有限本地路由作为降级，并在响应中声明。
 
 前端 Chatbot 现在只调用该编排入口，保留已有澄清按钮用于提交结构化位置和放宽选项。Spring AI 没有在本阶段引入：当前项目已有 OpenAI 兼容客户端和 Function Call 协议，路由状态机才是本轮的核心变化，额外框架不能替代这层业务编排。
+
+### 运行排障
+
+普通聊天连续返回相同本地文案时，应先检查 `ChatMessageResponse.usedModel=false` 及 `degradedReason`。该分支表示运行中的 Spring Boot 进程没有读取到 `DEEPSEEK_API_KEY`，与另一个终端窗口是否设置变量无关。使用 IDE 启动时需在对应 Run Configuration 配置环境变量后重启；路由和闲聊的模型调用失败也会输出 `[AI][chat]` 的 `CHAT_ROUTING` 或 `GENERAL_CHAT` fallback 日志，便于区分未配置与上游调用失败。
+
+### 本地配置隔离
+
+`application.yaml` 只保留环境变量占位符，不再保存数据库、Redis 或模型凭据；默认激活 `dev` profile。被 `.gitignore` 忽略的 `application-dev.yml` 覆盖本地数据库、Redis、模型地址、模型名和 Key。模型日志中的 `401 Unauthorized` 表示请求已携带 Key，但上游拒绝认证，通常是 Key 无效、过期、复制错误，或 Key 与所配置的服务地址不匹配；它不同于未配置 Key。开发机应在本地 `application-dev.yml` 填入有效 Key 后重启，不应提交该文件。
