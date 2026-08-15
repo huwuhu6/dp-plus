@@ -8,10 +8,10 @@ spring:
   application:
     name: hmdp
   datasource:
-    driver-class-name: com.mysql.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/hmdp?useSSL=false&serverTimezone=UTC
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/hmdp?useSSL=false&allowPublicKeyRetrieval=true&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: root
-    password: "111111"
+    password: ""
   redis:
     host: 127.0.0.1
     port: 6379
@@ -28,4 +28,14 @@ mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:
   level:
-    com.hmdp: debug
+    com.hmdp: info
+ai:
+  provider: deepseek
+  base-url: ${AI_BASE_URL:https://api.deepseek.com}
+  api-key: ${DEEPSEEK_API_KEY:}
+  model: ${AI_MODEL:deepseek-v4-flash}
+  timeout-ms: 20000
+  narrative-enabled: false
+  retrieval-strategy-version: structured-profile-evidence-v2
+  evaluation-dataset-version: seed-v2
+  holdout-dataset-version: holdout-v1

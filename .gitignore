@@ -31,3 +31,8 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### others ###
+nginx-1.18.0.zip
+dp.sql
+

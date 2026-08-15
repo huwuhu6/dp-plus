@@ -5,7 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 
-@MapperScan("com.hmdp.mapper")
+@MapperScan({"com.hmdp.mapper", "com.hmdp.ai.mapper"})
 @SpringBootApplication
 @EnableAspectJAutoProxy(exposeProxy = true)  // 添加这行
 public class HmDianPingApplication {
