@@ -11,7 +11,9 @@ public class AiProperties {
     private String apiKey;
     private String model = "deepseek-v4-flash";
     private Integer timeoutMs = 20000;
-    private Boolean narrativeEnabled = false;
+    private Boolean narrativeEnabled = true;
+    private Integer toolPlanningTimeoutMs = 8000;
+    private Integer answerPolishTimeoutMs = 8000;
     private String retrievalStrategyVersion = "structured-profile-evidence-v2";
     private String evaluationDatasetVersion = "seed-v2";
     private String holdoutDatasetVersion = "holdout-v1";

@@ -36,8 +36,10 @@ ai:
   base-url: ${AI_BASE_URL}
   api-key: ${DEEPSEEK_API_KEY}
   model: ${AI_MODEL}
-  timeout-ms: ${AI_TIMEOUT_MS}
-  narrative-enabled: false
+  timeout-ms: ${AI_TIMEOUT_MS:20000}
+  tool-planning-timeout-ms: ${AI_TOOL_PLANNING_TIMEOUT_MS:8000}
+  answer-polish-timeout-ms: ${AI_ANSWER_POLISH_TIMEOUT_MS:8000}
+  narrative-enabled: ${AI_NARRATIVE_ENABLED:true}
   retrieval-strategy-version: structured-profile-evidence-v2
   evaluation-dataset-version: seed-v2
   holdout-dataset-version: holdout-v1

@@ -22,6 +22,8 @@ import com.hmdp.ai.tool.AgentToolRegistry;
 import com.hmdp.ai.tool.AgentToolResult;
 import com.hmdp.ai.tool.BaseAgentTool;
 import com.hmdp.utils.UserHolder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -32,7 +34,7 @@ import java.util.Map;
 
 @Service
 public class AgentConversationService {
-    private static final int MAX_TOOL_STEPS = 3;
+    private static final Logger log = LoggerFactory.getLogger(AgentConversationService.class);
     @Resource private AiDecisionSessionMapper sessionMapper;
     @Resource private AiDecisionMessageMapper messageMapper;
     @Resource private AiAgentToolCallMapper toolCallMapper;
@@ -54,9 +56,12 @@ public class AgentConversationService {
         try {
             AgentSessionContext context = loadContext(session);
             context.setTurnNo(context.getTurnNo() + 1);
+            log.info("[AI][agent] event=TURN_START sessionId={} turnNo={} query={} context={}", sessionId,
+                    context.getTurnNo(), compact(request.getMessage().trim()), compact(contextSummary(context)));
             saveMessage(sessionId, "USER", "AGENT_FOLLOW_UP", request.getMessage().trim());
-            List<AgentToolResult> results = runToolLoop(sessionId, context, request.getMessage().trim());
-            boolean usedModel = aiProperties.isConfigured();
+            ToolPlanningResult planning = runToolLoop(sessionId, context, request.getMessage().trim());
+            List<AgentToolResult> results = planning.results;
+            boolean usedModel = planning.usedModel;
             if (results.isEmpty()) {
                 results.add(runFallbackTool(sessionId, context.getTurnNo(), request.getMessage().trim(), context));
                 usedModel = false;
@@ -66,6 +71,7 @@ public class AgentConversationService {
             sessionMapper.updateById(session);
 
             AgentConversationResponse response = response(sessionId, context, results, usedModel);
+            response.setAnswer(polishAnswer(request.getMessage().trim(), response.getAnswer(), usedModel));
             saveMessage(sessionId, "ASSISTANT", "AGENT_TOOL_ANSWER", response.getAnswer());
             return response;
         } catch (IllegalArgumentException e) {
@@ -83,35 +89,34 @@ public class AgentConversationService {
                 .eq("session_id", sessionId).orderByAsc("turn_no").orderByAsc("id"));
     }
 
-    private List<AgentToolResult> runToolLoop(Long sessionId, AgentSessionContext context, String userMessage) {
+    private ToolPlanningResult runToolLoop(Long sessionId, AgentSessionContext context, String userMessage) {
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
-        if (!aiProperties.isConfigured()) return results;
+        if (!aiProperties.isConfigured()) return new ToolPlanningResult(results, false);
         List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
         messages.add(message("system", "你是点评消费决策 Agent 的工具规划器。必须只使用提供的只读工具取得商户事实；不得编造商户、券、评价或价格。每次最多调用一个工具。用户问商户事实时优先调用工具，不要直接回答。"));
         messages.add(message("system", "会话上下文：" + contextSummary(context)));
         messages.add(message("user", userMessage));
-        for (int step = 0; step < MAX_TOOL_STEPS; step++) {
-            JsonNode response;
-            try {
-                response = aiClient.chatCompletion(messages, toolRegistry.definitions(), null, "AGENT_TOOL_PLANNING");
-            } catch (RuntimeException e) {
-                break;
+        try {
+            JsonNode response = aiClient.chatCompletion(messages, toolRegistry.definitions(), null,
+                    "AGENT_TOOL_PLANNING", aiProperties.getToolPlanningTimeoutMs());
+            JsonNode calls = response.path("choices").path(0).path("message").path("tool_calls");
+            if (!calls.isArray() || calls.size() == 0) {
+                log.warn("[AI][agent] event=PLAN_EMPTY sessionId={} turnNo={} query={}", sessionId,
+                        context.getTurnNo(), compact(userMessage));
+                return new ToolPlanningResult(results, false);
             }
-            JsonNode assistant = response.path("choices").path(0).path("message");
-            JsonNode calls = assistant.path("tool_calls");
-            if (!calls.isArray() || calls.size() == 0) break;
-            Map<String, Object> assistantMessage = objectMapper.convertValue(assistant, new TypeReference<Map<String, Object>>() { });
-            messages.add(assistantMessage);
             JsonNode call = calls.get(0);
             String toolName = call.path("function").path("name").asText();
             String arguments = call.path("function").path("arguments").asText("{}");
-            AgentToolResult result = executeTool(sessionId, context.getTurnNo(), toolName, arguments, context);
-            results.add(result);
-            Map<String, Object> toolMessage = message("tool", objectMapper.valueToTree(result.getFacts()).toString());
-            toolMessage.put("tool_call_id", call.path("id").asText());
-            messages.add(toolMessage);
+            log.info("[AI][agent] event=TOOL_PLAN sessionId={} turnNo={} tool={} arguments={}", sessionId,
+                    context.getTurnNo(), toolName, compact(arguments));
+            results.add(executeTool(sessionId, context.getTurnNo(), toolName, arguments, context));
+            return new ToolPlanningResult(results, true);
+        } catch (RuntimeException e) {
+            log.warn("[AI][agent] event=PLAN_FALLBACK sessionId={} turnNo={} query={} errorType={} detail={}", sessionId,
+                    context.getTurnNo(), compact(userMessage), e.getClass().getSimpleName(), compact(e.getMessage()));
+            return new ToolPlanningResult(results, false);
         }
-        return results;
     }
 
     private AgentToolResult executeTool(Long sessionId, Integer turnNo, String toolName, String arguments,
@@ -121,6 +126,8 @@ public class AgentConversationService {
         record.setSessionId(sessionId); record.setTurnNo(turnNo); record.setToolName(toolName);
         record.setToolInputJson(arguments);
         try {
+            log.info("[AI][agent] event=TOOL_START sessionId={} turnNo={} tool={} arguments={}", sessionId, turnNo,
+                    toolName, compact(arguments));
             Map<String, Object> input = objectMapper.readValue(arguments, new TypeReference<Map<String, Object>>() { });
             BaseAgentTool tool = toolRegistry.find(toolName);
             AgentToolResult result = tool.execute(input, context);
@@ -130,12 +137,16 @@ public class AgentConversationService {
             record.setToolOutputJson(objectMapper.writeValueAsString(result.getFacts()));
             record.setDurationMs(System.currentTimeMillis() - startedAt);
             toolCallMapper.insert(record);
+            log.info("[AI][agent] event=TOOL_SUCCESS sessionId={} turnNo={} tool={} durationMs={} result={}", sessionId,
+                    turnNo, toolName, result.getDurationMs(), compact(record.getToolOutputJson()));
             return result;
         } catch (Exception e) {
             record.setStatus("FAILED");
             record.setToolOutputJson("{\"error\":\"工具执行失败\"}");
             record.setDurationMs(System.currentTimeMillis() - startedAt);
             toolCallMapper.insert(record);
+            log.warn("[AI][agent] event=TOOL_FAILURE sessionId={} turnNo={} tool={} errorType={} detail={}", sessionId,
+                    turnNo, toolName, e.getClass().getSimpleName(), compact(e.getMessage()));
             throw new IllegalArgumentException("工具 " + toolName + " 无法执行");
         }
     }
@@ -164,6 +175,24 @@ public class AgentConversationService {
         }
         response.setAnswer(answer.toString());
         return response;
+    }
+
+    private String polishAnswer(String userMessage, String factualAnswer, boolean planningUsedModel) {
+        if (!planningUsedModel || !Boolean.TRUE.equals(aiProperties.getNarrativeEnabled())) return factualAnswer;
+        try {
+            String answer = aiClient.chatText(java.util.Arrays.asList(
+                    message("system", "你是点评消费决策助手。基于已检索到的事实，用简洁自然的中文回答用户。不得补充、猜测或改写任何事实；证据不足时直接说明。"),
+                    message("user", "用户问题：" + userMessage + "\n已检索事实：\n" + factualAnswer)),
+                    "AGENT_ANSWER_POLISH", aiProperties.getAnswerPolishTimeoutMs()).trim();
+            if (!answer.isEmpty()) {
+                log.info("[AI][agent] event=ANSWER_POLISH_SUCCESS query={} answer={}", compact(userMessage), compact(answer));
+                return answer;
+            }
+        } catch (RuntimeException e) {
+            log.warn("[AI][agent] event=ANSWER_POLISH_FALLBACK query={} errorType={} detail={}", compact(userMessage),
+                    e.getClass().getSimpleName(), compact(e.getMessage()));
+        }
+        return factualAnswer;
     }
 
     private AgentSessionContext loadContext(AiDecisionSession session) throws Exception {
@@ -208,6 +237,22 @@ public class AgentConversationService {
         if (session.getUserId() == null) return;
         if (UserHolder.getUser() == null || !session.getUserId().equals(UserHolder.getUser().getId())) {
             throw new SecurityException("无权访问其他用户的决策会话");
+        }
+    }
+
+    private String compact(String value) {
+        if (value == null) return "";
+        String result = value.replaceAll("[\\r\\n\\t]+", " ");
+        return result.length() > 1200 ? result.substring(0, 1200) + "..." : result;
+    }
+
+    private static class ToolPlanningResult {
+        private final List<AgentToolResult> results;
+        private final boolean usedModel;
+
+        private ToolPlanningResult(List<AgentToolResult> results, boolean usedModel) {
+            this.results = results;
+            this.usedModel = usedModel;
         }
     }
 }

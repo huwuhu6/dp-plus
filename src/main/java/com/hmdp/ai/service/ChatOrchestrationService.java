@@ -37,11 +37,14 @@ public class ChatOrchestrationService {
         String message = request.getMessage().trim();
         DecisionResponse activeDecision = request.getDecisionSessionId() == null ? null
                 : decisionService.getDecision(request.getDecisionSessionId());
+        log.info("[AI][chat] event=TURN_START sessionId={} status={} query={}", request.getDecisionSessionId(),
+                activeDecision == null ? "NONE" : activeDecision.getStatus(), compact(message));
         String route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus());
         if ("GENERAL_CHAT".equals(route) && activeDecision != null
                 && ("CLARIFYING".equals(activeDecision.getStatus()) || "WAITING_RELAXATION".equals(activeDecision.getStatus()))) {
             route = "EXIT_DECISION";
         }
+        log.info("[AI][chat] event=ROUTE_SELECTED sessionId={} route={}", request.getDecisionSessionId(), route);
         ChatMessageResponse response = new ChatMessageResponse();
         response.setRoute(route);
         response.setUsedModel(aiProperties.isConfigured());
@@ -91,7 +94,9 @@ public class ChatOrchestrationService {
             JsonNode result = aiClient.chatCompletion(messages, Arrays.asList(routeTool()), null, "CHAT_ROUTING");
             String arguments = result.path("choices").path(0).path("message").path("tool_calls").path(0)
                     .path("function").path("arguments").asText();
-            return objectMapper.readTree(arguments).path("route").asText(fallbackRoute(message, decisionStatus));
+            String route = objectMapper.readTree(arguments).path("route").asText(fallbackRoute(message, decisionStatus));
+            log.info("[AI][chat] action=CHAT_ROUTING event=MODEL_ROUTE route={}", route);
+            return route;
         } catch (Exception e) {
             log.warn("[AI][chat] action=CHAT_ROUTING event=FALLBACK errorType={}", e.getClass().getSimpleName());
             return fallbackRoute(message, decisionStatus);
@@ -137,5 +142,11 @@ public class ChatOrchestrationService {
     private Map<String, Object> message(String role, String content) {
         Map<String, Object> item = new LinkedHashMap<String, Object>();
         item.put("role", role); item.put("content", content); return item;
+    }
+
+    private String compact(String value) {
+        if (value == null) return "";
+        String result = value.replaceAll("[\\r\\n\\t]+", " ");
+        return result.length() > 800 ? result.substring(0, 800) + "..." : result;
     }
 }

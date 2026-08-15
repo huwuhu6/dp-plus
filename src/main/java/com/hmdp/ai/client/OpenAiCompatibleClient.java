@@ -37,6 +37,11 @@ public class OpenAiCompatibleClient {
 
     public JsonNode chatCompletion(List<Map<String, Object>> messages, List<Map<String, Object>> tools,
                                    Map<String, Object> toolChoice, String action) {
+        return chatCompletion(messages, tools, toolChoice, action, null);
+    }
+
+    public JsonNode chatCompletion(List<Map<String, Object>> messages, List<Map<String, Object>> tools,
+                                   Map<String, Object> toolChoice, String action, Integer timeoutMs) {
         if (!aiProperties.isConfigured()) {
             throw new IllegalStateException("未配置 DEEPSEEK_API_KEY，当前只能使用本地规则解析");
         }
@@ -56,17 +61,19 @@ public class OpenAiCompatibleClient {
         headers.setBearerAuth(aiProperties.getApiKey());
         String url = trimTrailingSlash(aiProperties.getBaseUrl()) + "/chat/completions";
         long startedAt = System.currentTimeMillis();
-        log.info("[AI][model] action={} model={} tools={} event=REQUEST", action, aiProperties.getModel(),
-                tools == null ? 0 : tools.size());
+        log.info("[AI][model] action={} model={} tools={} timeoutMs={} query={} event=REQUEST", action,
+                aiProperties.getModel(), tools == null ? 0 : tools.size(), resolvedTimeout(timeoutMs),
+                compact(lastUserMessage(messages)));
         try {
-            ResponseEntity<JsonNode> response = restTemplate().postForEntity(
+            ResponseEntity<JsonNode> response = restTemplate(timeoutMs).postForEntity(
                     url, new HttpEntity<>(body, headers), JsonNode.class);
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
                 throw new IllegalStateException("模型服务未返回有效响应");
             }
             modelCallTracker.recordSuccess();
-            log.info("[AI][model] action={} model={} event=SUCCESS durationMs={}", action,
-                    aiProperties.getModel(), System.currentTimeMillis() - startedAt);
+            log.info("[AI][model] action={} model={} event=SUCCESS durationMs={} toolCalls={}", action,
+                    aiProperties.getModel(), System.currentTimeMillis() - startedAt,
+                    compact(response.getBody().path("choices").path(0).path("message").path("tool_calls").toString()));
             return response.getBody();
         } catch (HttpStatusCodeException e) {
             modelCallTracker.recordFailure();
@@ -76,8 +83,9 @@ public class OpenAiCompatibleClient {
             throw e;
         } catch (RuntimeException e) {
             modelCallTracker.recordFailure();
-            log.warn("[AI][model] action={} model={} event=FAILURE durationMs={} errorType={}", action,
-                    aiProperties.getModel(), System.currentTimeMillis() - startedAt, e.getClass().getSimpleName());
+            log.warn("[AI][model] action={} model={} event=FAILURE durationMs={} errorType={} detail={}", action,
+                    aiProperties.getModel(), System.currentTimeMillis() - startedAt, e.getClass().getSimpleName(),
+                    compactError(e.getMessage()));
             throw e;
         }
     }
@@ -87,20 +95,26 @@ public class OpenAiCompatibleClient {
     }
 
     public String chatText(List<Map<String, Object>> messages, String action) {
-        JsonNode response = chatCompletion(messages, null, null, action);
+        return chatText(messages, action, null);
+    }
+
+    public String chatText(List<Map<String, Object>> messages, String action, Integer timeoutMs) {
+        JsonNode response = chatCompletion(messages, null, null, action, timeoutMs);
         JsonNode content = response.path("choices").path(0).path("message").path("content");
         if (content.isMissingNode() || content.isNull()) {
             throw new IllegalStateException("模型未生成最终答案");
         }
-        return content.asText();
+        String text = content.asText();
+        log.info("[AI][model] action={} event=TEXT_RESULT answer={}", action, compact(text));
+        return text;
     }
 
     private String trimTrailingSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
-    private RestTemplate restTemplate() {
-        int timeoutMs = aiProperties.getTimeoutMs() == null ? 20000 : aiProperties.getTimeoutMs();
+    private RestTemplate restTemplate(Integer requestedTimeoutMs) {
+        int timeoutMs = resolvedTimeout(requestedTimeoutMs);
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(timeoutMs);
         factory.setReadTimeout(timeoutMs);
@@ -111,5 +125,24 @@ public class OpenAiCompatibleClient {
         if (error == null) return "";
         String compact = error.replaceAll("[\\r\\n\\t]+", " ");
         return compact.length() > 500 ? compact.substring(0, 500) : compact;
+    }
+
+    private int resolvedTimeout(Integer requestedTimeoutMs) {
+        return requestedTimeoutMs == null ? (aiProperties.getTimeoutMs() == null ? 20000 : aiProperties.getTimeoutMs())
+                : requestedTimeoutMs;
+    }
+
+    private String lastUserMessage(List<Map<String, Object>> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Object role = messages.get(i).get("role");
+            if ("user".equals(role)) return String.valueOf(messages.get(i).get("content"));
+        }
+        return "";
+    }
+
+    private String compact(String value) {
+        if (value == null) return "";
+        String result = value.replaceAll("[\\r\\n\\t]+", " ");
+        return result.length() > 800 ? result.substring(0, 800) + "..." : result;
     }
 }
