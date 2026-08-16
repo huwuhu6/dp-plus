@@ -163,6 +163,29 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
+    void savedLocationScopeEnforcesNearbyRadiusForContextualNewDecision() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setOccasion("约会");
+        constraints.setQuiet(true);
+        when(constraintExtractor.extract("还有没有适合约会且安静的地方")).thenReturn(constraints);
+        when(shopMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(profileMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("还有没有适合约会且安静的地方");
+        request.setLatitude(26.054D);
+        request.setLongitude(119.186D);
+        request.setLocationStatus("AVAILABLE");
+        request.setUseLocationScope(true);
+        DecisionResponse response = service.decide(request);
+
+        assertEquals("WAITING_RELAXATION", response.getStatus());
+        assertTrue(response.getConstraints().getNearby());
+        assertEquals(3D, response.getConstraints().getRadiusKm());
+        assertTrue(response.getConstraints().getSoftPreferences().contains("已按会话位置在附近检索"));
+    }
+
+    @Test
     void relaxationResumesWithoutExtractingConstraintsAgain() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setCuisine("不存在菜系");

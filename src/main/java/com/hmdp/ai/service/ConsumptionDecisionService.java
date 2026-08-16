@@ -234,6 +234,12 @@ public class ConsumptionDecisionService {
         resolveDemoPlace(request, constraints);
         if (request.getLatitude() != null && request.getLongitude() != null) {
             removeMissingInformation(constraints, "位置", "坐标", "起点");
+            if (Boolean.TRUE.equals(request.getUseLocationScope())) {
+                constraints.setNearby(true);
+                if (!constraints.getSoftPreferences().contains("已按会话位置在附近检索")) {
+                    constraints.getSoftPreferences().add("已按会话位置在附近检索");
+                }
+            }
         }
         if (constraints.getOccasion().isEmpty() && isDateIntent(request.getQuery())) {
             constraints.setOccasion("约会");

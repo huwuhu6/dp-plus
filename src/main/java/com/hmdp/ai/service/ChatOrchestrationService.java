@@ -257,6 +257,7 @@ public class ChatOrchestrationService {
             request.setLatitude(location.getLatitude());
             request.setLongitude(location.getLongitude());
             request.setLocationStatus("AVAILABLE");
+            request.setUseLocationScope(true);
             log.info("[AI][chat] event=SLOT_REUSED chatId={} slot=location source={} latitude={} longitude={}",
                     state.getChatId(), location.getSource(), location.getLatitude(), location.getLongitude());
             return;

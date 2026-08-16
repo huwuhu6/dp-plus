@@ -8,5 +8,7 @@ public class DecisionRequest {
     private Double latitude;
     private Double longitude;
     private String locationStatus = "MISSING";
+    /** Whether a location restored from conversation state should constrain this search to nearby shops. */
+    private Boolean useLocationScope = false;
     private Integer maxCandidates = 3;
 }
