@@ -46,7 +46,14 @@ public class AiConversationEvaluationService {
     @Resource private AiProperties aiProperties;
 
     public ConversationEvaluationRunResponse runActiveCases() {
-        String datasetVersion = "conversation-v1";
+        return runCases(aiProperties.getConversationEvaluationDatasetVersion());
+    }
+
+    public ConversationEvaluationRunResponse runHoldoutCases() {
+        return runCases(aiProperties.getConversationHoldoutDatasetVersion());
+    }
+
+    private ConversationEvaluationRunResponse runCases(String datasetVersion) {
         List<AiConversationEvaluationCase> cases = caseMapper.selectList(new QueryWrapper<AiConversationEvaluationCase>()
                 .eq("active", true).eq("dataset_version", datasetVersion).orderByAsc("id"));
         if (cases.isEmpty()) throw new IllegalStateException("没有启用的对话轨迹评测用例");
@@ -95,7 +102,7 @@ public class AiConversationEvaluationService {
         try {
             List<Map<String, Object>> turns = objectMapper.readValue(evaluationCase.getTurnsJson(), new TypeReference<List<Map<String, Object>>>() { });
             List<String> routes = new ArrayList<>();
-            List<Long> shopIds = new ArrayList<>();
+            List<Long> finalShopIds = new ArrayList<>();
             Set<Long> decisionSessionIds = new HashSet<>();
             List<Map<String, Object>> outputs = new ArrayList<>();
             String finalStatus = null;
@@ -103,6 +110,7 @@ public class AiConversationEvaluationService {
                 ChatMessageRequest request = new ChatMessageRequest();
                 request.setChatId(chatId);
                 request.setMessage(String.valueOf(turn.get("message")));
+                if (turn.get("selectedOptionId") != null) request.setSelectedOptionId(String.valueOf(turn.get("selectedOptionId")));
                 applyLocation(turn.get("location"), request);
                 ChatMessageResponse response = chatOrchestrationService.chat(request);
                 routes.add(response.getRoute());
@@ -110,7 +118,10 @@ public class AiConversationEvaluationService {
                 if (response.getDecisionStatus() != null) finalStatus = response.getDecisionStatus();
                 if (response.getDecision() != null) {
                     finalStatus = response.getDecision().getStatus();
-                    for (DecisionRecommendation item : response.getDecision().getRecommendations()) shopIds.add(item.getShopId());
+                    if (!response.getDecision().getRecommendations().isEmpty()) {
+                        finalShopIds.clear();
+                        for (DecisionRecommendation item : response.getDecision().getRecommendations()) finalShopIds.add(item.getShopId());
+                    }
                 }
                 Map<String, Object> output = new LinkedHashMap<>();
                 output.put("route", response.getRoute());
@@ -121,14 +132,14 @@ public class AiConversationEvaluationService {
             List<String> expectedRoutes = objectMapper.readValue(evaluationCase.getExpectedRoutesJson(), new TypeReference<List<String>>() { });
             result.setActualRoutesJson(objectMapper.writeValueAsString(routes));
             result.setActualFinalStatus(finalStatus);
-            result.setRecommendedShopIds(shopIds.stream().distinct().map(String::valueOf).collect(Collectors.joining(",")));
+            result.setRecommendedShopIds(finalShopIds.stream().distinct().map(String::valueOf).collect(Collectors.joining(",")));
             result.setRouteMatched(expectedRoutes.equals(routes));
             List<String> actualTools = toolNames(decisionSessionIds);
             result.setActualToolNamesJson(objectMapper.writeValueAsString(actualTools));
             result.setToolMatched(expectedSequenceMatches(evaluationCase.getExpectedToolNamesJson(), actualTools));
-            result.setLocalityMatched(matchesExpectedCity(evaluationCase.getExpectedCity(), shopIds));
+            result.setLocalityMatched(matchesExpectedCity(evaluationCase.getExpectedCity(), finalShopIds));
             result.setFinalStatusMatched(equalsExpected(evaluationCase.getExpectedFinalStatus(), finalStatus));
-            result.setShopMatched(expectedShopsMatched(evaluationCase.getExpectedShopIds(), shopIds));
+            result.setShopMatched(expectedShopsMatched(evaluationCase.getExpectedShopIds(), finalShopIds));
             result.setTurnOutputsJson(objectMapper.writeValueAsString(outputs));
         } catch (Exception e) {
             result.setRouteMatched(false);

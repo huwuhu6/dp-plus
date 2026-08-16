@@ -749,6 +749,12 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 
 `V25__model_token_usage_metrics.sql` 让模型调用跟踪器直接读取供应商响应的 usage 字段：OpenAI-compatible 响应读取 `prompt_tokens` 与 `completion_tokens`，Spring AI 响应读取 `ChatResponseMetadata.Usage`。Token 数落入决策指标、单用例评测结果和评测运行聚合，可与已有模型成功率、P95 延迟、Recall@K/MRR 一起比较。供应商未返回 usage 时记为 0，不使用字符数估算，以免把不可靠的成本数据写入评测。
 
+## 2026-08-16：对话轨迹保留集
+
+对话评测现分为 `conversation-v1` 基准集和 `conversation-holdout-v1` 保留集，分别通过 `POST /ai/evaluations/conversation-runs` 与 `POST /ai/evaluations/conversation-runs/holdout` 运行。保留集覆盖身份闲聊、已完成推荐后发起新的约会场景推荐、明确拒绝定位后的全城检索，以及第二轮浏览器定位覆盖第一轮城市定位。
+
+城市范围断言只针对轨迹中最后一次实际推荐的商户集合：位置从福州切换到杭州时，首轮福州推荐是历史上下文，不应造成末轮杭州本地性检测误报。评测脚本还支持每轮 `selectedOptionId`，因此位置授权、拒绝定位和放宽条件等结构化前端事件可与自由文本混合回放。
+
 ## 2026-08-16：行政区位置槽位与检索预过滤
 
 地点解析候选被用户确认后，除经纬度外还会把 `province`、`city`、`district` 写入会话位置槽位，并在位置过期或用户拒绝位置时一并清空。新建推荐会透传这些字段到 `DecisionRequest`，检索阶段优先使用 `tb_shop` 的行政区联合索引收敛候选集，再执行坐标半径、结构化约束和语义召回排序。

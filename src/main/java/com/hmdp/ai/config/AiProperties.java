@@ -17,6 +17,8 @@ public class AiProperties {
     private String retrievalStrategyVersion = "structured-profile-evidence-v2";
     private String evaluationDatasetVersion = "seed-v2";
     private String holdoutDatasetVersion = "holdout-v1";
+    private String conversationEvaluationDatasetVersion = "conversation-v1";
+    private String conversationHoldoutDatasetVersion = "conversation-holdout-v1";
 
     public boolean isConfigured() {
         return apiKey != null && !apiKey.trim().isEmpty();
