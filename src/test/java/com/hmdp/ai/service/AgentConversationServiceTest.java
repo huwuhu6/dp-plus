@@ -66,6 +66,39 @@ class AgentConversationServiceTest {
         verify(sessionMapper).updateById(session);
     }
 
+    @Test
+    void resolvesNamedCandidateInsteadOfDefaultingToFirstShop() throws Exception {
+        AgentConversationService service = new AgentConversationService();
+        AiDecisionSessionMapper sessionMapper = mock(AiDecisionSessionMapper.class);
+        AiDecisionMessageMapper messageMapper = mock(AiDecisionMessageMapper.class);
+        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
+        AgentToolRegistry registry = mock(AgentToolRegistry.class);
+        BaseAgentTool evidenceTool = mock(BaseAgentTool.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        ReflectionTestUtils.setField(service, "sessionMapper", sessionMapper);
+        ReflectionTestUtils.setField(service, "messageMapper", messageMapper);
+        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
+        ReflectionTestUtils.setField(service, "toolRegistry", registry);
+        ReflectionTestUtils.setField(service, "aiClient", mock(OpenAiCompatibleClient.class));
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "objectMapper", objectMapper);
+        AiDecisionSession session = completedSessionWithJapaneseRestaurant(objectMapper);
+        when(sessionMapper.selectById(100L)).thenReturn(session);
+        when(registry.find("search_shop_evidence")).thenReturn(evidenceTool);
+        when(evidenceTool.execute(anyMap(), any())).thenAnswer(invocation -> {
+            assertEquals(9L, ((Number) invocation.getArgument(0, java.util.Map.class).get("shopId")).longValue());
+            return new AgentToolResult().summary("检索到评价").displayText("筑地日本料理的本地评价证据");
+        });
+        AgentConversationRequest request = new AgentConversationRequest();
+        request.setMessage("这个日本料理评价如何");
+
+        AgentConversationResponse response = service.converse(100L, request);
+
+        assertEquals(Long.valueOf(9L), response.getFocusedShopId());
+        assertEquals("筑地日本料理（上街店）", response.getFocusedShopName());
+        assertEquals("search_shop_evidence", response.getToolTrace().get(0).getToolName());
+    }
+
 
     private AiDecisionSession completedSession(ObjectMapper objectMapper) throws Exception {
         DecisionRecommendation recommendation = new DecisionRecommendation();
@@ -74,6 +107,24 @@ class AgentConversationServiceTest {
         DecisionResponse response = new DecisionResponse();
         response.setStatus("COMPLETED");
         response.getRecommendations().add(recommendation);
+        AiDecisionSession session = new AiDecisionSession();
+        session.setId(100L);
+        session.setStatus("COMPLETED");
+        session.setResultJson(objectMapper.writeValueAsString(response));
+        return session;
+    }
+
+    private AiDecisionSession completedSessionWithJapaneseRestaurant(ObjectMapper objectMapper) throws Exception {
+        DecisionRecommendation first = new DecisionRecommendation();
+        first.setShopId(8L);
+        first.setShopName("闽师东北菜（上街大学城店）");
+        DecisionRecommendation japanese = new DecisionRecommendation();
+        japanese.setShopId(9L);
+        japanese.setShopName("筑地日本料理（上街店）");
+        DecisionResponse response = new DecisionResponse();
+        response.setStatus("COMPLETED");
+        response.getRecommendations().add(first);
+        response.getRecommendations().add(japanese);
         AiDecisionSession session = new AiDecisionSession();
         session.setId(100L);
         session.setStatus("COMPLETED");

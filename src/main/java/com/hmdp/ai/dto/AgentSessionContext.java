@@ -11,6 +11,7 @@ public class AgentSessionContext {
     private Long focusedShopId;
     private String focusedShopName;
     private List<Long> shownShopIds = new ArrayList<Long>();
+    private List<DecisionRecommendation> shownShops = new ArrayList<DecisionRecommendation>();
     private DecisionRequest decisionRequest;
     private DecisionConstraints decisionConstraints;
 }
