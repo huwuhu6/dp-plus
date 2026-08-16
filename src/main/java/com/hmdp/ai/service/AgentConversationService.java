@@ -208,6 +208,12 @@ public class AgentConversationService {
                 context.setFocusedShopId(first.getShopId()); context.setFocusedShopName(first.getShopName());
             }
         }
+        if (context.getDecisionRequest() == null && session.getRequestContextJson() != null) {
+            context.setDecisionRequest(objectMapper.readValue(session.getRequestContextJson(), com.hmdp.ai.dto.DecisionRequest.class));
+        }
+        if (context.getDecisionConstraints() == null && session.getConstraintsJson() != null) {
+            context.setDecisionConstraints(objectMapper.readValue(session.getConstraintsJson(), com.hmdp.ai.dto.DecisionConstraints.class));
+        }
         return context;
     }
 

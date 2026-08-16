@@ -63,7 +63,7 @@ public class OpenAiCompatibleClient {
         long startedAt = System.currentTimeMillis();
         log.info("[AI][model] action={} model={} tools={} timeoutMs={} query={} event=REQUEST", action,
                 aiProperties.getModel(), tools == null ? 0 : tools.size(), resolvedTimeout(timeoutMs),
-                compact(lastUserMessage(messages)));
+                requestSummary(action, messages));
         try {
             ResponseEntity<JsonNode> response = restTemplate(timeoutMs).postForEntity(
                     url, new HttpEntity<>(body, headers), JsonNode.class);
@@ -105,7 +105,7 @@ public class OpenAiCompatibleClient {
             throw new IllegalStateException("模型未生成最终答案");
         }
         String text = content.asText();
-        log.info("[AI][model] action={} event=TEXT_RESULT answer={}", action, compact(text));
+        log.info("[AI][model] action={} event=TEXT_RESULT chars={}", action, text.length());
         return text;
     }
 
@@ -144,5 +144,11 @@ public class OpenAiCompatibleClient {
         if (value == null) return "";
         String result = value.replaceAll("[\\r\\n\\t]+", " ");
         return result.length() > 800 ? result.substring(0, 800) + "..." : result;
+    }
+
+    private String requestSummary(String action, List<Map<String, Object>> messages) {
+        String query = lastUserMessage(messages);
+        if ("AGENT_ANSWER_POLISH".equals(action)) return "[facts omitted, chars=" + query.length() + "]";
+        return compact(query);
     }
 }

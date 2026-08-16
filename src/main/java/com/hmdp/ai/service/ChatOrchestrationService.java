@@ -28,6 +28,7 @@ public class ChatOrchestrationService {
     @Resource private AiProperties aiProperties;
     @Resource private ConsumptionDecisionService decisionService;
     @Resource private AgentConversationService conversationService;
+    @Resource private ChatMemoryService chatMemoryService;
     @Resource private ObjectMapper objectMapper;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
@@ -35,17 +36,21 @@ public class ChatOrchestrationService {
             throw new IllegalArgumentException("message 不能为空");
         }
         String message = request.getMessage().trim();
+        String chatId = chatMemoryService.resolveChatId(request.getChatId());
+        List<Map<String, Object>> chatHistory = chatMemoryService.load(chatId);
         DecisionResponse activeDecision = request.getDecisionSessionId() == null ? null
                 : decisionService.getDecision(request.getDecisionSessionId());
-        log.info("[AI][chat] event=TURN_START sessionId={} status={} query={}", request.getDecisionSessionId(),
+        log.info("[AI][chat] event=MEMORY_LOADED chatId={} messages={}", chatId, chatHistory.size());
+        log.info("[AI][chat] event=TURN_START chatId={} sessionId={} status={} query={}", chatId, request.getDecisionSessionId(),
                 activeDecision == null ? "NONE" : activeDecision.getStatus(), compact(message));
-        String route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus());
+        String route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
         if ("GENERAL_CHAT".equals(route) && activeDecision != null
                 && ("CLARIFYING".equals(activeDecision.getStatus()) || "WAITING_RELAXATION".equals(activeDecision.getStatus()))) {
             route = "EXIT_DECISION";
         }
-        log.info("[AI][chat] event=ROUTE_SELECTED sessionId={} route={}", request.getDecisionSessionId(), route);
+        log.info("[AI][chat] event=ROUTE_SELECTED chatId={} sessionId={} route={}", chatId, request.getDecisionSessionId(), route);
         ChatMessageResponse response = new ChatMessageResponse();
+        response.setChatId(chatId);
         response.setRoute(route);
         response.setUsedModel(aiProperties.isConfigured());
         if ("START_DECISION".equals(route)) {
@@ -56,6 +61,7 @@ public class ChatOrchestrationService {
             response.setDecision(decision);
             response.setDecisionSessionId(decision.getSessionId());
             response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
+            recordTurn(chatId, message, response.getAnswer());
             return response;
         }
         if ("BUSINESS_FOLLOW_UP".equals(route) && request.getDecisionSessionId() != null) {
@@ -64,6 +70,7 @@ public class ChatOrchestrationService {
             response.setConversation(conversationService.converse(request.getDecisionSessionId(), followUp));
             response.setDecisionSessionId(request.getDecisionSessionId());
             response.setAnswer(response.getConversation().getAnswer());
+            recordTurn(chatId, message, response.getAnswer());
             return response;
         }
         if ("EXIT_DECISION".equals(route) && activeDecision != null) {
@@ -75,21 +82,23 @@ public class ChatOrchestrationService {
             response.setDecisionSessionId(null);
         }
         if ("GENERAL_CHAT".equals(route)) response.setDecisionSessionId(null);
-        response.setAnswer(generalReply(message));
+        response.setAnswer(generalReply(message, chatHistory));
         if (!aiProperties.isConfigured()) {
             response.setUsedModel(false);
             response.setDegradedReason("模型服务未配置：当前后端进程没有读取到 DEEPSEEK_API_KEY，本次使用本地对话降级回复。");
             log.warn("[AI][chat] action=GENERAL_CHAT event=MODEL_NOT_CONFIGURED");
         }
+        recordTurn(chatId, message, response.getAnswer());
         return response;
     }
 
-    private String route(String message, String decisionStatus) {
+    private String route(String message, String decisionStatus, List<Map<String, Object>> chatHistory) {
         if (!aiProperties.isConfigured()) return fallbackRoute(message, decisionStatus);
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
             messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择路由：GENERAL_CHAT=普通闲聊、能力问答或非餐饮需求；START_DECISION=用户要找餐厅、吃饭、菜品、订餐或餐饮消费推荐；BUSINESS_FOLLOW_UP=围绕已推荐餐饮商户问优惠券、评价、备选或比较；EXIT_DECISION=用户正在补充推荐条件但改为闲聊、拒绝继续或明确结束。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含“附近”也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
             messages.add(message("system", "当前决策状态=" + decisionStatus));
+            messages.addAll(chatHistory);
             messages.add(message("user", message));
             JsonNode result = aiClient.chatCompletion(messages, Arrays.asList(routeTool()), null, "CHAT_ROUTING");
             String arguments = result.path("choices").path(0).path("message").path("tool_calls").path(0)
@@ -103,12 +112,14 @@ public class ChatOrchestrationService {
         }
     }
 
-    private String generalReply(String message) {
+    private String generalReply(String message, List<Map<String, Object>> chatHistory) {
         if (!aiProperties.isConfigured()) return "你好，我是消费决策助手。想吃饭或需要了解已推荐商户时，随时告诉我。";
         try {
-            return aiClient.chatText(Arrays.asList(
-                    message("system", "你是点评消费决策助手。正常自然地进行简短闲聊；不要主动推荐商户、编造优惠或评价。用户表达消费需求时只提示可以继续描述需求。"),
-                    message("user", message)), "GENERAL_CHAT");
+            List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
+            messages.add(message("system", "你是本地餐饮消费决策助手。基于对话上下文自然、简短地回答。仅支持餐厅、用餐、菜品、餐饮优惠和已推荐餐饮商户的事实查询；面对游泳、运动场馆、医疗、住宿、交通等非餐饮需求，要友好说明当前暂不具备对应数据和检索能力，不得编造或推荐餐饮商户。"));
+            messages.addAll(chatHistory);
+            messages.add(message("user", message));
+            return aiClient.chatText(messages, "GENERAL_CHAT");
         } catch (Exception e) {
             log.warn("[AI][chat] action=GENERAL_CHAT event=FALLBACK errorType={}", e.getClass().getSimpleName());
             return "你好，我在。想聊聊吃什么、预算或用餐场景时，随时告诉我。";
@@ -118,8 +129,8 @@ public class ChatOrchestrationService {
     private String fallbackRoute(String message, String decisionStatus) {
         boolean hasDecision = !"NONE".equals(decisionStatus);
         if (message.contains("算了") || message.contains("不聊了") || message.contains("结束")) return hasDecision ? "EXIT_DECISION" : "GENERAL_CHAT";
-        boolean consumption = message.contains("吃") || message.contains("餐") || message.contains("饭") || message.contains("推荐") || message.contains("附近") || message.contains("优惠") || message.contains("评价");
-        if (!consumption) return "GENERAL_CHAT";
+        boolean dining = message.contains("吃") || message.contains("餐厅") || message.contains("饭") || message.contains("菜") || message.contains("订餐");
+        if (!dining) return "GENERAL_CHAT";
         return hasDecision && "COMPLETED".equals(decisionStatus) ? "BUSINESS_FOLLOW_UP" : "START_DECISION";
     }
 
@@ -150,5 +161,11 @@ public class ChatOrchestrationService {
         if (value == null) return "";
         String result = value.replaceAll("[\\r\\n\\t]+", " ");
         return result.length() > 800 ? result.substring(0, 800) + "..." : result;
+    }
+
+    private void recordTurn(String chatId, String userMessage, String assistantMessage) {
+        chatMemoryService.appendTurn(chatId, userMessage, assistantMessage);
+        log.info("[AI][chat] event=MEMORY_SAVED chatId={} userChars={} assistantChars={}", chatId,
+                userMessage.length(), assistantMessage == null ? 0 : assistantMessage.length());
     }
 }

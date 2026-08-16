@@ -4,6 +4,7 @@ import lombok.Data;
 
 @Data
 public class ChatMessageResponse {
+    private String chatId;
     private String route;
     private String answer;
     private Long decisionSessionId;

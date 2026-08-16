@@ -295,7 +295,7 @@ public class ConsumptionDecisionService {
                                                 DecisionMetrics metrics, long startedAt) throws Exception {
         DecisionConstraints constraints = response.getConstraints();
         response.setStatus("WAITING_RELAXATION");
-        response.setQuestion("严格条件下没有找到候选。请选择一个要放宽的条件后继续，不会自动修改你的限制。");
+        response.setQuestion("当前条件下没有找到匹配的餐饮商户。你可以选择明确放宽一项条件继续，或结束本次推荐；系统不会自动修改你的限制。");
         if (constraints.getRadiusKm() > 0) {
             response.getOptions().add(new DecisionOption("EXPAND_RADIUS", "扩大搜索距离到 " + round(constraints.getRadiusKm() + 2D) + " km"));
         }
@@ -495,6 +495,11 @@ public class ConsumptionDecisionService {
         if (constraints.getRadiusKm() > 0 && request.getLatitude() != null && request.getLongitude() != null
                 && distanceKm(request.getLatitude(), request.getLongitude(), shop.getY(), shop.getX()) > constraints.getRadiusKm()) return false;
         return isOpenAt(shop.getOpenHours(), constraints.getArrivalTime());
+    }
+
+    public boolean matchesFollowUpConstraints(Shop shop, AiShopProfile profile, DecisionRequest request,
+                                              DecisionConstraints constraints) {
+        return request != null && constraints != null && matchesHardConstraints(shop, profile, request, constraints);
     }
 
     private DecisionRecommendation toRecommendation(Shop shop, AiShopProfile profile, List<AiReviewDocument> documents,

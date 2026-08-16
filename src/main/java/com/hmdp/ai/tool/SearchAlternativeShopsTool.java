@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.entity.AiShopProfile;
 import com.hmdp.ai.mapper.AiShopProfileMapper;
+import com.hmdp.ai.service.ConsumptionDecisionService;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import org.springframework.stereotype.Component;
@@ -19,6 +20,7 @@ import java.util.Map;
 public class SearchAlternativeShopsTool extends BaseAgentTool {
     @Resource private ShopMapper shopMapper;
     @Resource private AiShopProfileMapper profileMapper;
+    @Resource private ConsumptionDecisionService decisionService;
 
     @Override public String name() { return "search_alternative_shops"; }
     @Override public String description() { return "查询尚未展示的餐饮备选商户。用户问还有别的吗、换一家或想看其他选择时使用。"; }
@@ -39,11 +41,14 @@ public class SearchAlternativeShopsTool extends BaseAgentTool {
             if (context.getShownShopIds().contains(shop.getId())) continue;
             AiShopProfile profile = profileByShop.get(shop.getId());
             if (!cuisine.trim().isEmpty() && (profile == null || profile.getCuisine() == null || !profile.getCuisine().contains(cuisine))) continue;
+            if (!decisionService.matchesFollowUpConstraints(shop, profile, context.getDecisionRequest(), context.getDecisionConstraints())) continue;
             candidates.add(shop);
         }
         candidates.sort(Comparator.comparing(Shop::getScore, Comparator.nullsLast(Comparator.reverseOrder())));
         if (candidates.size() > 3) candidates = candidates.subList(0, 3);
-        StringBuilder text = new StringBuilder("可继续考虑：");
+        StringBuilder text = new StringBuilder(candidates.isEmpty()
+                ? "当前检索范围内没有更多符合条件的餐饮商户。已保留首轮的距离、预算、菜系和营业时间约束；如需继续，可以明确调整条件。"
+                : "可继续考虑：");
         List<Map<String, Object>> facts = new ArrayList<Map<String, Object>>();
         for (Shop shop : candidates) {
             context.getShownShopIds().add(shop.getId());
@@ -54,8 +59,11 @@ public class SearchAlternativeShopsTool extends BaseAgentTool {
             text.append("\n- ").append(shop.getName()).append("，人均 ").append(shop.getAvgPrice())
                     .append(" 元，评分 ").append(shop.getScore() == null ? "暂无" : shop.getScore() / 10.0D);
         }
-        AgentToolResult result = new AgentToolResult().summary("返回 " + candidates.size() + " 家未展示备选商户").displayText(text.toString());
+        AgentToolResult result = new AgentToolResult().summary(candidates.isEmpty()
+                ? "当前范围内未找到更多符合条件的备选商户" : "返回 " + candidates.size() + " 家未展示备选商户")
+                .displayText(text.toString());
         result.getFacts().put("shops", facts);
+        result.getFacts().put("scopeInherited", true);
         return result;
     }
 }
