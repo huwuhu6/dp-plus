@@ -16,6 +16,8 @@ public class AiConversationEvaluationRun {
     private Integer caseCount;
     private Integer routeMatchedCount;
     private Integer toolMatchedCount;
+    private Integer toolExpectedCount;
+    private Integer toolCoveredCount;
     private Integer localityMatchedCount;
     private Integer finalStatusMatchedCount;
     private Integer shopMatchedCount;

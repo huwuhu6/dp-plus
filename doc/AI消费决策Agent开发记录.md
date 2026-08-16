@@ -789,3 +789,8 @@ Redis 的 30 分钟聊天记忆适合低延迟上下文，但不适合作为可�
 真实回放发现评测代码生成的 `chatId` 含下划线，而聊天入口仅接受字母、数字和连字符。入口会静默替换为 UUID，导致逐轮上下文、`ai_chat_message`、`ai_decision_session` 与 `ai_agent_tool_call` 的关联断裂，工具指标被误记为空。现已将评测 case code 统一规范为连字符并限制长度，评测记录与真实会话使用同一个合法 chatId；回归单测 `AiConversationEvaluationServiceTest` 已通过，修复后的真实回放路由命中恢复至两个数据集的 `100%`。
 
 未全绿的指标已按性质区分：通用闲聊不产生决策状态，因此不应要求 `COMPLETED`；工具序列受模型规划影响，不适合长期只使用“全序列完全相等”作为唯一口径，后续会增加工具覆盖率、目标商户/参数正确率；剩余 `WAITING_RELAXATION` 则保留为真实的候选数据和状态策略问题，而非用放宽断言掩盖。
+# 2026-08-16：工具覆盖评测与 Flyway 接管
+
+对话工具评测不再只将 `expected_tool_names_json` 与实际调用序列做严格相等比较。评测结果新增实际工具调用摘要（工具名、输入、执行状态）、期望工具数、已覆盖工具数和额外调用数；`toolMatched` 调整为“必要工具均覆盖”，允许模型以不同顺序或附加合理只读工具完成任务。预留 `expected_tool_arguments_json` 与 `toolArgumentsMatched`，用于后续对 `shopId`、城市、候选列表等关键参数做子集断言。运行层新增 `toolExpectedCount`/`toolCoveredCount`，可计算工具覆盖率，而非只报一个二元命中数。
+
+此前 `src/main/resources/db/migration` 中的 SQL 文件未被运行时自动执行，原因是项目没有 Flyway 依赖。现新增 `flyway-mysql`，开发环境对已有数据库以 V27 基线初始化 `flyway_schema_history`，启动时自动执行 V28。实际启动日志确认 V28 成功落库；真实开发集回放运行 #5 写入了 `toolExpectedCount=6`、`toolCoveredCount=4`。该轮路由和工具数存在模型调用波动，属于需要通过基线/留出集对比观察的真实质量数据，不应被固定输出或放宽断言掩盖。

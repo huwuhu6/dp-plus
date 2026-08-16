@@ -15,10 +15,15 @@ public class AiConversationEvaluationCaseResult {
     private String chatId;
     private String actualRoutesJson;
     private String actualToolNamesJson;
+    private String actualToolCallsJson;
+    private Integer expectedToolCount;
+    private Integer coveredToolCount;
+    private Integer unexpectedToolCount;
     private String actualFinalStatus;
     private String recommendedShopIds;
     private Boolean routeMatched;
     private Boolean toolMatched;
+    private Boolean toolArgumentsMatched;
     private Boolean localityMatched;
     private Boolean finalStatusMatched;
     private Boolean shopMatched;

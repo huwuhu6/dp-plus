@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -108,6 +109,8 @@ public class AiConversationEvaluationService {
                 - rate(baseline.getRouteMatchedCount(), baseline.getCaseCount())));
         deltas.put("toolMatchRate", round(rate(current.getToolMatchedCount(), current.getCaseCount())
                 - rate(baseline.getToolMatchedCount(), baseline.getCaseCount())));
+        deltas.put("toolCoverageRate", round(rate(current.getToolCoveredCount(), current.getToolExpectedCount())
+                - rate(baseline.getToolCoveredCount(), baseline.getToolExpectedCount())));
         deltas.put("localityMatchRate", round(rate(current.getLocalityMatchedCount(), current.getCaseCount())
                 - rate(baseline.getLocalityMatchedCount(), baseline.getCaseCount())));
         deltas.put("finalStatusMatchRate", round(rate(current.getFinalStatusMatchedCount(), current.getCaseCount())
@@ -167,9 +170,16 @@ public class AiConversationEvaluationService {
             result.setActualFinalStatus(finalStatus);
             result.setRecommendedShopIds(finalShopIds.stream().distinct().map(String::valueOf).collect(Collectors.joining(",")));
             result.setRouteMatched(expectedRoutes.equals(routes));
-            List<String> actualTools = toolNames(decisionSessionIds);
+            List<AiAgentToolCall> actualToolCalls = toolCalls(decisionSessionIds);
+            List<String> actualTools = actualToolCalls.stream().map(AiAgentToolCall::getToolName).collect(Collectors.toList());
             result.setActualToolNamesJson(objectMapper.writeValueAsString(actualTools));
-            result.setToolMatched(expectedSequenceMatches(evaluationCase.getExpectedToolNamesJson(), actualTools));
+            result.setActualToolCallsJson(objectMapper.writeValueAsString(compactToolCalls(actualToolCalls)));
+            ToolCoverage toolCoverage = evaluateToolCoverage(evaluationCase.getExpectedToolNamesJson(), actualTools);
+            result.setExpectedToolCount(toolCoverage.expectedCount);
+            result.setCoveredToolCount(toolCoverage.coveredCount);
+            result.setUnexpectedToolCount(toolCoverage.unexpectedCount);
+            result.setToolMatched(toolCoverage.matched);
+            result.setToolArgumentsMatched(toolArgumentsMatched(evaluationCase.getExpectedToolArgumentsJson(), actualToolCalls));
             result.setLocalityMatched(matchesExpectedCity(evaluationCase.getExpectedCity(), finalShopIds));
             result.setFinalStatusMatched(equalsExpected(evaluationCase.getExpectedFinalStatus(), finalStatus));
             result.setShopMatched(expectedShopsMatched(evaluationCase.getExpectedShopIds(), finalShopIds));
@@ -212,17 +222,53 @@ public class AiConversationEvaluationService {
         return actual.stream().map(String::valueOf).anyMatch(expectedIds::contains);
     }
 
-    private List<String> toolNames(Set<Long> sessionIds) {
+    private List<AiAgentToolCall> toolCalls(Set<Long> sessionIds) {
         if (sessionIds.isEmpty()) return Collections.emptyList();
         return toolCallMapper.selectList(new QueryWrapper<AiAgentToolCall>()
-                        .in("session_id", sessionIds).orderByAsc("id"))
-                .stream().map(AiAgentToolCall::getToolName).collect(Collectors.toList());
+                .in("session_id", sessionIds).orderByAsc("id"));
     }
 
-    private boolean expectedSequenceMatches(String expectedJson, List<String> actual) throws Exception {
-        if (expectedJson == null || expectedJson.trim().isEmpty()) return true;
+    private ToolCoverage evaluateToolCoverage(String expectedJson, List<String> actual) throws Exception {
+        if (expectedJson == null || expectedJson.trim().isEmpty()) return new ToolCoverage(0, 0, actual.size(), actual.isEmpty());
         List<String> expected = objectMapper.readValue(expectedJson, new TypeReference<List<String>>() { });
-        return expected.equals(actual);
+        Set<String> required = new LinkedHashSet<>(expected);
+        Set<String> actualSet = new LinkedHashSet<>(actual);
+        int covered = (int) required.stream().filter(actualSet::contains).count();
+        int unexpected = (int) actual.stream().filter(item -> !required.contains(item)).count();
+        boolean matched = required.isEmpty() ? actual.isEmpty() : covered == required.size();
+        return new ToolCoverage(required.size(), covered, unexpected, matched);
+    }
+
+    private List<Map<String, Object>> compactToolCalls(List<AiAgentToolCall> calls) {
+        List<Map<String, Object>> values = new ArrayList<>();
+        for (AiAgentToolCall call : calls) {
+            Map<String, Object> value = new LinkedHashMap<>();
+            value.put("name", call.getToolName());
+            value.put("input", compact(call.getToolInputJson()));
+            value.put("status", call.getStatus());
+            values.add(value);
+        }
+        return values;
+    }
+
+    private Boolean toolArgumentsMatched(String expectedJson, List<AiAgentToolCall> calls) throws Exception {
+        if (expectedJson == null || expectedJson.trim().isEmpty()) return null;
+        Map<String, Map<String, Object>> expected = objectMapper.readValue(expectedJson,
+                new TypeReference<Map<String, Map<String, Object>>>() { });
+        for (Map.Entry<String, Map<String, Object>> entry : expected.entrySet()) {
+            boolean matched = false;
+            for (AiAgentToolCall call : calls) {
+                if (!entry.getKey().equals(call.getToolName())) continue;
+                Map<String, Object> actual = call.getToolInputJson() == null || call.getToolInputJson().trim().isEmpty()
+                        ? Collections.emptyMap() : objectMapper.readValue(call.getToolInputJson(), new TypeReference<Map<String, Object>>() { });
+                if (entry.getValue().entrySet().stream().allMatch(item -> String.valueOf(item.getValue()).equals(String.valueOf(actual.get(item.getKey()))))) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) return false;
+        }
+        return true;
     }
 
     private boolean matchesExpectedCity(String expectedCity, List<Long> shopIds) {
@@ -237,6 +283,10 @@ public class AiConversationEvaluationService {
         run.setStatus(failed == 0 ? "COMPLETED" : "COMPLETED_WITH_ERRORS");
         run.setRouteMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getRouteMatched())).count());
         run.setToolMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getToolMatched())).count());
+        run.setToolExpectedCount(results.stream().map(AiConversationEvaluationCaseResult::getExpectedToolCount)
+                .filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        run.setToolCoveredCount(results.stream().map(AiConversationEvaluationCaseResult::getCoveredToolCount)
+                .filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
         run.setLocalityMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getLocalityMatched())).count());
         run.setFinalStatusMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getFinalStatusMatched())).count());
         run.setShopMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getShopMatched())).count());
@@ -272,5 +322,19 @@ public class AiConversationEvaluationService {
         if (value == null) return "";
         String normalized = value.replaceAll("[\\r\\n\\t]+", " ").trim();
         return normalized.length() > 300 ? normalized.substring(0, 300) + "..." : normalized;
+    }
+
+    private static final class ToolCoverage {
+        private final int expectedCount;
+        private final int coveredCount;
+        private final int unexpectedCount;
+        private final boolean matched;
+
+        private ToolCoverage(int expectedCount, int coveredCount, int unexpectedCount, boolean matched) {
+            this.expectedCount = expectedCount;
+            this.coveredCount = coveredCount;
+            this.unexpectedCount = unexpectedCount;
+            this.matched = matched;
+        }
     }
 }
