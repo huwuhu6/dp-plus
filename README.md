@@ -10,7 +10,7 @@
 - 状态与记忆：`ai_chat_message` 持久化聊天记录，`ai_chat_session` 持久化位置、当前商户和已展示候选等会话槽位；Redis 作为低延迟缓存而不是唯一记忆来源。
 - 混合检索：MySQL 负责菜系、预算、距离、营业时间等硬约束；Milvus 只在硬筛选候选白名单内进行语义召回和重排，不会突破地理或品类约束。
 - 可解释输出：响应包含决策状态、候选、事实证据、处理 trace 和延迟指标；日志记录模型、工具、状态机和语义召回摘要。
-- 离线评测：内置评测集、保留集、Recall@K、MRR、证据覆盖率、约束违例和模型调用指标，支持运行间比较。
+- 离线评测：内置单轮检索评测与多轮对话轨迹评测，覆盖 Recall@K、MRR、证据覆盖率、约束违例、工具覆盖率、模型用量和延迟，支持运行间比较。
 
 ## 技术栈
 
@@ -78,6 +78,7 @@ ai:
     vector-enabled: true
     semantic-weight: 18
     semantic-top-k: 80
+    semantic-min-score: 0.35
 
 spring.ai:
   vectorstore:
@@ -104,7 +105,9 @@ spring.ai:
 
 ### 3. 初始化数据库
 
-基础业务表和 AI 表的 SQL 位于 `src/main/resources/db/migration/`。本项目不自动执行这些脚本；在新数据库中按数字版本顺序执行 `V1` 到 `V20`。
+基础业务表和 AI 表的 SQL 位于 `src/main/resources/db/migration/`。当前开发库已由 Flyway 接管：已有数据库在首次启动时以 V27 建立基线，后续 V28 及以上迁移会自动执行并写入 `flyway_schema_history`。
+
+对于全新的空数据库，当前仍处于迁移体系过渡期：需要先按数字版本顺序导入 `V1` 到 `V27`，再启动服务交由 Flyway 管理后续增量迁移。不要在已有业务数据的数据库上重复执行旧版本脚本。
 
 - `V16__agent_business_demo_data.sql`：补充杭州演示餐饮数据、画像、评价证据、券和探店数据。
 - `V17_fuzhou_data.sql`：补充福州/闽侯/上街大学城演示数据。
@@ -156,8 +159,13 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8081/ai/retrieval/indexes/r
 | 运行主评测集 | `POST /ai/evaluations/runs` |
 | 运行保留集 | `POST /ai/evaluations/runs/holdout` |
 | 对比两次评测 | `GET /ai/evaluations/runs/{runId}/compare/{baselineRunId}` |
+| 运行多轮主评测集 | `POST /ai/evaluations/conversation-runs` |
+| 运行多轮保留集 | `POST /ai/evaluations/conversation-runs/holdout` |
+| 对比两次多轮评测 | `GET /ai/evaluations/conversation-runs/{runId}/compare/{baselineRunId}` |
 
 `/ai/retrieval/indexes/rebuild` 当前为本地调试便利开放；部署前应增加认证和管理员权限校验。
+
+最近一次本地 `structured-profile-evidence-vector-v3` 主评测基线：15 条用例全部完成，Recall@K `0.8333`、MRR `0.5833`、证据覆盖率 `1.0`、硬约束违规数 `0`、模型调用成功率 `100%`、P95 总延迟约 `5.8s`。这些值会随本地数据、模型和检索参数变化，应以运行记录而非 README 数字作为最终结论。
 
 ## 建议的开发顺序
 
