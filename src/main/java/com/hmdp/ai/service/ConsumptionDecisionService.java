@@ -202,6 +202,7 @@ public class ConsumptionDecisionService {
             saveMessage(session.getId(), "ASSISTANT", "FINAL_ANSWER", response.getAnswer());
             log.info("[AI][session={}] state=COMPLETED action=DECISION_FINISHED candidates={} modelCalls={} modelSuccess={} totalMs={}",
                     session.getId(), metrics.getFinalCandidateCount(), metrics.getModelCallCount(), metrics.getModelSuccessCount(), metrics.getTotalDurationMs());
+            logDecisionOutput(session.getId(), response);
             return response;
         } catch (Exception e) {
             session.setStatus("FAILED");
@@ -330,6 +331,7 @@ public class ConsumptionDecisionService {
         saveMessage(session.getId(), "ASSISTANT", pendingType + "_QUESTION", response.getQuestion());
         log.info("[AI][session={}] state={} action=WAITING_USER options={} modelCalls={} totalMs={}",
                 session.getId(), state, response.getOptions().size(), metrics.getModelCallCount(), metrics.getTotalDurationMs());
+        logDecisionOutput(session.getId(), response);
         return response;
     }
 
@@ -377,6 +379,7 @@ public class ConsumptionDecisionService {
         saveMessage(session.getId(), "USER", "SESSION_ENDED", followUp.getMessage() == null ? "END_DECISION" : followUp.getMessage());
         saveMessage(session.getId(), "ASSISTANT", "SESSION_ENDED", response.getAnswer());
         log.info("[AI][session={}] state=CANCELLED action=USER_ENDED_SESSION", session.getId());
+        logDecisionOutput(session.getId(), response);
         return response;
     }
 
@@ -395,10 +398,24 @@ public class ConsumptionDecisionService {
 
     private static Map<String, double[]> demoPlaceCoordinates() {
         Map<String, double[]> places = new LinkedHashMap<>();
+        places.put("福州鼓楼", new double[]{26.0871D, 119.2998D});
+        places.put("上街大学城", new double[]{26.0745D, 119.1978D});
+        places.put("闽侯", new double[]{26.0745D, 119.1978D});
+        places.put("鼓楼", new double[]{26.0871D, 119.2998D});
         places.put("西湖文化广场", new double[]{30.3127D, 120.1467D});
         places.put("运河上街", new double[]{30.3186D, 120.1486D});
         places.put("武林广场", new double[]{30.3252D, 120.1505D});
         return places;
+    }
+
+    private void logDecisionOutput(Long sessionId, DecisionResponse response) {
+        List<String> candidates = new ArrayList<String>();
+        for (DecisionRecommendation item : response.getRecommendations()) {
+            candidates.add(item.getShopId() + ":" + item.getShopName());
+        }
+        String output = response.getAnswer() == null ? response.getQuestion() : response.getAnswer();
+        log.info("[AI][session={}] event=OUTPUT status={} candidates={} answer={}", sessionId,
+                response.getStatus(), candidates, compact(output));
     }
 
     private void saveMessage(Long sessionId, String role, String messageType, String content) {

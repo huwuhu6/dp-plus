@@ -61,7 +61,7 @@ public class ChatOrchestrationService {
             response.setDecision(decision);
             response.setDecisionSessionId(decision.getSessionId());
             response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
-            recordTurn(chatId, message, response.getAnswer());
+            recordTurn(chatId, message, response);
             return response;
         }
         if ("BUSINESS_FOLLOW_UP".equals(route) && request.getDecisionSessionId() != null) {
@@ -70,7 +70,7 @@ public class ChatOrchestrationService {
             response.setConversation(conversationService.converse(request.getDecisionSessionId(), followUp));
             response.setDecisionSessionId(request.getDecisionSessionId());
             response.setAnswer(response.getConversation().getAnswer());
-            recordTurn(chatId, message, response.getAnswer());
+            recordTurn(chatId, message, response);
             return response;
         }
         if ("EXIT_DECISION".equals(route) && activeDecision != null) {
@@ -88,7 +88,7 @@ public class ChatOrchestrationService {
             response.setDegradedReason("模型服务未配置：当前后端进程没有读取到 DEEPSEEK_API_KEY，本次使用本地对话降级回复。");
             log.warn("[AI][chat] action=GENERAL_CHAT event=MODEL_NOT_CONFIGURED");
         }
-        recordTurn(chatId, message, response.getAnswer());
+        recordTurn(chatId, message, response);
         return response;
     }
 
@@ -119,7 +119,12 @@ public class ChatOrchestrationService {
             messages.add(message("system", "你是本地餐饮消费决策助手。基于对话上下文自然、简短地回答。仅支持餐厅、用餐、菜品、餐饮优惠和已推荐餐饮商户的事实查询；面对游泳、运动场馆、医疗、住宿、交通等非餐饮需求，要友好说明当前暂不具备对应数据和检索能力，不得编造或推荐餐饮商户。"));
             messages.addAll(chatHistory);
             messages.add(message("user", message));
-            return aiClient.chatText(messages, "GENERAL_CHAT");
+            String answer = aiClient.chatText(messages, "GENERAL_CHAT");
+            if (containsUngroundedRecommendation(answer)) {
+                log.warn("[AI][chat] action=GENERAL_CHAT event=UNGROUNDED_RECOMMENDATION_BLOCKED");
+                return "抱歉，我不能在没有检索到本地商户数据的情况下直接列出餐厅或消费建议。你可以告诉我想吃什么、预算和地点，我会先查询餐饮数据后再推荐。";
+            }
+            return answer;
         } catch (Exception e) {
             log.warn("[AI][chat] action=GENERAL_CHAT event=FALLBACK errorType={}", e.getClass().getSimpleName());
             return "你好，我在。想聊聊吃什么、预算或用餐场景时，随时告诉我。";
@@ -163,9 +168,16 @@ public class ChatOrchestrationService {
         return result.length() > 800 ? result.substring(0, 800) + "..." : result;
     }
 
-    private void recordTurn(String chatId, String userMessage, String assistantMessage) {
-        chatMemoryService.appendTurn(chatId, userMessage, assistantMessage);
+    private void recordTurn(String chatId, String userMessage, ChatMessageResponse response) {
+        chatMemoryService.appendTurn(chatId, userMessage, response.getAnswer(), response.getRoute(), response.getDecisionSessionId());
         log.info("[AI][chat] event=MEMORY_SAVED chatId={} userChars={} assistantChars={}", chatId,
-                userMessage.length(), assistantMessage == null ? 0 : assistantMessage.length());
+                userMessage.length(), response.getAnswer() == null ? 0 : response.getAnswer().length());
+    }
+
+    private boolean containsUngroundedRecommendation(String answer) {
+        if (answer == null) return false;
+        boolean numberedList = answer.matches("(?s).*\\n?\\s*1[.、].*");
+        boolean businessMention = answer.contains("餐厅") || answer.contains("餐馆") || answer.contains("饭店");
+        return numberedList && businessMention;
     }
 }

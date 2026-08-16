@@ -571,3 +571,11 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 已完成推荐后的“还有别的吗”过去只排除已展示店铺，再按全库评分排序，因此福州会话可能返回杭州商户。`AgentSessionContext` 现保存首轮 `DecisionRequest` 和 `DecisionConstraints`；`search_alternative_shops` 复用首轮的预算、菜系、坐标半径和营业时间硬约束。当前范围内没有新候选时，工具返回明确的无结果说明，而不跨城市补高分商户。首轮零候选的澄清文案也明确为“当前条件下没有找到匹配的餐饮商户”，只允许用户显式放宽条件或结束。
 
 日志保留 `query -> route -> tool plan -> tool result -> polished answer` 的关键审计信息。`AGENT_ANSWER_POLISH` 不再将完整证据正文作为 query 打印，底层模型文本日志仅记录长度，避免同一份评价证据和润色答案在 INFO 日志中重复多次。
+
+## 2026-08-16：聊天记录持久化与非检索回答防幻觉
+
+Redis 的 30 分钟聊天记忆适合低延迟上下文，但不适合作为可审计的唯一来源。新增 `V18__chat_memory.sql` 创建 `ai_chat_message`：按 `chat_id`、用户、关联决策会话、角色、路由、内容和时间持久化每一轮聊天。`ChatMemoryService` 先读 Redis，缓存缺失时从该表恢复最近 8 条消息并回填缓存。原有 `ai_decision_message` 仍仅记录餐饮决策状态机中的用户补充、澄清与工具追问；`ai_decision_session.result_json` 保存一次决策的最终结构化结果；`ai_agent_tool_call` 保存工具审计。普通聊天与决策入口的完整记录现在由 `ai_chat_message` 覆盖。
+
+所有聊天和决策输出均增加显式日志：聊天层的 `OUTPUT` 输出 `chatId`、路由、决策会话和压缩回答；决策层的 `OUTPUT` 输出状态、候选商户 ID/名称和最终回答或澄清问题。模型自身的文本日志只保留长度，避免与上述业务输出重复。
+
+为支持福州本地演示，地点解析增加了闽侯、上街大学城、福州鼓楼和鼓楼坐标。普通聊天即使调用模型，也没有商户检索事实可用；若模型在这条路径生成带编号的餐厅/餐馆列表，会被 `UNGROUNDED_RECOMMENDATION_BLOCKED` 拦截并替换为不虚构商户的友好答复。餐饮推荐必须经过决策检索或工具调用后才能返回具体商户。

@@ -42,6 +42,6 @@ class ChatOrchestrationServiceTest {
         assertEquals("test-chat", response.getChatId());
         assertTrue(response.getAnswer().contains("消费决策助手"));
         verifyNoInteractions(decisionService, conversationService);
-        verify(memoryService).appendTurn(any(), any(), any());
+        verify(memoryService).appendTurn(any(), any(), any(), any(), any());
     }
 }
