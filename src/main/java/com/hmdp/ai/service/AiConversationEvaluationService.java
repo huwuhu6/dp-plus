@@ -8,6 +8,7 @@ import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunResponse;
+import com.hmdp.ai.dto.ConversationEvaluationRunComparisonResponse;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
@@ -89,6 +90,36 @@ public class AiConversationEvaluationService {
         response.setRun(run);
         response.setCaseResults(resultMapper.selectList(new QueryWrapper<AiConversationEvaluationCaseResult>()
                 .eq("run_id", runId).orderByAsc("id")));
+        return response;
+    }
+
+    public ConversationEvaluationRunComparisonResponse compareRuns(Long runId, Long baselineRunId) {
+        AiConversationEvaluationRun current = runMapper.selectById(runId);
+        AiConversationEvaluationRun baseline = runMapper.selectById(baselineRunId);
+        if (current == null || baseline == null) throw new IllegalArgumentException("对话评测运行记录不存在");
+        requireOwner(current);
+        requireOwner(baseline);
+        if (!current.getDatasetVersion().equals(baseline.getDatasetVersion())
+                || !current.getCaseCount().equals(baseline.getCaseCount())) {
+            throw new IllegalArgumentException("评测数据集或用例数量不一致，不能直接比较");
+        }
+        Map<String, Double> deltas = new LinkedHashMap<>();
+        deltas.put("routeMatchRate", round(rate(current.getRouteMatchedCount(), current.getCaseCount())
+                - rate(baseline.getRouteMatchedCount(), baseline.getCaseCount())));
+        deltas.put("toolMatchRate", round(rate(current.getToolMatchedCount(), current.getCaseCount())
+                - rate(baseline.getToolMatchedCount(), baseline.getCaseCount())));
+        deltas.put("localityMatchRate", round(rate(current.getLocalityMatchedCount(), current.getCaseCount())
+                - rate(baseline.getLocalityMatchedCount(), baseline.getCaseCount())));
+        deltas.put("finalStatusMatchRate", round(rate(current.getFinalStatusMatchedCount(), current.getCaseCount())
+                - rate(baseline.getFinalStatusMatchedCount(), baseline.getCaseCount())));
+        deltas.put("completionRate", round(rate(current.getCompletedCount(), current.getCaseCount())
+                - rate(baseline.getCompletedCount(), baseline.getCaseCount())));
+        deltas.put("avgDurationMs", round(value(current.getAvgDurationMs()) - value(baseline.getAvgDurationMs())));
+
+        ConversationEvaluationRunComparisonResponse response = new ConversationEvaluationRunComparisonResponse();
+        response.setBaselineRun(baseline);
+        response.setCurrentRun(current);
+        response.setMetricDeltas(deltas);
         return response;
     }
 
@@ -216,6 +247,23 @@ public class AiConversationEvaluationService {
         if (UserHolder.getUser() == null || run.getUserId() == null || !run.getUserId().equals(UserHolder.getUser().getId())) {
             throw new IllegalStateException("无权访问该对话评测运行记录");
         }
+    }
+
+    private double rate(Integer numerator, Integer denominator) {
+        if (denominator == null || denominator <= 0) return 0D;
+        return (double) value(numerator) / denominator;
+    }
+
+    private int value(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private long value(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private double round(double value) {
+        return Math.round(value * 10000D) / 10000D;
     }
 
     private String compact(String value) {

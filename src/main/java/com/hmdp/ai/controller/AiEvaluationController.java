@@ -56,4 +56,9 @@ public class AiEvaluationController {
     public Result getConversationRun(@PathVariable Long runId) {
         return Result.ok(conversationEvaluationService.getRun(runId));
     }
+
+    @GetMapping("/conversation-runs/{runId}/compare/{baselineRunId}")
+    public Result compareConversationRuns(@PathVariable Long runId, @PathVariable Long baselineRunId) {
+        return Result.ok(conversationEvaluationService.compareRuns(runId, baselineRunId));
+    }
 }
