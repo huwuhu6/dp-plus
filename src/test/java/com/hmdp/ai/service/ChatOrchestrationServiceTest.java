@@ -10,12 +10,15 @@ import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.DecisionRequest;
+import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Collections;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -242,5 +245,49 @@ class ChatOrchestrationServiceTest {
         verify(stateService).acceptLocation(state, input);
         verify(decisionService).continueDecision(any(), any());
         verifyNoInteractions(aiClient);
+    }
+
+    @Test
+    void explicitPlaceSkipsPreviousBrowserLocationAndRequestsMapConfirmation() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        AmapMcpLocationResolutionService locationService = mock(AmapMcpLocationResolutionService.class);
+        ReflectionTestUtils.setField(service, "aiClient", mock(OpenAiCompatibleClient.class));
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "locationResolutionService", locationService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        when(locationService.isAvailable()).thenReturn(true);
+        DecisionResponse decision = new DecisionResponse();
+        decision.setSessionId(57L);
+        decision.setStatus("CLARIFYING");
+        decision.setOptions(new java.util.ArrayList<>());
+        when(decisionService.decide(any())).thenReturn(decision);
+        ResolvedLocationCandidate candidate = new ResolvedLocationCandidate();
+        candidate.setLabel("重庆市");
+        candidate.setLatitude(29.563D);
+        candidate.setLongitude(106.551D);
+        when(locationService.resolve("重庆")).thenReturn(Arrays.asList(candidate));
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("重庆那边有什么好吃的店吗");
+        ChatMessageResponse response = service.chat(request);
+
+        ArgumentCaptor<DecisionRequest> decisionRequest = ArgumentCaptor.forClass(DecisionRequest.class);
+        verify(decisionService).decide(decisionRequest.capture());
+        assertEquals(null, decisionRequest.getValue().getLatitude());
+        assertEquals("LOCATION_RESOLUTION", response.getRoute());
+        assertEquals(57L, response.getDecisionSessionId());
+        verify(locationService).resolve("重庆");
     }
 }

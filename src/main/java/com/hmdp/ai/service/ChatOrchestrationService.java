@@ -23,6 +23,8 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class ChatOrchestrationService {
@@ -136,8 +138,22 @@ public class ChatOrchestrationService {
         DecisionRequest decisionRequest = new DecisionRequest();
         decisionRequest.setQuery(message);
         decisionRequest.setMaxCandidates(3);
-        applyLocationSlot(decisionRequest, state);
+        String explicitLocationScope = extractExplicitLocationScope(message);
+        if (explicitLocationScope == null) {
+            applyLocationSlot(decisionRequest, state);
+        } else {
+            // A location named in this turn always takes precedence over the previous browser location.
+            decisionRequest.setLocationStatus("MISSING");
+            log.info("[AI][chat] event=EXPLICIT_LOCATION_SCOPE_DETECTED chatId={} scope={} action=SKIP_LOCATION_SLOT_REUSE",
+                    chatId, compact(explicitLocationScope));
+        }
         DecisionResponse decision = decisionService.decide(decisionRequest);
+        conversationStateService.activateDecision(state, decision.getSessionId());
+        if (explicitLocationScope != null && isLocationClarification(decision)) {
+            ChatMessageResponse locationResponse = buildLocationResolutionResponse(chatId, message, state,
+                    decision.getSessionId(), decision, explicitLocationScope);
+            if (locationResponse != null) return locationResponse;
+        }
         ChatMessageResponse response = new ChatMessageResponse();
         response.setChatId(chatId);
         response.setRoute("START_DECISION");
@@ -146,7 +162,6 @@ public class ChatOrchestrationService {
         response.setDecisionSessionId(decision.getSessionId());
         response.setDecisionStatus(decision.getStatus());
         response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
-        conversationStateService.activateDecision(state, decision.getSessionId());
         recordTurn(chatId, message, response);
         return response;
     }
@@ -233,10 +248,17 @@ public class ChatOrchestrationService {
 
     private ChatMessageResponse resolveNamedLocation(String chatId, String message, AiChatSession state,
                                                      Long activeSessionId, DecisionResponse activeDecision) {
-        List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(message);
+        return buildLocationResolutionResponse(chatId, message, state, activeSessionId, activeDecision, message);
+    }
+
+    private ChatMessageResponse buildLocationResolutionResponse(String chatId, String message, AiChatSession state,
+                                                                Long activeSessionId, DecisionResponse activeDecision,
+                                                                String locationQuery) {
+        if (!locationServiceAvailable()) return null;
+        List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(locationQuery);
         if (candidates.isEmpty()) {
             log.info("[AI][chat] event=LOCATION_RESOLUTION_EMPTY chatId={} sessionId={} query={}",
-                    chatId, activeSessionId, compact(message));
+                    chatId, activeSessionId, compact(locationQuery));
             return null;
         }
         conversationStateService.rememberLocationCandidates(state, candidates);
@@ -260,9 +282,26 @@ public class ChatOrchestrationService {
         response.setDecisionStatus(decision.getStatus());
         response.setAnswer(decision.getQuestion());
         log.info("[AI][chat] event=LOCATION_RESOLUTION_CANDIDATES chatId={} sessionId={} query={} candidates={}",
-                chatId, activeSessionId, compact(message), candidates.size());
+                chatId, activeSessionId, compact(locationQuery), candidates.size());
         recordTurn(chatId, message, response);
         return response;
+    }
+
+    private boolean locationServiceAvailable() {
+        return locationResolutionService != null && locationResolutionService.isAvailable();
+    }
+
+    private String extractExplicitLocationScope(String message) {
+        if (!locationServiceAvailable()) return null;
+        String normalized = message.replaceAll("\\s+", "").trim();
+        if (normalized.length() > 80) return null;
+        Pattern relativePlace = Pattern.compile("(?:^|[，,。；;]|在|去|到)([\\p{IsHan}]{2,12}?)(?:那边|附近|周边|一带|当地)");
+        Matcher relativeMatcher = relativePlace.matcher(normalized);
+        if (relativeMatcher.find()) return relativeMatcher.group(1);
+        Pattern administrativePlace = Pattern.compile("([\\p{IsHan}]{2,12}(?:省|市|区|县|镇|乡|街道|大学城|商圈))");
+        Matcher administrativeMatcher = administrativePlace.matcher(normalized);
+        if (administrativeMatcher.find()) return administrativeMatcher.group(1);
+        return null;
     }
 
     private String buildLocationConfirmationQuestion(List<ResolvedLocationCandidate> candidates) {

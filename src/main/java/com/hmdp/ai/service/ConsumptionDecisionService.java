@@ -340,7 +340,8 @@ public class ConsumptionDecisionService {
             response.getOptions().add(new DecisionOption("EXPAND_RADIUS", "扩大搜索距离到 " + round(constraints.getRadiusKm() + 2D) + " km"));
         }
         if (constraints.getBudgetPerPerson() > 0) {
-            response.getOptions().add(new DecisionOption("INCREASE_BUDGET", "将人均预算提高 50 元"));
+            response.getOptions().add(new DecisionOption("INCREASE_BUDGET", "将人均预算上限提高到 "
+                    + (constraints.getBudgetPerPerson() + 50) + " 元"));
         }
         if (!constraints.getCuisine().isEmpty()) {
             response.getOptions().add(new DecisionOption("RELAX_CUISINE", "保留其他条件，允许其他菜系"));
@@ -381,6 +382,8 @@ public class ConsumptionDecisionService {
         if ("EXPAND_RADIUS".equals(optionId) && constraints.getRadiusKm() > 0) {
             constraints.setRadiusKm(round(constraints.getRadiusKm() + 2D));
         } else if ("INCREASE_BUDGET".equals(optionId) && constraints.getBudgetPerPerson() > 0) {
+            log.info("[AI][decision] action=BUDGET_RELAXATION previousBudget={} nextBudget={}",
+                    constraints.getBudgetPerPerson(), constraints.getBudgetPerPerson() + 50);
             constraints.setBudgetPerPerson(constraints.getBudgetPerPerson() + 50);
         } else if ("RELAX_CUISINE".equals(optionId) && !constraints.getCuisine().isEmpty()) {
             constraints.setCuisine("");
