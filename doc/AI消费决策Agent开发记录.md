@@ -572,6 +572,20 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 
 日志保留 `query -> route -> tool plan -> tool result -> polished answer` 的关键审计信息。`AGENT_ANSWER_POLISH` 不再将完整证据正文作为 query 打印，底层模型文本日志仅记录长度，避免同一份评价证据和润色答案在 INFO 日志中重复多次。
 
+## 2026-08-16：服务端聊天状态与业务追问恢复
+
+### 问题
+
+聊天历史按 `chatId` 保存，而决策检索和工具调用按 `decisionSessionId` 保存。旧实现把后者完全交给前端在每次请求中回传：页面在一次普通闲聊或退出后清空该字段，后端虽然可从聊天文本中路由出 `BUSINESS_FOLLOW_UP`，却无法进入 `AgentConversationService` 调用评价、优惠券等工具，最终错误地降级为普通模型回答。
+
+### 处理
+
+新增 `ai_chat_session` 及 `ChatSessionStateService`，以 `chatId` 记录服务端可信的 `activeDecisionSessionId` 和 `lastDecisionSessionId`。新推荐会激活并更新两者；明确退出只清空活动会话，保留最近一次已推荐会话用于解析“那一家”“评价如何”之类的后续指代。追问时优先使用活动会话，其次恢复最近会话；兼容历史聊天记录时，仍可从 `ai_chat_message` 的最近关联记录恢复。所有恢复出的会话仍通过既有用户归属校验，客户端传来的不一致 sessionId 只会被记录并忽略，不能越权改变服务端会话状态。
+
+对话路由同时收紧：`附近有啥`、`有什么推荐`等未说明餐饮目标的输入先进入普通聊天澄清，不擅自开始餐饮检索；澄清中的普通闲聊也不再自动取消推荐，只有模型识别到明确结束才清空活动会话。前端保留后端返回的活动会话状态，且不再在澄清阶段禁用输入，从而允许用户自然转聊后再回到原任务。
+
+该设计与成熟对话平台的会话参数/活动上下文模型一致：结构化参数由服务端在会话内维护，并在后续路由和履约中引用，而不是由前端文本历史推断。参考：[Dialogflow CX session parameters](https://cloud.google.com/dialogflow/cx/docs/concept/parameter?hl=zh-cn)、[Amazon Lex session state](https://docs.aws.amazon.com/lexv2/latest/APIReference/API_runtime_SessionState.html)。
+
 ## 2026-08-16：聊天记忆角色协议兼容修复
 
 ### 问题

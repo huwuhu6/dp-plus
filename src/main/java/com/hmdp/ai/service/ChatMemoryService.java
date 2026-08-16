@@ -66,6 +66,18 @@ public class ChatMemoryService {
         }
     }
 
+    public Long findLatestDecisionSessionId(String chatId) {
+        try {
+            AiChatMessage record = chatMessageMapper.selectOne(new QueryWrapper<AiChatMessage>()
+                    .eq("chat_id", chatId).isNotNull("decision_session_id").orderByDesc("id").last("limit 1"));
+            return record == null ? null : record.getDecisionSessionId();
+        } catch (Exception e) {
+            log.warn("[AI][chat] event=DECISION_CONTEXT_LOOKUP_FAILURE chatId={} errorType={}", chatId,
+                    e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
     private List<Map<String, Object>> restoreFromDatabase(String chatId) {
         try {
             List<AiChatMessage> records = chatMessageMapper.selectList(new QueryWrapper<AiChatMessage>()

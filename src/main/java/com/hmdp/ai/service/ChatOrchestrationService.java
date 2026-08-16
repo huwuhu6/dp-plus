@@ -29,6 +29,7 @@ public class ChatOrchestrationService {
     @Resource private ConsumptionDecisionService decisionService;
     @Resource private AgentConversationService conversationService;
     @Resource private ChatMemoryService chatMemoryService;
+    @Resource private ChatSessionStateService chatSessionStateService;
     @Resource private ObjectMapper objectMapper;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
@@ -38,17 +39,14 @@ public class ChatOrchestrationService {
         String message = request.getMessage().trim();
         String chatId = chatMemoryService.resolveChatId(request.getChatId());
         List<Map<String, Object>> chatHistory = chatMemoryService.load(chatId);
-        DecisionResponse activeDecision = request.getDecisionSessionId() == null ? null
-                : decisionService.getDecision(request.getDecisionSessionId());
+        Long activeSessionId = resolveActiveSessionId(chatId, request.getDecisionSessionId());
+        DecisionResponse activeDecision = activeSessionId == null ? null : decisionService.getDecision(activeSessionId);
         log.info("[AI][chat] event=MEMORY_LOADED chatId={} messages={}", chatId, chatHistory.size());
-        log.info("[AI][chat] event=TURN_START chatId={} sessionId={} status={} query={}", chatId, request.getDecisionSessionId(),
+        log.info("[AI][chat] event=TURN_START chatId={} clientSessionId={} activeSessionId={} status={} query={}", chatId,
+                request.getDecisionSessionId(), activeSessionId,
                 activeDecision == null ? "NONE" : activeDecision.getStatus(), compact(message));
         String route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
-        if ("GENERAL_CHAT".equals(route) && activeDecision != null
-                && ("CLARIFYING".equals(activeDecision.getStatus()) || "WAITING_RELAXATION".equals(activeDecision.getStatus()))) {
-            route = "EXIT_DECISION";
-        }
-        log.info("[AI][chat] event=ROUTE_SELECTED chatId={} sessionId={} route={}", chatId, request.getDecisionSessionId(), route);
+        log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
         ChatMessageResponse response = new ChatMessageResponse();
         response.setChatId(chatId);
         response.setRoute(route);
@@ -60,15 +58,32 @@ public class ChatOrchestrationService {
             DecisionResponse decision = decisionService.decide(decisionRequest);
             response.setDecision(decision);
             response.setDecisionSessionId(decision.getSessionId());
+            response.setDecisionStatus(decision.getStatus());
             response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
+            chatSessionStateService.activate(chatId, decision.getSessionId());
             recordTurn(chatId, message, response);
             return response;
         }
-        if ("BUSINESS_FOLLOW_UP".equals(route) && request.getDecisionSessionId() != null) {
+        if ("BUSINESS_FOLLOW_UP".equals(route)) {
+            Long followUpSessionId = resolveFollowUpSessionId(chatId, activeSessionId);
+            if (followUpSessionId == null) {
+                response.setAnswer("我没有找到可以关联的推荐会话。请告诉我店名，或者重新说一下你的用餐需求，我会先查询再回答。");
+                recordTurn(chatId, message, response);
+                return response;
+            }
+            DecisionResponse followUpDecision = decisionService.getDecision(followUpSessionId);
+            if (!"COMPLETED".equals(followUpDecision.getStatus())) {
+                response.setDecisionSessionId(followUpSessionId);
+                response.setDecisionStatus(followUpDecision.getStatus());
+                response.setAnswer("刚才的推荐还在等待补充条件，完成推荐后我才能查询具体商户的评价、优惠券或备选。");
+                recordTurn(chatId, message, response);
+                return response;
+            }
             AgentConversationRequest followUp = new AgentConversationRequest();
             followUp.setMessage(message);
-            response.setConversation(conversationService.converse(request.getDecisionSessionId(), followUp));
-            response.setDecisionSessionId(request.getDecisionSessionId());
+            response.setConversation(conversationService.converse(followUpSessionId, followUp));
+            response.setDecisionSessionId(followUpSessionId);
+            response.setDecisionStatus(followUpDecision.getStatus());
             response.setAnswer(response.getConversation().getAnswer());
             recordTurn(chatId, message, response);
             return response;
@@ -77,11 +92,15 @@ public class ChatOrchestrationService {
             if ("CLARIFYING".equals(activeDecision.getStatus()) || "WAITING_RELAXATION".equals(activeDecision.getStatus())) {
                 DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
                 followUp.setMessage(message);
-                decisionService.continueDecision(request.getDecisionSessionId(), followUp);
+                decisionService.continueDecision(activeSessionId, followUp);
             }
+            chatSessionStateService.clearActive(chatId);
             response.setDecisionSessionId(null);
         }
-        if ("GENERAL_CHAT".equals(route)) response.setDecisionSessionId(null);
+        if ("GENERAL_CHAT".equals(route) && activeDecision != null) {
+            response.setDecisionSessionId(activeSessionId);
+            response.setDecisionStatus(activeDecision.getStatus());
+        }
         response.setAnswer(generalReply(message, chatHistory));
         if (!aiProperties.isConfigured()) {
             response.setUsedModel(false);
@@ -96,7 +115,7 @@ public class ChatOrchestrationService {
         if (!aiProperties.isConfigured()) return fallbackRoute(message, decisionStatus);
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
-            messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择路由：GENERAL_CHAT=普通闲聊、能力问答或非餐饮需求；START_DECISION=用户要找餐厅、吃饭、菜品、订餐或餐饮消费推荐；BUSINESS_FOLLOW_UP=围绕已推荐餐饮商户问优惠券、评价、备选或比较；EXIT_DECISION=用户正在补充推荐条件但改为闲聊、拒绝继续或明确结束。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含“附近”也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
+            messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求或需求不完整；START_DECISION=用户明确要找餐厅、吃饭、菜品、订餐或餐饮消费推荐；BUSINESS_FOLLOW_UP=围绕已推荐餐饮商户问优惠券、评价、备选或比较；EXIT_DECISION=用户明确说算了、不找了、结束或不需要了。‘附近有啥’、‘有什么推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
             messages.add(message("system", "当前决策状态=" + decisionStatus));
             messages.addAll(chatHistory);
             messages.add(message("user", message));
@@ -172,6 +191,29 @@ public class ChatOrchestrationService {
         chatMemoryService.appendTurn(chatId, userMessage, response.getAnswer(), response.getRoute(), response.getDecisionSessionId());
         log.info("[AI][chat] event=MEMORY_SAVED chatId={} userChars={} assistantChars={}", chatId,
                 userMessage.length(), response.getAnswer() == null ? 0 : response.getAnswer().length());
+    }
+
+    private Long resolveActiveSessionId(String chatId, Long clientSessionId) {
+        com.hmdp.ai.entity.AiChatSession state = chatSessionStateService.get(chatId);
+        if (state != null && state.getActiveDecisionSessionId() != null) {
+            if (clientSessionId != null && !clientSessionId.equals(state.getActiveDecisionSessionId())) {
+                log.warn("[AI][chat] event=CLIENT_SESSION_IGNORED chatId={} clientSessionId={} activeSessionId={}", chatId,
+                        clientSessionId, state.getActiveDecisionSessionId());
+            }
+            return state.getActiveDecisionSessionId();
+        }
+        return clientSessionId;
+    }
+
+    private Long resolveFollowUpSessionId(String chatId, Long activeSessionId) {
+        if (activeSessionId != null) return activeSessionId;
+        com.hmdp.ai.entity.AiChatSession state = chatSessionStateService.get(chatId);
+        Long sessionId = state == null ? null : state.getLastDecisionSessionId();
+        if (sessionId == null) sessionId = chatMemoryService.findLatestDecisionSessionId(chatId);
+        if (sessionId != null) chatSessionStateService.rememberLast(chatId, sessionId);
+        log.info("[AI][chat] event=FOLLOW_UP_CONTEXT_RESOLVED chatId={} sessionId={} source={}", chatId, sessionId,
+                activeSessionId != null ? "ACTIVE" : (state == null ? "MESSAGE_HISTORY" : "LAST"));
+        return sessionId;
     }
 
     private boolean containsUngroundedRecommendation(String answer) {

@@ -38,3 +38,4 @@ dp.sql
 
 nginx-1.18.0
 src/main/resources/application-dev.yml
+nginx-1.18.0
