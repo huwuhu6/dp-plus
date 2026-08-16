@@ -127,7 +127,9 @@ public class AiConversationEvaluationService {
         AiConversationEvaluationCaseResult result = new AiConversationEvaluationCaseResult();
         result.setRunId(runId);
         result.setCaseId(evaluationCase.getId());
-        String chatId = "eval-" + evaluationCase.getCaseCode().toLowerCase() + "-" + UUID.randomUUID().toString().substring(0, 8);
+        String casePart = evaluationCase.getCaseCode().toLowerCase().replace('_', '-');
+        if (casePart.length() > 48) casePart = casePart.substring(0, 48);
+        String chatId = "eval-" + casePart + "-" + UUID.randomUUID().toString().substring(0, 8);
         result.setChatId(chatId);
         long startedAt = System.currentTimeMillis();
         try {

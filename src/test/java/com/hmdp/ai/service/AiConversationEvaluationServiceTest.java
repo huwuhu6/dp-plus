@@ -67,6 +67,7 @@ class AiConversationEvaluationServiceTest {
         assertEquals(1, response.getRun().getFinalStatusMatchedCount());
         assertEquals(1, response.getRun().getCompletedCount());
         assertEquals(true, response.getCaseResults().get(0).getRouteMatched());
+        assertEquals(true, response.getCaseResults().get(0).getChatId().matches("[A-Za-z0-9-]{1,64}"));
     }
 
     @Test
