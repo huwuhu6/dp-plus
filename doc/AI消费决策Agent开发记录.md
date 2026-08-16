@@ -731,6 +731,18 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 
 通用闲聊、推荐文案和工具结果润色等纯文本生成已迁移到 Spring AI；原有路由和动态业务工具规划暂时保留 OpenAI 兼容协议，以维持会话状态、工具参数审计和人工确认边界。下一阶段将为 `BaseAgentTool` 建立 Spring AI `ToolCallback` 适配层，再逐步迁移工具调用循环。
 
+## 2026-08-16：Spring AI 业务工具适配
+
+在纯文本对话迁移完成后，业务工具规划也接入 Spring AI。新增 `SpringAiAgentToolCallback`，将既有 `BaseAgentTool` 的名称、描述和 JSON 参数约束适配为 Spring AI `ToolCallback` 与 `ToolDefinition`；工具定义仍由原 `AgentToolRegistry` 集中维护，因此不会出现两套 schema 漂移。
+
+`SpringAiToolPlanner` 使用 `ChatClient` 携带这些回调向模型请求下一步工具调用，并显式关闭 Spring AI 的内部自动执行。模型只负责选择只读工具及生成参数；实际执行仍由 `AgentConversationService` 调用既有注册表完成，保留候选商户强制绑定、参数校验、会话约束、`ai_agent_tool_call` 审计和工具结果日志。这样既完成了 Spring AI 的工具协议迁移，又不把餐饮领域的关键控制权交给模型的自动循环。
+
+## 2026-08-16：多轮聊天轨迹评测
+
+原 `ai_evaluation_case` 适合稳定评估抽取、结构化检索和一次按钮续聊，不能覆盖真实聊天入口中的路由、位置槽位复用、候选商户指代和业务工具追问。新增 `V23__conversation_trajectory_evaluation.sql`，以独立的 case/run/result 三张表保存多轮评测，避免和 Recall@K、MRR 等检索指标混淆。
+
+每个轨迹用例以 JSON 保存连续用户输入及可选浏览器坐标，实际执行时逐轮调用 `ChatOrchestrationService`，即与调试台完全相同的服务入口。结果持久化每轮路由、最终决策状态、推荐商户集合、截断后的输出、耗时与异常；运行级别汇总路由命中、最终状态命中、商户命中和平均耗时。当前 `conversation-v1` 覆盖福州附近日料追问、附近烤肉营业时间追问，以及“羽毛球馆”非餐饮需求不进入餐饮决策链路三条基线。接口为 `POST /ai/evaluations/conversation-runs` 与 `GET /ai/evaluations/conversation-runs/{runId}`，评测运行仍要求登录用户，结果按创建者隔离。
+
 ## 2026-08-16：行政区位置槽位与检索预过滤
 
 地点解析候选被用户确认后，除经纬度外还会把 `province`、`city`、`district` 写入会话位置槽位，并在位置过期或用户拒绝位置时一并清空。新建推荐会透传这些字段到 `DecisionRequest`，检索阶段优先使用 `tb_shop` 的行政区联合索引收敛候选集，再执行坐标半径、结构化约束和语义召回排序。

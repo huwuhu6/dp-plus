@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.client.SpringAiTextClient;
+import com.hmdp.ai.client.SpringAiToolPlanner;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentConversationRequest;
 import com.hmdp.ai.dto.AgentConversationResponse;
@@ -42,6 +43,7 @@ public class AgentConversationService {
     @Resource private AgentToolRegistry toolRegistry;
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private SpringAiTextClient springAiTextClient;
+    @Resource private SpringAiToolPlanner springAiToolPlanner;
     @Resource private AiProperties aiProperties;
     @Resource private ObjectMapper objectMapper;
 
@@ -136,17 +138,15 @@ public class AgentConversationService {
         messages.add(message("system", "会话上下文：" + contextSummary(context)));
         messages.add(message("user", userMessage));
         try {
-            JsonNode response = aiClient.chatCompletion(messages, toolRegistry.definitions(), null,
-                    "AGENT_TOOL_PLANNING", aiProperties.getToolPlanningTimeoutMs());
-            JsonNode calls = response.path("choices").path(0).path("message").path("tool_calls");
-            if (!calls.isArray() || calls.size() == 0) {
+            SpringAiToolPlanner.ToolPlan plan = springAiToolPlanner.plan(messages,
+                    toolRegistry.springAiCallbacks(context), "AGENT_TOOL_PLANNING");
+            if (plan.isEmpty()) {
                 log.warn("[AI][agent] event=PLAN_EMPTY sessionId={} turnNo={} query={}", sessionId,
                         context.getTurnNo(), compact(userMessage));
                 return new ToolPlanningResult(results, false);
             }
-            JsonNode call = calls.get(0);
-            String toolName = call.path("function").path("name").asText();
-            String arguments = call.path("function").path("arguments").asText("{}");
+            String toolName = plan.getName();
+            String arguments = plan.getArguments();
             log.info("[AI][agent] event=TOOL_PLAN sessionId={} turnNo={} tool={} arguments={}", sessionId,
                     context.getTurnNo(), toolName, compact(arguments));
             results.add(executeTool(sessionId, context.getTurnNo(), toolName, arguments, context, explicitlyReferencedShopId));

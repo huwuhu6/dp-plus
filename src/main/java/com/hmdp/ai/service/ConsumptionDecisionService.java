@@ -592,10 +592,6 @@ public class ConsumptionDecisionService {
         return hasText(request.getProvince()) || hasText(request.getCity()) || hasText(request.getDistrict());
     }
 
-    private boolean hasText(String value) {
-        return value != null && !value.trim().isEmpty();
-    }
-
     private boolean matchesCuisine(String profileCuisine, String requestedCuisine) {
         if (contains(profileCuisine, requestedCuisine)) return true;
         boolean requestedGrill = requestedCuisine.contains("烧烤") || requestedCuisine.contains("烤肉");

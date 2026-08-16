@@ -1,6 +1,7 @@
 package com.hmdp.ai.controller;
 
 import com.hmdp.ai.service.AiEvaluationService;
+import com.hmdp.ai.service.AiConversationEvaluationService;
 import com.hmdp.dto.Result;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,6 +15,7 @@ import jakarta.annotation.Resource;
 @RequestMapping("/ai/evaluations")
 public class AiEvaluationController {
     @Resource private AiEvaluationService evaluationService;
+    @Resource private AiConversationEvaluationService conversationEvaluationService;
 
     @PostMapping("/runs")
     public Result runActiveCases() {
@@ -38,5 +40,15 @@ public class AiEvaluationController {
     @PostMapping("/runs/{runId}/abort")
     public Result abortRun(@PathVariable Long runId) {
         return Result.ok(evaluationService.abortRun(runId));
+    }
+
+    @PostMapping("/conversation-runs")
+    public Result runConversationCases() {
+        return Result.ok(conversationEvaluationService.runActiveCases());
+    }
+
+    @GetMapping("/conversation-runs/{runId}")
+    public Result getConversationRun(@PathVariable Long runId) {
+        return Result.ok(conversationEvaluationService.getRun(runId));
     }
 }
