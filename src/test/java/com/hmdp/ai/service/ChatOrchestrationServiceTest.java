@@ -8,6 +8,7 @@ import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ConversationLocationSlot;
+import com.hmdp.ai.dto.ConversationSlots;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRequest;
@@ -289,5 +290,47 @@ class ChatOrchestrationServiceTest {
         assertEquals("LOCATION_RESOLUTION", response.getRoute());
         assertEquals(57L, response.getDecisionSessionId());
         verify(locationService).resolve("重庆");
+    }
+
+    @Test
+    void sceneBasedRestaurantRequestStartsNewDecisionInsteadOfBusinessFollowUp() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(55L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        ConversationSlots slots = new ConversationSlots();
+        when(stateService.slots(state)).thenReturn(slots);
+        DecisionResponse previous = new DecisionResponse();
+        previous.setSessionId(55L);
+        previous.setStatus("COMPLETED");
+        when(decisionService.getDecision(55L)).thenReturn(previous);
+        DecisionResponse next = new DecisionResponse();
+        next.setSessionId(58L);
+        next.setStatus("COMPLETED");
+        next.setAnswer("已按约会场景开始重新筛选");
+        when(decisionService.decide(any())).thenReturn(next);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("那有适合约会的店吗");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("START_DECISION", response.getRoute());
+        assertEquals(58L, response.getDecisionSessionId());
+        verify(decisionService).decide(any());
+        verifyNoInteractions(aiClient);
     }
 }

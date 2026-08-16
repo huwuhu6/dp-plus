@@ -717,6 +717,8 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 
 预算放宽的按钮改为展示最终约束，例如“将人均预算上限提高到 80 元”；执行时输出 `BUDGET_RELAXATION previousBudget=30 nextBudget=80`，使页面选项、实际检索约束和日志三者一致。新增回归测试覆盖“已有福州浏览器定位时，重庆请求不携带旧坐标并进入地图地点确认”的路径。
 
+补充路由修复：已完成推荐后的“那有适合约会的店吗”过去可能被模型误判为针对上一家店的追问。现增加服务端确定性守卫：包含“有没有/还有/推荐”等新候选表达，且按约会、聚餐、安静、清淡、性价比等场景筛店时，强制进入 `START_DECISION`；只有“这家/那家/上一家”等明确指向已展示商户的问题才进入 `BUSINESS_FOLLOW_UP`。日志通过 `ROUTE_GUARD_MATCHED source=NEW_RECOMMENDATION` 标记该分流，避免由模型偶发路由造成状态串线。
+
 ## 2026-08-16：聊天记录持久化与非检索回答防幻觉
 
 Redis 的 30 分钟聊天记忆适合低延迟上下文，但不适合作为可审计的唯一来源。新增 `V18__chat_memory.sql` 创建 `ai_chat_message`：按 `chat_id`、用户、关联决策会话、角色、路由、内容和时间持久化每一轮聊天。`ChatMemoryService` 先读 Redis，缓存缺失时从该表恢复最近 8 条消息并回填缓存。原有 `ai_decision_message` 仍仅记录餐饮决策状态机中的用户补充、澄清与工具追问；`ai_decision_session.result_json` 保存一次决策的最终结构化结果；`ai_agent_tool_call` 保存工具审计。普通聊天与决策入口的完整记录现在由 `ai_chat_message` 覆盖。

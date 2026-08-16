@@ -65,7 +65,7 @@ public class ChatOrchestrationService {
             ChatMessageResponse locationResponse = resolveNamedLocation(chatId, message, state, activeSessionId, activeDecision);
             if (locationResponse != null) return locationResponse;
         }
-        if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null && isRestaurantSearch(message)) {
+        if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null && isNewRecommendationIntent(message)) {
             DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
             cancel.setSelectedOptionId("END_DECISION");
             cancel.setMessage("被新的餐饮需求替代：" + message);
@@ -76,6 +76,11 @@ public class ChatOrchestrationService {
             log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route=START_DECISION source=PENDING_SUPERSEDE",
                     chatId, activeSessionId);
             return startDecision(chatId, message, state, false);
+        }
+        if (isNewRecommendationIntent(message)) {
+            log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} activeSessionId={} route=START_DECISION source=NEW_RECOMMENDATION query={}",
+                    chatId, activeSessionId, compact(message));
+            return startDecision(chatId, message, state, aiProperties.isConfigured());
         }
         String route = resolveContextualFollowUpRoute(chatId, message, state, activeSessionId, activeDecision);
         if (route == null) route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
@@ -228,7 +233,27 @@ public class ChatOrchestrationService {
 
     private boolean hasExplicitNewDecisionIntent(String message) {
         return message.contains("我想吃") || message.contains("想找") || message.contains("帮我找")
-                || message.contains("给我推荐") || message.contains("重新推荐") || message.contains("再推荐");
+                || message.contains("给我推荐") || message.contains("重新推荐") || message.contains("再推荐")
+                || isNewRecommendationIntent(message);
+    }
+
+    private boolean isNewRecommendationIntent(String message) {
+        if (message == null || message.isEmpty() || isFocusedShopQuestion(message)) return false;
+        boolean asksForPlace = message.contains("店") || message.contains("餐厅") || message.contains("餐馆")
+                || message.contains("地方") || message.contains("吃饭");
+        boolean asksForNewOptions = message.contains("有没有") || message.contains("有没") || message.contains("还有")
+                || message.contains("推荐") || message.contains("找") || message.contains("来一家");
+        boolean hasScene = message.contains("适合约会") || message.contains("约会") || message.contains("聚餐")
+                || message.contains("安静") || message.contains("清淡") || message.contains("性价比");
+        boolean hasDiningCategory = message.contains("烤肉") || message.contains("烧烤") || message.contains("火锅")
+                || message.contains("日料") || message.contains("料理") || message.contains("小吃") || message.contains("咖啡")
+                || message.contains("奶茶") || message.contains("川菜") || message.contains("粤菜");
+        return asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory);
+    }
+
+    private boolean isFocusedShopQuestion(String message) {
+        return message.contains("这家") || message.contains("那家") || message.contains("这一个")
+                || message.contains("上一家") || message.contains("刚才那家");
     }
 
     private boolean isPausedDecision(DecisionResponse decision) {
