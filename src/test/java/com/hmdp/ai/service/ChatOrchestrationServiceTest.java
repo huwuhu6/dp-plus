@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentConversationResponse;
+import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
+import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.entity.AiChatSession;
 import org.junit.jupiter.api.Test;
@@ -28,16 +30,17 @@ class ChatOrchestrationServiceTest {
         ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
         AgentConversationService conversationService = mock(AgentConversationService.class);
         ChatMemoryService memoryService = mock(ChatMemoryService.class);
-        ChatSessionStateService sessionStateService = mock(ChatSessionStateService.class);
+        ConversationStateService sessionStateService = mock(ConversationStateService.class);
         ReflectionTestUtils.setField(service, "aiClient", mock(OpenAiCompatibleClient.class));
         ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
         ReflectionTestUtils.setField(service, "decisionService", decisionService);
         ReflectionTestUtils.setField(service, "conversationService", conversationService);
         ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
-        ReflectionTestUtils.setField(service, "chatSessionStateService", sessionStateService);
+        ReflectionTestUtils.setField(service, "conversationStateService", sessionStateService);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         when(memoryService.resolveChatId(any())).thenReturn("test-chat");
         when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        when(sessionStateService.getOrCreate("test-chat")).thenReturn(new AiChatSession());
         ChatMessageRequest request = new ChatMessageRequest();
         request.setMessage("hello 啊");
 
@@ -57,7 +60,7 @@ class ChatOrchestrationServiceTest {
         ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
         AgentConversationService conversationService = mock(AgentConversationService.class);
         ChatMemoryService memoryService = mock(ChatMemoryService.class);
-        ChatSessionStateService sessionStateService = mock(ChatSessionStateService.class);
+        ConversationStateService sessionStateService = mock(ConversationStateService.class);
         AiProperties properties = new AiProperties();
         properties.setApiKey("test-key");
         ReflectionTestUtils.setField(service, "aiClient", aiClient);
@@ -65,14 +68,14 @@ class ChatOrchestrationServiceTest {
         ReflectionTestUtils.setField(service, "decisionService", decisionService);
         ReflectionTestUtils.setField(service, "conversationService", conversationService);
         ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
-        ReflectionTestUtils.setField(service, "chatSessionStateService", sessionStateService);
+        ReflectionTestUtils.setField(service, "conversationStateService", sessionStateService);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         when(memoryService.resolveChatId(any())).thenReturn("test-chat");
         when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
         AiChatSession state = new AiChatSession();
         state.setChatId("test-chat");
         state.setLastDecisionSessionId(36L);
-        when(sessionStateService.get("test-chat")).thenReturn(state);
+        when(sessionStateService.getOrCreate("test-chat")).thenReturn(state);
         when(aiClient.chatCompletion(any(), any(), any(), any())).thenReturn(new ObjectMapper().readTree(
                 "{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"route\\\":\\\"BUSINESS_FOLLOW_UP\\\"}\"}}]}}]}"));
         DecisionResponse decision = new DecisionResponse();
@@ -91,6 +94,58 @@ class ChatOrchestrationServiceTest {
         assertEquals(36L, response.getDecisionSessionId());
         assertEquals("COMPLETED", response.getDecisionStatus());
         verify(conversationService).converse(any(), any());
-        verify(sessionStateService).rememberLast("test-chat", 36L);
+        verify(sessionStateService).rememberLastDecision(state, 36L);
+    }
+
+    @Test
+    void resumesClarifyingDecisionFromPersistedLocationEventWithoutRoutingModel() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        ConversationLocationSlot location = new ConversationLocationSlot();
+        location.setStatus("AVAILABLE");
+        location.setLatitude(26.0745D);
+        location.setLongitude(119.1978D);
+        when(stateService.usableLocation(state)).thenReturn(location);
+        DecisionResponse clarifying = new DecisionResponse();
+        clarifying.setSessionId(100L);
+        clarifying.setStatus("CLARIFYING");
+        when(decisionService.getDecision(100L)).thenReturn(clarifying);
+        DecisionResponse completed = new DecisionResponse();
+        completed.setSessionId(100L);
+        completed.setStatus("COMPLETED");
+        completed.setAnswer("已按当前位置完成推荐");
+        when(decisionService.continueDecision(any(), any())).thenReturn(completed);
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("已提供当前位置");
+        request.setSelectedOptionId("PROVIDE_LOCATION");
+        ChatLocationInput input = new ChatLocationInput();
+        input.setLatitude(26.0745D);
+        input.setLongitude(119.1978D);
+        input.setSource("BROWSER_GEOLOCATION");
+        request.setLocation(input);
+
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("DECISION_EVENT", response.getRoute());
+        assertEquals("COMPLETED", response.getDecisionStatus());
+        verify(stateService).acceptLocation(state, input);
+        verify(decisionService).continueDecision(any(), any());
+        verifyNoInteractions(aiClient);
     }
 }

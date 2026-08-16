@@ -10,6 +10,8 @@ import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.ConversationLocationSlot;
+import com.hmdp.ai.entity.AiChatSession;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,7 +31,7 @@ public class ChatOrchestrationService {
     @Resource private ConsumptionDecisionService decisionService;
     @Resource private AgentConversationService conversationService;
     @Resource private ChatMemoryService chatMemoryService;
-    @Resource private ChatSessionStateService chatSessionStateService;
+    @Resource private ConversationStateService conversationStateService;
     @Resource private ObjectMapper objectMapper;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
@@ -39,12 +41,22 @@ public class ChatOrchestrationService {
         String message = request.getMessage().trim();
         String chatId = chatMemoryService.resolveChatId(request.getChatId());
         List<Map<String, Object>> chatHistory = chatMemoryService.load(chatId);
-        Long activeSessionId = resolveActiveSessionId(chatId, request.getDecisionSessionId());
+        AiChatSession state = conversationStateService.getOrCreate(chatId);
+        if (request.getLocation() != null) conversationStateService.acceptLocation(state, request.getLocation());
+        Long activeSessionId = resolveActiveSessionId(state, request.getDecisionSessionId());
         DecisionResponse activeDecision = activeSessionId == null ? null : decisionService.getDecision(activeSessionId);
         log.info("[AI][chat] event=MEMORY_LOADED chatId={} messages={}", chatId, chatHistory.size());
         log.info("[AI][chat] event=TURN_START chatId={} clientSessionId={} activeSessionId={} status={} query={}", chatId,
                 request.getDecisionSessionId(), activeSessionId,
                 activeDecision == null ? "NONE" : activeDecision.getStatus(), compact(message));
+        if (request.getSelectedOptionId() != null && activeDecision != null
+                && ("CLARIFYING".equals(activeDecision.getStatus()) || "WAITING_RELAXATION".equals(activeDecision.getStatus()))) {
+            ChatMessageResponse eventResponse = new ChatMessageResponse();
+            eventResponse.setChatId(chatId);
+            eventResponse.setRoute("DECISION_EVENT");
+            eventResponse.setUsedModel(false);
+            return handleDecisionEvent(chatId, message, request, state, activeSessionId, eventResponse);
+        }
         String route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
         log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
         ChatMessageResponse response = new ChatMessageResponse();
@@ -55,17 +67,18 @@ public class ChatOrchestrationService {
             DecisionRequest decisionRequest = new DecisionRequest();
             decisionRequest.setQuery(message);
             decisionRequest.setMaxCandidates(3);
+            applyLocationSlot(decisionRequest, state);
             DecisionResponse decision = decisionService.decide(decisionRequest);
             response.setDecision(decision);
             response.setDecisionSessionId(decision.getSessionId());
             response.setDecisionStatus(decision.getStatus());
             response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
-            chatSessionStateService.activate(chatId, decision.getSessionId());
+            conversationStateService.activateDecision(state, decision.getSessionId());
             recordTurn(chatId, message, response);
             return response;
         }
         if ("BUSINESS_FOLLOW_UP".equals(route)) {
-            Long followUpSessionId = resolveFollowUpSessionId(chatId, activeSessionId);
+            Long followUpSessionId = resolveFollowUpSessionId(chatId, state, activeSessionId);
             if (followUpSessionId == null) {
                 response.setAnswer("我没有找到可以关联的推荐会话。请告诉我店名，或者重新说一下你的用餐需求，我会先查询再回答。");
                 recordTurn(chatId, message, response);
@@ -94,7 +107,7 @@ public class ChatOrchestrationService {
                 followUp.setMessage(message);
                 decisionService.continueDecision(activeSessionId, followUp);
             }
-            chatSessionStateService.clearActive(chatId);
+            conversationStateService.clearActiveDecision(state);
             response.setDecisionSessionId(null);
         }
         if ("GENERAL_CHAT".equals(route) && activeDecision != null) {
@@ -193,11 +206,51 @@ public class ChatOrchestrationService {
                 userMessage.length(), response.getAnswer() == null ? 0 : response.getAnswer().length());
     }
 
-    private Long resolveActiveSessionId(String chatId, Long clientSessionId) {
-        com.hmdp.ai.entity.AiChatSession state = chatSessionStateService.get(chatId);
-        if (state != null && state.getActiveDecisionSessionId() != null) {
+    private ChatMessageResponse handleDecisionEvent(String chatId, String message, ChatMessageRequest request,
+                                                    AiChatSession state, Long activeSessionId,
+                                                    ChatMessageResponse response) {
+        String optionId = request.getSelectedOptionId();
+        if ("DECLINE_LOCATION".equals(optionId)) conversationStateService.declineLocation(state);
+        DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
+        followUp.setSelectedOptionId(optionId);
+        followUp.setMessage(message);
+        if ("PROVIDE_LOCATION".equals(optionId)) {
+            ConversationLocationSlot location = conversationStateService.usableLocation(state);
+            if (location == null) throw new IllegalArgumentException("当前没有有效位置，请重新授权定位后继续");
+            followUp.setLatitude(location.getLatitude());
+            followUp.setLongitude(location.getLongitude());
+        }
+        log.info("[AI][chat] event=DECISION_EVENT chatId={} sessionId={} optionId={}", chatId, activeSessionId, optionId);
+        DecisionResponse decision = decisionService.continueDecision(activeSessionId, followUp);
+        response.setDecision(decision);
+        response.setDecisionSessionId("CANCELLED".equals(decision.getStatus()) ? null : decision.getSessionId());
+        response.setDecisionStatus(decision.getStatus());
+        response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
+        if ("CANCELLED".equals(decision.getStatus())) conversationStateService.clearActiveDecision(state);
+        else conversationStateService.activateDecision(state, decision.getSessionId());
+        recordTurn(chatId, message, response);
+        return response;
+    }
+
+    private void applyLocationSlot(DecisionRequest request, AiChatSession state) {
+        ConversationLocationSlot location = conversationStateService.usableLocation(state);
+        if (location != null) {
+            request.setLatitude(location.getLatitude());
+            request.setLongitude(location.getLongitude());
+            request.setLocationStatus("AVAILABLE");
+            log.info("[AI][chat] event=SLOT_REUSED chatId={} slot=location source={} latitude={} longitude={}",
+                    state.getChatId(), location.getSource(), location.getLatitude(), location.getLongitude());
+            return;
+        }
+        String status = conversationStateService.slots(state).getLocation().getStatus();
+        request.setLocationStatus(status == null ? "MISSING" : status);
+        log.info("[AI][chat] event=SLOT_READ chatId={} slot=location status={}", state.getChatId(), request.getLocationStatus());
+    }
+
+    private Long resolveActiveSessionId(AiChatSession state, Long clientSessionId) {
+        if (state.getActiveDecisionSessionId() != null) {
             if (clientSessionId != null && !clientSessionId.equals(state.getActiveDecisionSessionId())) {
-                log.warn("[AI][chat] event=CLIENT_SESSION_IGNORED chatId={} clientSessionId={} activeSessionId={}", chatId,
+                log.warn("[AI][chat] event=CLIENT_SESSION_IGNORED chatId={} clientSessionId={} activeSessionId={}", state.getChatId(),
                         clientSessionId, state.getActiveDecisionSessionId());
             }
             return state.getActiveDecisionSessionId();
@@ -205,14 +258,13 @@ public class ChatOrchestrationService {
         return clientSessionId;
     }
 
-    private Long resolveFollowUpSessionId(String chatId, Long activeSessionId) {
+    private Long resolveFollowUpSessionId(String chatId, AiChatSession state, Long activeSessionId) {
         if (activeSessionId != null) return activeSessionId;
-        com.hmdp.ai.entity.AiChatSession state = chatSessionStateService.get(chatId);
-        Long sessionId = state == null ? null : state.getLastDecisionSessionId();
+        Long sessionId = state.getLastDecisionSessionId();
         if (sessionId == null) sessionId = chatMemoryService.findLatestDecisionSessionId(chatId);
-        if (sessionId != null) chatSessionStateService.rememberLast(chatId, sessionId);
+        if (sessionId != null) conversationStateService.rememberLastDecision(state, sessionId);
         log.info("[AI][chat] event=FOLLOW_UP_CONTEXT_RESOLVED chatId={} sessionId={} source={}", chatId, sessionId,
-                activeSessionId != null ? "ACTIVE" : (state == null ? "MESSAGE_HISTORY" : "LAST"));
+                activeSessionId != null ? "ACTIVE" : (state.getLastDecisionSessionId() == null ? "MESSAGE_HISTORY" : "LAST"));
         return sessionId;
     }
 

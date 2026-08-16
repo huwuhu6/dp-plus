@@ -572,6 +572,27 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 
 日志保留 `query -> route -> tool plan -> tool result -> polished answer` 的关键审计信息。`AGENT_ANSWER_POLISH` 不再将完整证据正文作为 query 打印，底层模型文本日志仅记录长度，避免同一份评价证据和润色答案在 INFO 日志中重复多次。
 
+## 2026-08-16：统一 ConversationState 与位置槽位生命周期
+
+### 问题
+
+此前的上下文被拆散在四处：Redis/MySQL 聊天记录用于模型文本历史，`ai_chat_session` 只记录活动决策 ID，`ai_decision_session.request_context_json` 保存单次决策坐标，`agent_context_json` 保存完成推荐后的商户焦点。用户通过浏览器提交位置后，坐标只进入当次 `DecisionSession`；后续创建新决策时没有从聊天会话复用位置，系统又会把它判为缺失并再次索要。前端的定位、拒绝定位和放宽条件还绕过了聊天编排入口，直接调用决策接口，使事件审计和状态来源进一步分裂。
+
+### 重新设计
+
+保留 `ai_chat_session` 作为唯一服务端 `ConversationState`，`V20__conversation_state_slots.sql` 新增：
+
+- `version`：乐观锁版本，避免同一聊天会话的并发事件互相覆盖；
+- `slots_json`：类型化会话槽位，目前包含 `location`。
+
+`location` 槽位保存 `status`、经纬度、精度、来源、采集时间和过期时间。状态为 `MISSING`、`AVAILABLE`、`DECLINED` 或 `EXPIRED`；浏览器定位写入 `AVAILABLE` 并设置 30 分钟 TTL，显式拒绝位置写入 `DECLINED`。新餐饮决策创建前先读取有效槽位并把坐标复制到 `DecisionRequest` 快照；若槽位为 `DECLINED`，则明确按全城搜索并移除附近硬约束，不再重复追问；过期后才恢复为需要位置的澄清流程。
+
+定位、拒绝定位、结束和放宽条件现在统一经 `POST /ai/chat/messages` 作为结构化事件进入 `ChatOrchestrationService`。该分支先更新/读取槽位、再恢复当前决策，不调用路由模型。聊天记录只负责自然语言历史与审计，`DecisionSession` 只负责不可变的任务快照和检索结果，`AgentSessionContext` 只负责已完成任务的候选商户与工具焦点；三者不再互相承担状态真相。
+
+这一拆分参考了 Dialogflow CX 的 form/session parameter 机制和 Amazon Lex 的 session attributes：所收集参数在服务端会话中持久化并可供后续履约复用，客户端未重传时仍使用服务端状态。模型保留用于开放式闲聊、餐饮意图和工具规划，但不再决定位置是否缺失、是否重复索要或结构化事件如何迁移状态。
+
+新增测试覆盖“`CLARIFYING` 会话收到浏览器位置事件后，不调用路由模型、从位置槽位恢复原决策”的路径；`ConsumptionDecisionService` 也修正了旧的结束判断，不再把任何带文字的 follow-up 错误当作取消。
+
 ## 2026-08-16：候选商户指代解析与工具参数约束
 
 ### 问题
@@ -592,7 +613,7 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 
 ### 处理
 
-新增 `ai_chat_session` 及 `ChatSessionStateService`，以 `chatId` 记录服务端可信的 `activeDecisionSessionId` 和 `lastDecisionSessionId`。新推荐会激活并更新两者；明确退出只清空活动会话，保留最近一次已推荐会话用于解析“那一家”“评价如何”之类的后续指代。追问时优先使用活动会话，其次恢复最近会话；兼容历史聊天记录时，仍可从 `ai_chat_message` 的最近关联记录恢复。所有恢复出的会话仍通过既有用户归属校验，客户端传来的不一致 sessionId 只会被记录并忽略，不能越权改变服务端会话状态。
+新增 `ai_chat_session` 及初版 `ChatSessionStateService`，以 `chatId` 记录服务端可信的 `activeDecisionSessionId` 和 `lastDecisionSessionId`。后续已收敛为 `ConversationStateService`，并加入 `slotsJson` 与版本号，统一管理活动任务、最近任务和位置槽位。新推荐会激活并更新两者；明确退出只清空活动会话，保留最近一次已推荐会话用于解析“那一家”“评价如何”之类的后续指代。追问时优先使用活动会话，其次恢复最近会话；兼容历史聊天记录时，仍可从 `ai_chat_message` 的最近关联记录恢复。所有恢复出的会话仍通过既有用户归属校验，客户端传来的不一致 sessionId 只会被记录并忽略，不能越权改变服务端会话状态。
 
 对话路由同时收紧：`附近有啥`、`有什么推荐`等未说明餐饮目标的输入先进入普通聊天澄清，不擅自开始餐饮检索；澄清中的普通闲聊也不再自动取消推荐，只有模型识别到明确结束才清空活动会话。前端保留后端返回的活动会话状态，且不再在澄清阶段禁用输入，从而允许用户自然转聊后再回到原任务。
 

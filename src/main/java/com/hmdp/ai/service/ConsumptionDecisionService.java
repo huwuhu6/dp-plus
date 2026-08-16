@@ -103,6 +103,7 @@ public class ConsumptionDecisionService {
             if ("CLARIFYING".equals(pausedStatus)) {
                 if ("DECLINE_LOCATION".equals(followUp == null ? null : followUp.getSelectedOptionId())) {
                     log.info("[AI][session={}] state=CLARIFYING action=LOCATION_DECLINED searchScope=CITYWIDE", sessionId);
+                    request.setLocationStatus("DECLINED");
                     constraints.setNearby(false);
                     constraints.setRadiusKm(-1D);
                     constraints.getSoftPreferences().add("用户未提供位置，按全城搜索");
@@ -113,6 +114,7 @@ public class ConsumptionDecisionService {
                 } else {
                     request.setLatitude(followUp.getLatitude());
                     request.setLongitude(followUp.getLongitude());
+                    request.setLocationStatus("AVAILABLE");
                     log.info("[AI][session={}] state=CLARIFYING action=LOCATION_ACCEPTED latitude={} longitude={}",
                             sessionId, request.getLatitude(), request.getLongitude());
                 }
@@ -164,6 +166,13 @@ public class ConsumptionDecisionService {
         try {
             DecisionConstraints constraints = extractConstraints ? constraintExtractor.extract(request.getQuery()) : existingConstraints;
             reconcileRequestFacts(constraints, request);
+            if ("DECLINED".equals(request.getLocationStatus())) {
+                constraints.setNearby(false);
+                constraints.setRadiusKm(-1D);
+                removeHardConstraints(constraints, "附近", "距离", "位置");
+                removeMissingInformation(constraints, "位置", "坐标", "起点");
+                log.info("[AI][session={}] event=LOCATION_SLOT_REUSED status=DECLINED searchScope=CITYWIDE", session.getId());
+            }
             response.setConstraints(constraints);
             session.setConstraintsJson(objectMapper.writeValueAsString(constraints));
             session.setStatus(extractConstraints ? "EXTRACTING" : "RESUMING");
@@ -352,8 +361,10 @@ public class ConsumptionDecisionService {
     }
 
     private boolean isEndRequest(DecisionFollowUpRequest followUp) {
-        return followUp != null && ("END_DECISION".equals(followUp.getSelectedOptionId())
-                || (followUp.getMessage() != null && !followUp.getMessage().trim().isEmpty()));
+        if (followUp == null) return false;
+        if ("END_DECISION".equals(followUp.getSelectedOptionId())) return true;
+        String message = followUp.getMessage() == null ? "" : followUp.getMessage().trim();
+        return message.contains("算了") || message.contains("不找了") || message.contains("结束") || message.contains("没你事了");
     }
 
     private String compact(String value) {

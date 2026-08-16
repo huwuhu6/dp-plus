@@ -7,5 +7,6 @@ public class DecisionRequest {
     private String query;
     private Double latitude;
     private Double longitude;
+    private String locationStatus = "MISSING";
     private Integer maxCandidates = 3;
 }
