@@ -32,7 +32,11 @@ AI_RETRIEVAL_VECTOR_ENABLED=true
 
 ### 验证
 
-`mvn -q test` 已通过；`docker compose -f docker-compose.milvus.yml config` 已通过。当前 Docker CLI 已安装，但 Docker daemon 未启动，尚未在本机拉起 Milvus 容器并进行端到端索引验证。
+`mvn -q test` 已通过；`docker compose -f docker-compose.milvus.yml config` 已通过。开发机已确认 Milvus `19530` 端口可达，且百炼 `text-embedding-v4` 健康检查成功返回 1024 维向量。
+
+Spring AI 的默认 Embedding 路径会追加 `/v1/embeddings`，因此百炼配置应使用 `https://dashscope.aliyuncs.com/compatible-mode` 作为 base URL；索引写入按每批 10 条切分，以符合 `text-embedding-v4` 的批量上限。已实际写入 80 家商户对应的 480 条画像/评价文档，并完成一次决策链路验证：13 家结构化候选进入白名单，Milvus 语义召回参与重排（约 1.2 秒），最终返回 3 家候选。开发日志仅保留项目定义的模型、工具、状态机与语义检索日志，避免输出完整 prompt、Embedding 文本和评价原文。
+
+索引重建端点纳入与既有 `/ai/decisions/**` 相同的调试访问范围，便于通过浏览器开发者工具复现完整链路；生产环境应使用认证与管理权限保护该写入接口。
 
 本文记录 AI 消费决策 Agent 开发中会影响架构、正确性、兼容性或演示可信度的问题。普通环境配置、一次性命令问题和明显的小错误不记录。
 

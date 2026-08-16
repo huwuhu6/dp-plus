@@ -15,6 +15,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -28,12 +29,14 @@ import java.util.Set;
 @ConditionalOnProperty(prefix = "ai.retrieval", name = "vector-enabled", havingValue = "true")
 public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
     private static final Logger log = LoggerFactory.getLogger(MilvusSemanticShopRetriever.class);
-    private static final int DEFAULT_TOP_K = 80;
+    // DashScope text-embedding-v4 accepts at most ten input texts per request.
+    private static final int EMBEDDING_BATCH_SIZE = 10;
 
     @Resource private VectorStore vectorStore;
     @Resource private ShopMapper shopMapper;
     @Resource private AiShopProfileMapper profileMapper;
     @Resource private AiReviewDocumentMapper reviewMapper;
+    @Value("${ai.retrieval.semantic-top-k:80}") private int semanticTopK;
 
     @Override
     public SemanticRecallResult recall(String query, List<Shop> hardMatchedShops,
@@ -49,7 +52,7 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
         try {
             List<Document> documents = vectorStore.similaritySearch(SearchRequest.builder()
                     .query(query)
-                    .topK(DEFAULT_TOP_K)
+                    .topK(Math.max(1, Math.min(semanticTopK, 200)))
                     .similarityThresholdAll()
                     .build());
             Map<Long, Double> scoreByShopId = new HashMap<>();
@@ -97,7 +100,14 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
         } catch (Exception ignored) {
             // A fresh collection has no documents to delete.
         }
-        vectorStore.add(documents);
+        for (int start = 0; start < documents.size(); start += EMBEDDING_BATCH_SIZE) {
+            int end = Math.min(start + EMBEDDING_BATCH_SIZE, documents.size());
+            vectorStore.add(documents.subList(start, end));
+            log.info("[AI][semantic] action=INDEX_BATCH_WRITTEN batch={}/{} documents={}",
+                    start / EMBEDDING_BATCH_SIZE + 1,
+                    (documents.size() + EMBEDDING_BATCH_SIZE - 1) / EMBEDDING_BATCH_SIZE,
+                    end - start);
+        }
         log.info("[AI][semantic] action=INDEX_REBUILT shops={} documents={}", shops.size(), documents.size());
         return documents.size();
     }
@@ -129,7 +139,7 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
     }
 
     private Long toLong(Object value) {
-        if (value instanceof Number number) return number.longValue();
+        if (value instanceof Number) return ((Number) value).longValue();
         if (value == null) return null;
         try {
             return Long.parseLong(String.valueOf(value));
