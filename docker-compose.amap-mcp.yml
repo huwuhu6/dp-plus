@@ -1,0 +1,10 @@
+services:
+  amap-mcp:
+    build:
+      context: ./docker/amap-mcp
+    container_name: hmdp-amap-mcp
+    environment:
+      AMAP_MAPS_API_KEY: ${AMAP_MAPS_API_KEY:?Set AMAP_MAPS_API_KEY in .env before starting}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

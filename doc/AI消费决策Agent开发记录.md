@@ -2,9 +2,23 @@
 
 ## 2026-08-16：推荐默认定位与地点消歧
 
-推荐不再仅在用户使用“附近”等关键词时才索要位置。任何进入餐饮推荐链路、且没有有效会话定位或唯一命名地点坐标的请求，都会停在 `CLARIFYING` 状态，要求用户授权当前位置或补充明确城市/区域；用户显式选择不提供位置时，才允许全城搜索。
+推荐不再仅在用户使用“附近”等关键词时才索要位置。任何进入餐饮推荐链路、且没有有效会话定位的请求，都会停在 `CLARIFYING` 状态，要求用户授权当前位置；用户显式选择不提供位置时，才允许全城搜索。
 
-移除了“鼓楼 -> 福州鼓楼”的硬编码映射。“鼓楼”属于跨城市歧义地名，系统进入 `PLACE_DISAMBIGUATION` 暂停态，提示用户补充如“福州鼓楼”的城市级信息；聊天中补充明确地点会恢复原决策会话。当前命名地点解析仍是演示坐标表，后续应替换为地理编码服务或独立地点解析工具。
+已删除全部演示地点坐标表，包括“鼓楼 -> 福州鼓楼”的硬编码映射。地点名不能在没有地理编码服务的情况下直接变为坐标；后续接入地理编码工具后，应返回候选地点并由用户确认，不能猜测城市或回退到全城检索。
+
+### 地理编码 MCP 方案调研
+
+当前项目不再把地名映射写在 Java 代码或 SQL 中。地理解析将抽象为 `LocationResolutionService`：输入地点文本和可选城市上下文，输出零到多个结构化候选（标准名称、行政区、经纬度、置信度和数据源）；只有唯一高置信候选或用户明确确认候选后，才写入会话位置槽位并进入半径检索。
+
+调研后，中国本地餐饮场景优先考虑高德地图 MCP Server。该开源服务支持 stdio、SSE 和 Streamable HTTP，可作为独立容器运行，由 Spring AI MCP Client 通过 HTTP 消费其地理编码、逆地理编码、地点搜索与周边搜索工具；它需要单独配置高德开发者 Key，不能将公共地图能力假定为无限制免费服务。OpenStreetMap MCP 可作为无 Key 的实验备选，但其默认依赖公共 Nominatim/Overpass，受公共服务用量政策约束，不适合作为正式交互链路的默认依赖。完整自建 Nominatim 需要导入 OSM 数据和 PostGIS，资源成本明显更高，当前阶段不引入。
+
+因此下一步不是恢复任何硬编码，而是在用户确定地图服务与 Key 后，用 Docker 启动 MCP 服务、以 HTTP 接入 Spring AI MCP Client，并为 `resolve_place` 增加“零结果、歧义候选、唯一结果、用户确认”四类评测用例。未配置服务时仍保持当前的显式定位澄清，不用猜测城市。
+
+### 高德 MCP 接入
+
+新增 `docker-compose.amap-mcp.yml` 与独立 Python 容器，启动 `amap-mcp-server sse` 并仅通过 Docker `.env` 中的 `AMAP_MAPS_API_KEY` 读取地图凭据；`.env.example` 只保留空占位符。Spring Boot 引入 Spring AI MCP Client，默认关闭；配置 `AI_LOCATION_MCP_ENABLED=true` 后，以 SSE 连接 `http://127.0.0.1:8000/sse`。
+
+`AmapMcpLocationResolutionService` 只调用 MCP 的 `maps_geo`，而不是把地图 MCP 的全量工具直接交给模型。它将返回的经纬度标准化为 `ResolvedLocationCandidate`；`ConversationSlots` 暂存候选，聊天接口返回“使用该地点作为搜索位置”的确认操作。用户确认后，候选才进入带来源标识 `AMAP_MCP` 的位置槽位并恢复原决策；解析失败或未确认则保持 `CLARIFYING`，仍可选择浏览器定位或全城搜索。日志覆盖 `MCP_GEO_SUCCESS`、`MCP_GEO_FAILURE`、候选保存和确认事件。
 
 ## 2026-08-16：可复现运行与跨机器索引策略
 

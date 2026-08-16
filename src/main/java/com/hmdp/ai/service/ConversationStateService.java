@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.ConversationSlots;
+import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.mapper.AiChatSessionMapper;
 import com.hmdp.utils.UserHolder;
@@ -14,6 +15,8 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
 
 @Service
 public class ConversationStateService {
@@ -79,6 +82,34 @@ public class ConversationStateService {
         updateSlots(state, slots);
         log.info("[AI][state] event=SLOT_UPDATED chatId={} slot=location status=AVAILABLE source={} latitude={} longitude={} expiresAt={}",
                 state.getChatId(), location.getSource(), location.getLatitude(), location.getLongitude(), location.getExpiresAt());
+    }
+
+    public void rememberLocationCandidates(AiChatSession state, List<ResolvedLocationCandidate> candidates) {
+        ConversationSlots slots = slots(state);
+        slots.setPendingLocationCandidates(candidates == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(candidates));
+        updateSlots(state, slots);
+        log.info("[AI][state] event=LOCATION_CANDIDATES_SAVED chatId={} candidates={}", state.getChatId(),
+                slots.getPendingLocationCandidates().size());
+    }
+
+    public ResolvedLocationCandidate acceptPendingLocation(AiChatSession state, int index) {
+        ConversationSlots slots = slots(state);
+        List<ResolvedLocationCandidate> candidates = slots.getPendingLocationCandidates();
+        if (candidates == null || index < 0 || index >= candidates.size()) {
+            throw new IllegalArgumentException("地点候选已失效，请重新输入地点名称");
+        }
+        ResolvedLocationCandidate candidate = candidates.get(index);
+        ChatLocationInput input = new ChatLocationInput();
+        input.setLatitude(candidate.getLatitude());
+        input.setLongitude(candidate.getLongitude());
+        input.setSource(candidate.getSource());
+        acceptLocation(state, input);
+        slots = slots(state);
+        slots.setPendingLocationCandidates(new java.util.ArrayList<>());
+        updateSlots(state, slots);
+        log.info("[AI][state] event=LOCATION_CANDIDATE_CONFIRMED chatId={} index={} label={} latitude={} longitude={}",
+                state.getChatId(), index, candidate.getLabel(), candidate.getLatitude(), candidate.getLongitude());
+        return candidate;
     }
 
     public void declineLocation(AiChatSession state) {

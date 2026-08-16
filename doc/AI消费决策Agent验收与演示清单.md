@@ -11,23 +11,21 @@
 
 ## 1. 推荐主流程
 
-### 1.1 地点名演示
+### 1.1 默认定位澄清
 
 `POST {{baseUrl}}/ai/decisions`
 
 ```json
 {
-  "query": "帮我找武林广场附近安静的日料"
+  "query": "帮我找安静的日料"
 }
 ```
 
 预期：
 
-- `status` 为 `COMPLETED`。
-- `constraints.softPreferences` 中有“演示地点“武林广场”已转换为坐标”。
-- `recommendations` 按 `score` 从高到低排列，最多返回请求指定数量，默认最多 3 家。
-- `answer` 中明确说明地点坐标和距离只用于演示；不要把 `0.0km` 解释成真实地图距离。
-- `metrics.factualConsistent=true`，每家推荐有 `evidence`。
+- `status` 为 `CLARIFYING`。
+- `question` 请求提供当前定位；`options` 包含 `PROVIDE_LOCATION`、`DECLINE_LOCATION` 和 `END_DECISION`。
+- 当前未接入地理编码工具时，输入“鼓楼”“福州鼓楼”等地点名称也不会被硬编码为坐标。
 
 ### 1.2 缺定位后拒绝定位
 

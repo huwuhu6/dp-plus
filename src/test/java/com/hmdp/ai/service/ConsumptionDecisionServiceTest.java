@@ -36,6 +36,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -184,7 +185,7 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
-    void ambiguousPlaceDoesNotResolveToDemoCoordinates() {
+    void namedPlaceDoesNotResolveToHardcodedCoordinates() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setCuisine("火锅");
         when(constraintExtractor.extract("帮我看看鼓楼的火锅")).thenReturn(constraints);
@@ -194,22 +195,22 @@ class ConsumptionDecisionServiceTest {
         DecisionResponse response = service.decide(request);
 
         assertEquals("CLARIFYING", response.getStatus());
-        assertTrue(response.getQuestion().contains("鼓楼"));
-        assertEquals(2, response.getOptions().size());
+        assertTrue(response.getQuestion().contains("地理编码服务"));
+        assertEquals(3, response.getOptions().size());
         verify(shopMapper, never()).selectList(any());
     }
 
     @Test
-    void explicitCityAndAreaUsesNamedPlaceCoordinates() {
+    void explicitCityAndAreaIsNotMappedWithoutGeocodingService() {
         DecisionRequest request = new DecisionRequest();
         request.setQuery("帮我看看福州鼓楼的火锅");
         DecisionConstraints constraints = new DecisionConstraints();
 
         ReflectionTestUtils.invokeMethod(service, "reconcileRequestFacts", constraints, request);
 
-        assertEquals(26.0871D, request.getLatitude());
-        assertEquals(119.2998D, request.getLongitude());
-        assertTrue(request.getUseLocationScope());
+        assertNull(request.getLatitude());
+        assertNull(request.getLongitude());
+        assertFalse(request.getUseLocationScope());
     }
 
     @Test

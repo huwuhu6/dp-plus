@@ -27,6 +27,18 @@ spring:
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
   ai:
+    mcp:
+      client:
+        enabled: ${AI_LOCATION_MCP_ENABLED:false}
+        type: SYNC
+        request-timeout: ${AI_LOCATION_MCP_TIMEOUT:6s}
+        toolcallback:
+          enabled: false
+        sse:
+          connections:
+            amap:
+              url: ${AI_LOCATION_MCP_URL:http://127.0.0.1:8000}
+              sse-endpoint: /sse
     vectorstore:
       # Keep the vector store disabled unless the local Milvus container and embedding credentials are configured.
       type: ${AI_VECTOR_STORE_TYPE:none}
@@ -51,6 +63,9 @@ logging:
   level:
     com.hmdp: info
 ai:
+  location:
+    mcp:
+      enabled: ${AI_LOCATION_MCP_ENABLED:false}
   provider: ${AI_PROVIDER}
   base-url: ${AI_BASE_URL}
   api-key: ${DEEPSEEK_API_KEY}

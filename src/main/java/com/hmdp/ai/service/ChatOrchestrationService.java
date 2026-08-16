@@ -11,6 +11,7 @@ import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.ConversationLocationSlot;
+import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
@@ -32,6 +33,7 @@ public class ChatOrchestrationService {
     @Resource private AgentConversationService conversationService;
     @Resource private ChatMemoryService chatMemoryService;
     @Resource private ConversationStateService conversationStateService;
+    @Resource private AmapMcpLocationResolutionService locationResolutionService;
     @Resource private ObjectMapper objectMapper;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
@@ -57,13 +59,9 @@ public class ChatOrchestrationService {
             eventResponse.setUsedModel(false);
             return handleDecisionEvent(chatId, message, request, state, activeSessionId, eventResponse);
         }
-        if (activeDecision != null && "CLARIFYING".equals(activeDecision.getStatus())
-                && decisionService.isAwaitingPlaceDisambiguation(activeSessionId)) {
-            ChatMessageResponse eventResponse = new ChatMessageResponse();
-            eventResponse.setChatId(chatId);
-            eventResponse.setRoute("DECISION_EVENT");
-            eventResponse.setUsedModel(false);
-            return handleDecisionEvent(chatId, message, request, state, activeSessionId, eventResponse);
+        if (isLocationClarification(activeDecision) && isPotentialNamedLocation(message)) {
+            ChatMessageResponse locationResponse = resolveNamedLocation(chatId, message, state, activeSessionId, activeDecision);
+            if (locationResponse != null) return locationResponse;
         }
         if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null && isRestaurantSearch(message)) {
             DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
@@ -223,6 +221,58 @@ public class ChatOrchestrationService {
                 || "WAITING_RELAXATION".equals(decision.getStatus()));
     }
 
+    private boolean isLocationClarification(DecisionResponse decision) {
+        return decision != null && "CLARIFYING".equals(decision.getStatus());
+    }
+
+    private boolean isPotentialNamedLocation(String message) {
+        if (!locationResolutionService.isAvailable()) return false;
+        if (message.length() > 40 || message.contains("?") || message.contains("？")) return false;
+        return !message.contains("算了") && !message.contains("结束") && !message.contains("不找了");
+    }
+
+    private ChatMessageResponse resolveNamedLocation(String chatId, String message, AiChatSession state,
+                                                     Long activeSessionId, DecisionResponse activeDecision) {
+        List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(message);
+        if (candidates.isEmpty()) {
+            log.info("[AI][chat] event=LOCATION_RESOLUTION_EMPTY chatId={} sessionId={} query={}",
+                    chatId, activeSessionId, compact(message));
+            return null;
+        }
+        conversationStateService.rememberLocationCandidates(state, candidates);
+        DecisionResponse decision = activeDecision;
+        decision.setQuestion(buildLocationConfirmationQuestion(candidates));
+        decision.setAnswer(null);
+        decision.getOptions().clear();
+        for (int index = 0; index < candidates.size(); index++) {
+            decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("CONFIRM_RESOLVED_LOCATION_" + index,
+                    "使用“" + candidates.get(index).getLabel() + "”作为搜索位置"));
+        }
+        decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("PROVIDE_LOCATION", "改用当前位置坐标"));
+        decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("DECLINE_LOCATION", "不提供位置，按全城搜索"));
+        decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("END_DECISION", "结束本次推荐"));
+        ChatMessageResponse response = new ChatMessageResponse();
+        response.setChatId(chatId);
+        response.setRoute("LOCATION_RESOLUTION");
+        response.setUsedModel(false);
+        response.setDecision(decision);
+        response.setDecisionSessionId(activeSessionId);
+        response.setDecisionStatus(decision.getStatus());
+        response.setAnswer(decision.getQuestion());
+        log.info("[AI][chat] event=LOCATION_RESOLUTION_CANDIDATES chatId={} sessionId={} query={} candidates={}",
+                chatId, activeSessionId, compact(message), candidates.size());
+        recordTurn(chatId, message, response);
+        return response;
+    }
+
+    private String buildLocationConfirmationQuestion(List<ResolvedLocationCandidate> candidates) {
+        if (candidates.size() == 1) {
+            ResolvedLocationCandidate candidate = candidates.get(0);
+            return "已通过地图服务解析到“" + candidate.getLabel() + "”。确认使用该位置搜索附近餐饮商户吗？";
+        }
+        return "地图服务解析到多个可能地点，请选择要作为搜索中心的位置。";
+    }
+
     private boolean isRestaurantSearch(String message) {
         String[] keywords = {"吃", "餐厅", "餐馆", "饭店", "饭", "菜", "烧烤", "烤肉", "火锅", "日料", "料理", "小吃", "咖啡", "奶茶"};
         for (String keyword : keywords) {
@@ -270,6 +320,13 @@ public class ChatOrchestrationService {
                                                     AiChatSession state, Long activeSessionId,
                                                     ChatMessageResponse response) {
         String optionId = request.getSelectedOptionId();
+        if (optionId.startsWith("CONFIRM_RESOLVED_LOCATION_")) {
+            int index = Integer.parseInt(optionId.substring("CONFIRM_RESOLVED_LOCATION_".length()));
+            ResolvedLocationCandidate candidate = conversationStateService.acceptPendingLocation(state, index);
+            optionId = "PROVIDE_LOCATION";
+            log.info("[AI][chat] event=LOCATION_RESOLUTION_CONFIRMED chatId={} sessionId={} label={} latitude={} longitude={}",
+                    chatId, activeSessionId, candidate.getLabel(), candidate.getLatitude(), candidate.getLongitude());
+        }
         if ("DECLINE_LOCATION".equals(optionId)) conversationStateService.declineLocation(state);
         DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
         followUp.setSelectedOptionId(optionId);
