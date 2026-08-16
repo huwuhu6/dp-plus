@@ -8,6 +8,8 @@ import com.hmdp.ai.dto.ConversationEvaluationRunResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunComparisonResponse;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
+import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
+import com.hmdp.ai.dto.ConversationEvaluationDiagnosticsResponse;
 import com.hmdp.ai.entity.AiAgentToolCall;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseResultMapper;
@@ -19,6 +21,7 @@ import com.hmdp.dto.UserDTO;
 import com.hmdp.utils.UserHolder;
 
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -108,6 +111,37 @@ class AiConversationEvaluationServiceTest {
         }
     }
 
+    @Test
+    void returnsOnlyFailedConversationCasesAsDiagnostics() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
+        AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
+        ReflectionTestUtils.setField(service, "runMapper", runMapper);
+        ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
+        when(runMapper.selectById(1L)).thenReturn(run(1L, 100L, "conversation-v1", 2, 2, 1, 2, 2, 100L));
+        AiConversationEvaluationCaseResult passed = caseResult(1L, true, true);
+        AiConversationEvaluationCaseResult failed = caseResult(2L, true, false);
+        when(resultMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(passed, failed));
+        AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
+        evaluationCase.setId(2L);
+        evaluationCase.setCaseCode("TOOL_COVERAGE_MISS");
+        when(caseMapper.selectBatchIds(any())).thenReturn(List.of(evaluationCase));
+        UserDTO user = new UserDTO();
+        user.setId(100L);
+        UserHolder.saveUser(user);
+        try {
+            ConversationEvaluationDiagnosticsResponse response = service.getDiagnostics(1L);
+            assertEquals(1, response.getFailures().size());
+            assertEquals("TOOL_COVERAGE_MISS", response.getFailures().get(0).getCaseCode());
+            assertEquals(1, response.getFailureCounts().get("toolCoverage"));
+            assertEquals(0, response.getFailureCounts().get("route"));
+        } finally {
+            UserHolder.removeUser();
+        }
+    }
+
     private AiConversationEvaluationRun run(Long id, Long userId, String dataset, int caseCount,
                                             int routes, int tools, int locality, int finalStatus, long duration) {
         AiConversationEvaluationRun run = new AiConversationEvaluationRun();
@@ -131,5 +165,16 @@ class AiConversationEvaluationServiceTest {
         response.setDecisionSessionId(22L);
         response.setAnswer("ok");
         return response;
+    }
+
+    private AiConversationEvaluationCaseResult caseResult(Long caseId, boolean routeMatched, boolean toolMatched) {
+        AiConversationEvaluationCaseResult result = new AiConversationEvaluationCaseResult();
+        result.setCaseId(caseId);
+        result.setRouteMatched(routeMatched);
+        result.setToolMatched(toolMatched);
+        result.setLocalityMatched(true);
+        result.setFinalStatusMatched(true);
+        result.setShopMatched(true);
+        return result;
     }
 }

@@ -9,6 +9,7 @@ import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunComparisonResponse;
+import com.hmdp.ai.dto.ConversationEvaluationDiagnosticsResponse;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
@@ -126,6 +127,33 @@ public class AiConversationEvaluationService {
         return response;
     }
 
+    public ConversationEvaluationDiagnosticsResponse getDiagnostics(Long runId) {
+        AiConversationEvaluationRun run = runMapper.selectById(runId);
+        if (run == null) throw new IllegalArgumentException("对话评测运行记录不存在");
+        requireOwner(run);
+        List<AiConversationEvaluationCaseResult> results = resultMapper.selectList(new QueryWrapper<AiConversationEvaluationCaseResult>()
+                .eq("run_id", runId).orderByAsc("id"));
+        Map<Long, AiConversationEvaluationCase> casesById = caseMapper.selectBatchIds(results.stream()
+                        .map(AiConversationEvaluationCaseResult::getCaseId).distinct().collect(Collectors.toList()))
+                .stream().collect(Collectors.toMap(AiConversationEvaluationCase::getId, item -> item));
+        List<ConversationEvaluationDiagnosticsResponse.CaseDiagnostic> failures = results.stream()
+                .filter(this::hasFailure).map(result -> toDiagnostic(result, casesById.get(result.getCaseId())))
+                .collect(Collectors.toList());
+        Map<String, Integer> failureCounts = new LinkedHashMap<>();
+        failureCounts.put("route", (int) results.stream().filter(item -> !Boolean.TRUE.equals(item.getRouteMatched())).count());
+        failureCounts.put("toolCoverage", (int) results.stream().filter(item -> !Boolean.TRUE.equals(item.getToolMatched())).count());
+        failureCounts.put("toolArguments", (int) results.stream().filter(item -> Boolean.FALSE.equals(item.getToolArgumentsMatched())).count());
+        failureCounts.put("locality", (int) results.stream().filter(item -> !Boolean.TRUE.equals(item.getLocalityMatched())).count());
+        failureCounts.put("finalStatus", (int) results.stream().filter(item -> !Boolean.TRUE.equals(item.getFinalStatusMatched())).count());
+        failureCounts.put("shop", (int) results.stream().filter(item -> !Boolean.TRUE.equals(item.getShopMatched())).count());
+        failureCounts.put("execution", (int) results.stream().filter(item -> item.getErrorMessage() != null && !item.getErrorMessage().isEmpty()).count());
+        ConversationEvaluationDiagnosticsResponse response = new ConversationEvaluationDiagnosticsResponse();
+        response.setRun(run);
+        response.setFailureCounts(failureCounts);
+        response.setFailures(failures);
+        return response;
+    }
+
     private AiConversationEvaluationCaseResult evaluate(Long runId, AiConversationEvaluationCase evaluationCase) {
         AiConversationEvaluationCaseResult result = new AiConversationEvaluationCaseResult();
         result.setRunId(runId);
@@ -152,6 +180,7 @@ public class AiConversationEvaluationService {
                 routes.add(response.getRoute());
                 if (response.getDecisionSessionId() != null) decisionSessionIds.add(response.getDecisionSessionId());
                 if (response.getDecisionStatus() != null) finalStatus = response.getDecisionStatus();
+                if ("START_DECISION".equals(response.getRoute())) finalShopIds.clear();
                 if (response.getDecision() != null) {
                     finalStatus = response.getDecision().getStatus();
                     if (!response.getDecision().getRecommendations().isEmpty()) {
@@ -213,6 +242,45 @@ public class AiConversationEvaluationService {
 
     private boolean equalsExpected(String expected, String actual) {
         return expected == null || expected.trim().isEmpty() || expected.equals(actual);
+    }
+
+    private boolean hasFailure(AiConversationEvaluationCaseResult result) {
+        return !Boolean.TRUE.equals(result.getRouteMatched())
+                || !Boolean.TRUE.equals(result.getToolMatched())
+                || Boolean.FALSE.equals(result.getToolArgumentsMatched())
+                || !Boolean.TRUE.equals(result.getLocalityMatched())
+                || !Boolean.TRUE.equals(result.getFinalStatusMatched())
+                || !Boolean.TRUE.equals(result.getShopMatched())
+                || (result.getErrorMessage() != null && !result.getErrorMessage().isEmpty());
+    }
+
+    private ConversationEvaluationDiagnosticsResponse.CaseDiagnostic toDiagnostic(AiConversationEvaluationCaseResult result,
+                                                                                    AiConversationEvaluationCase evaluationCase) {
+        ConversationEvaluationDiagnosticsResponse.CaseDiagnostic diagnostic = new ConversationEvaluationDiagnosticsResponse.CaseDiagnostic();
+        diagnostic.setCaseId(result.getCaseId());
+        if (evaluationCase != null) {
+            diagnostic.setCaseCode(evaluationCase.getCaseCode());
+            diagnostic.setNotes(evaluationCase.getNotes());
+            diagnostic.setExpectedRoutesJson(evaluationCase.getExpectedRoutesJson());
+            diagnostic.setExpectedToolNamesJson(evaluationCase.getExpectedToolNamesJson());
+            diagnostic.setExpectedToolArgumentsJson(evaluationCase.getExpectedToolArgumentsJson());
+            diagnostic.setExpectedFinalStatus(evaluationCase.getExpectedFinalStatus());
+            diagnostic.setExpectedCity(evaluationCase.getExpectedCity());
+        }
+        diagnostic.setActualRoutesJson(result.getActualRoutesJson());
+        diagnostic.setActualToolNamesJson(result.getActualToolNamesJson());
+        diagnostic.setActualToolCallsJson(result.getActualToolCallsJson());
+        diagnostic.setActualFinalStatus(result.getActualFinalStatus());
+        diagnostic.setRecommendedShopIds(result.getRecommendedShopIds());
+        diagnostic.setRouteMatched(result.getRouteMatched());
+        diagnostic.setToolMatched(result.getToolMatched());
+        diagnostic.setToolArgumentsMatched(result.getToolArgumentsMatched());
+        diagnostic.setLocalityMatched(result.getLocalityMatched());
+        diagnostic.setFinalStatusMatched(result.getFinalStatusMatched());
+        diagnostic.setShopMatched(result.getShopMatched());
+        diagnostic.setDurationMs(result.getDurationMs());
+        diagnostic.setErrorMessage(result.getErrorMessage());
+        return diagnostic;
     }
 
     private boolean expectedShopsMatched(String expected, List<Long> actual) {

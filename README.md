@@ -162,6 +162,7 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8081/ai/retrieval/indexes/r
 | 运行多轮主评测集 | `POST /ai/evaluations/conversation-runs` |
 | 运行多轮保留集 | `POST /ai/evaluations/conversation-runs/holdout` |
 | 对比两次多轮评测 | `GET /ai/evaluations/conversation-runs/{runId}/compare/{baselineRunId}` |
+| 查看多轮失败诊断 | `GET /ai/evaluations/conversation-runs/{runId}/diagnostics` |
 
 `/ai/retrieval/indexes/rebuild` 当前为本地调试便利开放；部署前应增加认证和管理员权限校验。
 
