@@ -13,6 +13,7 @@ import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionTraceItem;
+import com.hmdp.ai.dto.SemanticRecallResult;
 import com.hmdp.ai.entity.AiDecisionSession;
 import com.hmdp.ai.entity.AiDecisionStep;
 import com.hmdp.ai.entity.AiDecisionMetric;
@@ -29,10 +30,12 @@ import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.utils.UserHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -61,6 +64,8 @@ public class ConsumptionDecisionService {
     @Resource private AiDecisionStepMapper stepMapper;
     @Resource private AiDecisionMetricMapper metricMapper;
     @Resource private AiDecisionMessageMapper messageMapper;
+    @Autowired(required = false) private SemanticShopRetriever semanticShopRetriever;
+    @Value("${ai.retrieval.semantic-weight:18}") private double semanticWeight;
 
     public DecisionResponse decide(DecisionRequest request) {
         if (request == null || request.getQuery() == null || request.getQuery().trim().isEmpty()) {
@@ -193,6 +198,9 @@ public class ConsumptionDecisionService {
 
             List<DecisionRecommendation> candidates = retrieveAndRank(request, constraints, response, metrics);
             response.setRecommendations(candidates);
+            if (Boolean.TRUE.equals(metrics.getSemanticRetrievalUsed())) {
+                recordCompletedStep(response, session.getId(), "SEMANTIC_RETRIEVING", "在硬约束候选范围内完成语义证据召回", metrics.getSemanticRetrievingDurationMs());
+            }
             recordCompletedStep(response, session.getId(), "RETRIEVING", "从结构化数据和证据中召回候选", metrics.getRetrievingDurationMs());
             recordCompletedStep(response, session.getId(), "RERANKING", "在 " + candidates.size() + " 家候选中完成确定性重排", metrics.getRerankingDurationMs());
             if (candidates.isEmpty()) {
@@ -522,11 +530,24 @@ public class ConsumptionDecisionService {
         Map<Long, List<AiReviewDocument>> reviewsByShopId = loadReviewsByShopId(shopIds);
         metrics.setRetrievingDurationMs(System.currentTimeMillis() - retrievingStart);
 
+        SemanticRecallResult semanticResult = SemanticRecallResult.unavailable();
+        if (semanticShopRetriever != null) {
+            semanticResult = semanticShopRetriever.recall(request.getQuery(), hardMatched, profileByShopId, reviewsByShopId);
+            metrics.setSemanticRetrievalUsed(semanticResult.isAvailable());
+            metrics.setSemanticRetrievingDurationMs(semanticResult.getDurationMs());
+        }
+
         long rerankingStart = System.currentTimeMillis();
         List<DecisionRecommendation> recommendations = new ArrayList<>();
         for (Shop shop : hardMatched) {
             DecisionRecommendation item = toRecommendation(shop, profileByShopId.get(shop.getId()),
                     reviewsByShopId.get(shop.getId()), request, constraints);
+            Double semanticScore = semanticResult.getShopScores().get(shop.getId());
+            if (semanticScore != null) {
+                item.setSemanticScore(round(semanticScore));
+                item.setScore(round(Math.min(100D, item.getScore() + semanticScore * semanticWeight)));
+                item.getMatchedReasons().add("语义证据与本轮需求相关");
+            }
             recommendations.add(item);
         }
         recommendations.sort(Comparator.comparing(DecisionRecommendation::getScore).reversed());
@@ -707,8 +728,8 @@ public class ConsumptionDecisionService {
     private void persistMetrics(Long sessionId, DecisionMetrics metrics) {
         AiDecisionMetric metric = new AiDecisionMetric();
         metric.setSessionId(sessionId);
-        Integer previousAttempts = metricMapper.selectCount(new QueryWrapper<AiDecisionMetric>().eq("session_id", sessionId));
-        metric.setAttemptNo(previousAttempts + 1);
+        Long previousAttempts = metricMapper.selectCount(new QueryWrapper<AiDecisionMetric>().eq("session_id", sessionId));
+        metric.setAttemptNo(Math.toIntExact(previousAttempts + 1));
         metric.setTotalDurationMs(metrics.getTotalDurationMs());
         metric.setExtractingDurationMs(metrics.getExtractingDurationMs());
         metric.setRetrievingDurationMs(metrics.getRetrievingDurationMs());

@@ -26,6 +26,25 @@ spring:
         time-between-eviction-runs: 10s
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
+  ai:
+    vectorstore:
+      # Keep the vector store disabled unless the local Milvus container and embedding credentials are configured.
+      type: ${AI_VECTOR_STORE_TYPE:none}
+      milvus:
+        collection-name: ${AI_MILVUS_COLLECTION:hmdp_shop_evidence}
+        embedding-dimension: ${AI_EMBEDDING_DIMENSION:1536}
+        initialize-schema: ${AI_MILVUS_INITIALIZE_SCHEMA:true}
+        auto-id: false
+        client:
+          host: ${AI_MILVUS_HOST:127.0.0.1}
+          port: ${AI_MILVUS_PORT:19530}
+          connect-timeout-ms: ${AI_MILVUS_CONNECT_TIMEOUT_MS:3000}
+    openai:
+      base-url: ${AI_EMBEDDING_BASE_URL:${ai.base-url}}
+      api-key: ${AI_EMBEDDING_API_KEY:${ai.api-key}}
+      embedding:
+        options:
+          model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:
@@ -40,6 +59,10 @@ ai:
   tool-planning-timeout-ms: ${AI_TOOL_PLANNING_TIMEOUT_MS:8000}
   answer-polish-timeout-ms: ${AI_ANSWER_POLISH_TIMEOUT_MS:8000}
   narrative-enabled: ${AI_NARRATIVE_ENABLED:true}
+  retrieval:
+    vector-enabled: ${AI_RETRIEVAL_VECTOR_ENABLED:false}
+    semantic-weight: ${AI_RETRIEVAL_SEMANTIC_WEIGHT:18}
+    semantic-top-k: ${AI_RETRIEVAL_SEMANTIC_TOP_K:80}
   retrieval-strategy-version: structured-profile-evidence-v2
   evaluation-dataset-version: seed-v2
   holdout-dataset-version: holdout-v1

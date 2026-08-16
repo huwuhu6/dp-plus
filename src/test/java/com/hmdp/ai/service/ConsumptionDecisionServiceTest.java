@@ -11,6 +11,8 @@ import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.entity.AiDecisionSession;
+import com.hmdp.ai.entity.AiDecisionMessage;
+import com.hmdp.ai.entity.AiDecisionMetric;
 import com.hmdp.ai.entity.AiReviewDocument;
 import com.hmdp.ai.entity.AiShopProfile;
 import com.hmdp.ai.mapper.AiDecisionMessageMapper;
@@ -84,7 +86,7 @@ class ConsumptionDecisionServiceTest {
             session.setId(100L);
             return 1;
         }).when(sessionMapper).insert(any(AiDecisionSession.class));
-        when(metricMapper.selectCount(any(QueryWrapper.class))).thenReturn(0, 1);
+        when(metricMapper.selectCount(any(QueryWrapper.class))).thenReturn(0L, 1L);
         when(sessionMapper.update(any(AiDecisionSession.class), any(UpdateWrapper.class))).thenReturn(1);
     }
 
@@ -163,7 +165,7 @@ class ConsumptionDecisionServiceTest {
         assertEquals("PROVIDE_LOCATION", response.getOptions().get(0).getId());
         assertEquals(0, response.getMetrics().getModelCallCount());
         verify(shopMapper, never()).selectList(any());
-        verify(metricMapper).insert(any());
+        verify(metricMapper).insert(any(AiDecisionMetric.class));
     }
 
     @Test
@@ -279,7 +281,7 @@ class ConsumptionDecisionServiceTest {
         assertTrue(completed.getAnswer().contains("测试餐厅"));
         assertEquals(1, completed.getMetrics().getRelaxationCount());
         verify(constraintExtractor).extract("想吃不存在菜系");
-        verify(metricMapper, org.mockito.Mockito.times(2)).insert(any());
+        verify(metricMapper, org.mockito.Mockito.times(2)).insert(any(AiDecisionMetric.class));
     }
 
     @Test
@@ -342,7 +344,7 @@ class ConsumptionDecisionServiceTest {
         assertTrue(error.getMessage().contains("已被其他续聊请求处理"));
         verify(shopMapper, never()).selectList(any());
         verify(constraintExtractor).extract("找附近的火锅");
-        verify(messageMapper, org.mockito.Mockito.times(2)).insert(any());
+        verify(messageMapper, org.mockito.Mockito.times(2)).insert(any(AiDecisionMessage.class));
     }
 
     @Test
@@ -413,7 +415,7 @@ class ConsumptionDecisionServiceTest {
         assertEquals("已结束本次推荐。需要新的消费建议时，请发起新的请求。", cancelled.getAnswer());
         assertEquals("CANCELLED", sessionCaptor.getValue().getStatus());
         verify(shopMapper, times(1)).selectList(any());
-        verify(messageMapper, times(4)).insert(any());
+        verify(messageMapper, times(4)).insert(any(AiDecisionMessage.class));
     }
 
     @Test

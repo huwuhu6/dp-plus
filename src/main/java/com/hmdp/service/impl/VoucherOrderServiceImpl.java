@@ -21,7 +21,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import java.time.LocalDateTime;
 
 /**
@@ -89,7 +89,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         //5一人一单逻辑
         //5.1获取订单
         UserDTO user = UserHolder.getUser();
-        int count=query().eq("user_id",1010L).eq("voucher_id",voucherId).count();
+        long count=query().eq("user_id",1010L).eq("voucher_id",voucherId).count();
         //5.2判断是否已经下单过
         if(count>0){
             return Result.fail("用户已经购买过");

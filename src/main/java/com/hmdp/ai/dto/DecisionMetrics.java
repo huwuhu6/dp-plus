@@ -8,6 +8,7 @@ public class DecisionMetrics {
     private Long extractingDurationMs;
     private Long retrievingDurationMs;
     private Long rerankingDurationMs;
+    private Long semanticRetrievingDurationMs;
     private Long answeringDurationMs;
     private Integer modelCallCount = 0;
     private Integer modelSuccessCount = 0;
@@ -20,4 +21,5 @@ public class DecisionMetrics {
     private Double evidenceCoverageRate = 0D;
     private Boolean factualConsistent = true;
     private Boolean narrativeRejected = false;
+    private Boolean semanticRetrievalUsed = false;
 }

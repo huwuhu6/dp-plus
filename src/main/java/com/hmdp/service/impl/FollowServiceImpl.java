@@ -15,7 +15,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -42,7 +42,7 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
     public Result isFollow(Long id) {
         //1.获取当前用户
         Long userId= UserHolder.getUser().getId();
-        Integer count=query().eq("user_id",userId).eq("follow_user_id",id).count();
+        Long count=query().eq("user_id",userId).eq("follow_user_id",id).count();
         return Result.ok(count>0);
     }
 

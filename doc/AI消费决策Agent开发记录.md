@@ -1,5 +1,39 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-08-16：JDK 21、Spring Boot 3 与混合检索底座
+
+### 改造
+
+项目运行时升级为 JDK 21、Spring Boot 3.4 和 Jakarta API；MyBatis-Plus 切换到 Boot 3 Starter，并同步修正新版 `count()` 返回 `Long` 与 `insert` 重载带来的测试兼容点。
+
+新增 Spring AI OpenAI Embedding 与 Milvus VectorStore 依赖，但保留既有 OpenAI-Compatible 聊天客户端和工具编排。聊天、Function Call 与决策状态机不因向量库改造而重写。
+
+### 检索架构
+
+检索采用“硬约束过滤 -> 语义召回 -> 业务重排”的混合策略：
+
+- MySQL 仍是商户、坐标、预算、营业时间、菜系和证据的事实源；先完成位置半径、预算、菜系等硬过滤。
+- Milvus 存储由 `ai_shop_profile` 和 `ai_review_document` 构成的商户画像/评价证据文档，使用稳定文档 ID，支持重复重建。
+- 向量检索结果只在 MySQL 本轮硬约束候选白名单中聚合得分，绝不直接作为可推荐商户。因此语义相似不能绕过城市、距离和餐饮品类约束。
+- 向量服务不可用、索引为空或 Embedding 请求失败时，语义层记录 `RECALL_FALLBACK` 并降级为既有结构化检索，不影响主推荐链路。
+
+### 本地运行
+
+新增 `docker-compose.milvus.yml`。默认 `AI_RETRIEVAL_VECTOR_ENABLED=false` 且 `AI_VECTOR_STORE_TYPE=none`，不会连接 Milvus。启动 Docker 后，需要配置一个兼容 OpenAI Embeddings API 的独立 Embedding 服务：`AI_EMBEDDING_BASE_URL`、`AI_EMBEDDING_API_KEY`、`AI_EMBEDDING_MODEL` 和对应的 `AI_EMBEDDING_DIMENSION`。
+
+开启时设置：
+
+```text
+AI_VECTOR_STORE_TYPE=milvus
+AI_RETRIEVAL_VECTOR_ENABLED=true
+```
+
+然后调用 `POST /ai/retrieval/indexes/rebuild` 建立向量索引。推荐响应的 trace 会增加 `SEMANTIC_RETRIEVING`，后端日志会输出 `RECALL`、候选白名单规模、向量文档数量、命中商户数与耗时。
+
+### 验证
+
+`mvn -q test` 已通过；`docker compose -f docker-compose.milvus.yml config` 已通过。当前 Docker CLI 已安装，但 Docker daemon 未启动，尚未在本机拉起 Milvus 容器并进行端到端索引验证。
+
 本文记录 AI 消费决策 Agent 开发中会影响架构、正确性、兼容性或演示可信度的问题。普通环境配置、一次性命令问题和明显的小错误不记录。
 
 ## 2026-08-14：现有数据不具备直接做评论 RAG 的条件

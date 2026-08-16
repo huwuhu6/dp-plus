@@ -12,6 +12,7 @@ public class DecisionRecommendation {
     private Long avgPrice;
     private Double distanceKm;
     private Double score;
+    private Double semanticScore;
     private String address;
     private String openHours;
     private List<String> matchedReasons = new ArrayList<>();
