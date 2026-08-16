@@ -20,6 +20,8 @@ public class AiDecisionMetric {
     private Integer modelCallCount;
     private Integer modelSuccessCount;
     private Integer modelFailureCount;
+    private Integer promptTokenCount;
+    private Integer completionTokenCount;
     private Integer initialCandidateCount;
     private Integer hardMatchedCandidateCount;
     private Integer finalCandidateCount;

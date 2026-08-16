@@ -151,6 +151,8 @@ public class AiEvaluationService {
                 - rate(baseline.getModelSuccessCount(), baseline.getModelCallCount())));
         deltas.put("modelFailureRate", round(rate(current.getModelFailureCount(), current.getModelCallCount())
                 - rate(baseline.getModelFailureCount(), baseline.getModelCallCount())));
+        deltas.put("promptTokenCount", round(value(current.getPromptTokenCount()) - value(baseline.getPromptTokenCount())));
+        deltas.put("completionTokenCount", round(value(current.getCompletionTokenCount()) - value(baseline.getCompletionTokenCount())));
         deltas.put("avgTotalDurationMs", round(value(current.getAvgTotalDurationMs())
                 - value(baseline.getAvgTotalDurationMs())));
         deltas.put("p95TotalDurationMs", round(value(current.getP95TotalDurationMs())
@@ -226,6 +228,8 @@ public class AiEvaluationService {
             result.setModelCallCount(metrics.getModelCallCount());
             result.setModelSuccessCount(metrics.getModelSuccessCount());
             result.setModelFailureCount(metrics.getModelFailureCount());
+            result.setPromptTokenCount(metrics.getPromptTokenCount());
+            result.setCompletionTokenCount(metrics.getCompletionTokenCount());
             result.setTotalDurationMs(metrics.getTotalDurationMs());
             result.setExtractingDurationMs(metrics.getExtractingDurationMs());
         } catch (Exception e) {
@@ -238,6 +242,8 @@ public class AiEvaluationService {
             result.setModelCallCount(0);
             result.setModelSuccessCount(0);
             result.setModelFailureCount(0);
+            result.setPromptTokenCount(0);
+            result.setCompletionTokenCount(0);
             result.setErrorMessage(trim(e.getMessage()));
         }
         return result;
@@ -270,6 +276,8 @@ public class AiEvaluationService {
         merged.setModelCallCount(intValue(initial.getModelCallCount()) + intValue(followUp.getModelCallCount()));
         merged.setModelSuccessCount(intValue(initial.getModelSuccessCount()) + intValue(followUp.getModelSuccessCount()));
         merged.setModelFailureCount(intValue(initial.getModelFailureCount()) + intValue(followUp.getModelFailureCount()));
+        merged.setPromptTokenCount(intValue(initial.getPromptTokenCount()) + intValue(followUp.getPromptTokenCount()));
+        merged.setCompletionTokenCount(intValue(initial.getCompletionTokenCount()) + intValue(followUp.getCompletionTokenCount()));
         merged.setTotalDurationMs(longValue(initial.getTotalDurationMs()) + longValue(followUp.getTotalDurationMs()));
         merged.setExtractingDurationMs(longValue(initial.getExtractingDurationMs()) + longValue(followUp.getExtractingDurationMs()));
         return merged;
@@ -348,6 +356,8 @@ public class AiEvaluationService {
         run.setModelCallCount(sum(results.stream().map(AiEvaluationCaseResult::getModelCallCount).collect(Collectors.toList())));
         run.setModelSuccessCount(sum(results.stream().map(AiEvaluationCaseResult::getModelSuccessCount).collect(Collectors.toList())));
         run.setModelFailureCount(sum(results.stream().map(AiEvaluationCaseResult::getModelFailureCount).collect(Collectors.toList())));
+        run.setPromptTokenCount(sum(results.stream().map(AiEvaluationCaseResult::getPromptTokenCount).collect(Collectors.toList())));
+        run.setCompletionTokenCount(sum(results.stream().map(AiEvaluationCaseResult::getCompletionTokenCount).collect(Collectors.toList())));
         List<Long> totalDurations = results.stream().map(AiEvaluationCaseResult::getTotalDurationMs)
                 .filter(value -> value != null).collect(Collectors.toList());
         List<Long> extractingDurations = results.stream().map(AiEvaluationCaseResult::getExtractingDurationMs)

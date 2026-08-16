@@ -29,6 +29,8 @@ public class AiEvaluationCaseResult {
     private Integer modelCallCount;
     private Integer modelSuccessCount;
     private Integer modelFailureCount;
+    private Integer promptTokenCount;
+    private Integer completionTokenCount;
     private Long totalDurationMs;
     private Long extractingDurationMs;
     private String errorMessage;

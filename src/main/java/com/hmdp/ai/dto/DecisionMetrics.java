@@ -13,6 +13,8 @@ public class DecisionMetrics {
     private Integer modelCallCount = 0;
     private Integer modelSuccessCount = 0;
     private Integer modelFailureCount = 0;
+    private Integer promptTokenCount = 0;
+    private Integer completionTokenCount = 0;
     private Integer initialCandidateCount = 0;
     private Integer hardMatchedCandidateCount = 0;
     private Integer finalCandidateCount = 0;

@@ -7,9 +7,11 @@ import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunResponse;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
+import com.hmdp.ai.entity.AiAgentToolCall;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseResultMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationRunMapper;
+import com.hmdp.ai.mapper.AiAgentToolCallMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -29,10 +31,12 @@ class AiConversationEvaluationServiceTest {
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
+        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
         ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
         ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
+        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
 
@@ -42,15 +46,20 @@ class AiConversationEvaluationServiceTest {
         evaluationCase.setTurnsJson("[{\"message\":\"找日料\"},{\"message\":\"这家评价如何\"}]");
         evaluationCase.setExpectedRoutesJson("[\"START_DECISION\",\"BUSINESS_FOLLOW_UP\"]");
         evaluationCase.setExpectedFinalStatus("COMPLETED");
+        evaluationCase.setExpectedToolNamesJson("[\"search_shop_evidence\"]");
         when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(12L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
         when(chatService.chat(any())).thenReturn(response("START_DECISION", "COMPLETED"), response("BUSINESS_FOLLOW_UP", "COMPLETED"));
+        AiAgentToolCall toolCall = new AiAgentToolCall();
+        toolCall.setToolName("search_shop_evidence");
+        when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(toolCall));
 
         ConversationEvaluationRunResponse response = service.runActiveCases();
 
         assertEquals("COMPLETED", response.getRun().getStatus());
         assertEquals(1, response.getRun().getRouteMatchedCount());
+        assertEquals(1, response.getRun().getToolMatchedCount());
         assertEquals(1, response.getRun().getFinalStatusMatchedCount());
         assertEquals(1, response.getRun().getCompletedCount());
         assertEquals(true, response.getCaseResults().get(0).getRouteMatched());
@@ -60,6 +69,7 @@ class AiConversationEvaluationServiceTest {
         ChatMessageResponse response = new ChatMessageResponse();
         response.setRoute(route);
         response.setDecisionStatus(status);
+        response.setDecisionSessionId(22L);
         response.setAnswer("ok");
         return response;
     }

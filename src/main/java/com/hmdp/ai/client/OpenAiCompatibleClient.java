@@ -70,7 +70,10 @@ public class OpenAiCompatibleClient {
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
                 throw new IllegalStateException("模型服务未返回有效响应");
             }
-            modelCallTracker.recordSuccess();
+            modelCallTracker.recordSuccess(response.getBody().path("usage").path("prompt_tokens").isNumber()
+                            ? response.getBody().path("usage").path("prompt_tokens").asInt() : null,
+                    response.getBody().path("usage").path("completion_tokens").isNumber()
+                            ? response.getBody().path("usage").path("completion_tokens").asInt() : null);
             log.info("[AI][model] action={} model={} event=SUCCESS durationMs={} toolCalls={}", action,
                     aiProperties.getModel(), System.currentTimeMillis() - startedAt,
                     compact(response.getBody().path("choices").path(0).path("message").path("tool_calls").toString()));

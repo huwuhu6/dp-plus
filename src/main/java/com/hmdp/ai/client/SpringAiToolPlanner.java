@@ -10,6 +10,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -44,7 +45,7 @@ public class SpringAiToolPlanner {
                     .call()
                     .chatResponse();
             if (response == null || !response.hasToolCalls()) {
-                modelCallTracker.recordSuccess();
+                modelCallTracker.recordSuccess(promptTokens(response), completionTokens(response));
                 log.info("[AI][spring-ai] action={} event=NO_TOOL_CALL durationMs={}", action,
                         System.currentTimeMillis() - startedAt);
                 return ToolPlan.empty();
@@ -52,7 +53,7 @@ public class SpringAiToolPlanner {
             List<AssistantMessage.ToolCall> calls = response.getResult().getOutput().getToolCalls();
             if (calls == null || calls.isEmpty()) return ToolPlan.empty();
             AssistantMessage.ToolCall call = calls.get(0);
-            modelCallTracker.recordSuccess();
+            modelCallTracker.recordSuccess(promptTokens(response), completionTokens(response));
             log.info("[AI][spring-ai] action={} event=TOOL_PLAN durationMs={} tool={}", action,
                     System.currentTimeMillis() - startedAt, call.name());
             return new ToolPlan(call.name(), call.arguments());
@@ -90,5 +91,15 @@ public class SpringAiToolPlanner {
         public boolean isEmpty() { return name == null || name.isBlank(); }
         public String getName() { return name; }
         public String getArguments() { return arguments == null || arguments.isBlank() ? "{}" : arguments; }
+    }
+
+    private Integer promptTokens(ChatResponse response) {
+        Usage usage = response == null || response.getMetadata() == null ? null : response.getMetadata().getUsage();
+        return usage == null ? null : usage.getPromptTokens();
+    }
+
+    private Integer completionTokens(ChatResponse response) {
+        Usage usage = response == null || response.getMetadata() == null ? null : response.getMetadata().getUsage();
+        return usage == null ? null : usage.getCompletionTokens();
     }
 }

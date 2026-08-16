@@ -12,9 +12,13 @@ import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
+import com.hmdp.ai.entity.AiAgentToolCall;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseResultMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationRunMapper;
+import com.hmdp.ai.mapper.AiAgentToolCallMapper;
+import com.hmdp.entity.Shop;
+import com.hmdp.mapper.ShopMapper;
 import com.hmdp.utils.UserHolder;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +29,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 
 /** Executes scripted user turns through the same chat entry point used by the web console. */
@@ -34,6 +40,8 @@ public class AiConversationEvaluationService {
     @Resource private AiConversationEvaluationCaseMapper caseMapper;
     @Resource private AiConversationEvaluationRunMapper runMapper;
     @Resource private AiConversationEvaluationCaseResultMapper resultMapper;
+    @Resource private AiAgentToolCallMapper toolCallMapper;
+    @Resource private ShopMapper shopMapper;
     @Resource private ObjectMapper objectMapper;
     @Resource private AiProperties aiProperties;
 
@@ -88,6 +96,7 @@ public class AiConversationEvaluationService {
             List<Map<String, Object>> turns = objectMapper.readValue(evaluationCase.getTurnsJson(), new TypeReference<List<Map<String, Object>>>() { });
             List<String> routes = new ArrayList<>();
             List<Long> shopIds = new ArrayList<>();
+            Set<Long> decisionSessionIds = new HashSet<>();
             List<Map<String, Object>> outputs = new ArrayList<>();
             String finalStatus = null;
             for (Map<String, Object> turn : turns) {
@@ -97,6 +106,7 @@ public class AiConversationEvaluationService {
                 applyLocation(turn.get("location"), request);
                 ChatMessageResponse response = chatOrchestrationService.chat(request);
                 routes.add(response.getRoute());
+                if (response.getDecisionSessionId() != null) decisionSessionIds.add(response.getDecisionSessionId());
                 if (response.getDecisionStatus() != null) finalStatus = response.getDecisionStatus();
                 if (response.getDecision() != null) {
                     finalStatus = response.getDecision().getStatus();
@@ -113,11 +123,17 @@ public class AiConversationEvaluationService {
             result.setActualFinalStatus(finalStatus);
             result.setRecommendedShopIds(shopIds.stream().distinct().map(String::valueOf).collect(Collectors.joining(",")));
             result.setRouteMatched(expectedRoutes.equals(routes));
+            List<String> actualTools = toolNames(decisionSessionIds);
+            result.setActualToolNamesJson(objectMapper.writeValueAsString(actualTools));
+            result.setToolMatched(expectedSequenceMatches(evaluationCase.getExpectedToolNamesJson(), actualTools));
+            result.setLocalityMatched(matchesExpectedCity(evaluationCase.getExpectedCity(), shopIds));
             result.setFinalStatusMatched(equalsExpected(evaluationCase.getExpectedFinalStatus(), finalStatus));
             result.setShopMatched(expectedShopsMatched(evaluationCase.getExpectedShopIds(), shopIds));
             result.setTurnOutputsJson(objectMapper.writeValueAsString(outputs));
         } catch (Exception e) {
             result.setRouteMatched(false);
+            result.setToolMatched(false);
+            result.setLocalityMatched(false);
             result.setFinalStatusMatched(false);
             result.setShopMatched(false);
             result.setErrorMessage(compact(e.getMessage()));
@@ -152,10 +168,32 @@ public class AiConversationEvaluationService {
         return actual.stream().map(String::valueOf).anyMatch(expectedIds::contains);
     }
 
+    private List<String> toolNames(Set<Long> sessionIds) {
+        if (sessionIds.isEmpty()) return Collections.emptyList();
+        return toolCallMapper.selectList(new QueryWrapper<AiAgentToolCall>()
+                        .in("session_id", sessionIds).orderByAsc("id"))
+                .stream().map(AiAgentToolCall::getToolName).collect(Collectors.toList());
+    }
+
+    private boolean expectedSequenceMatches(String expectedJson, List<String> actual) throws Exception {
+        if (expectedJson == null || expectedJson.trim().isEmpty()) return true;
+        List<String> expected = objectMapper.readValue(expectedJson, new TypeReference<List<String>>() { });
+        return expected.equals(actual);
+    }
+
+    private boolean matchesExpectedCity(String expectedCity, List<Long> shopIds) {
+        if (expectedCity == null || expectedCity.trim().isEmpty() || shopIds.isEmpty()) return true;
+        List<Shop> shops = shopMapper.selectBatchIds(shopIds.stream().distinct().collect(Collectors.toList()));
+        return shops.size() == new HashSet<>(shopIds).size()
+                && shops.stream().allMatch(shop -> expectedCity.equals(shop.getCity()));
+    }
+
     private void finish(AiConversationEvaluationRun run, List<AiConversationEvaluationCaseResult> results) {
         long failed = results.stream().filter(item -> item.getErrorMessage() != null).count();
         run.setStatus(failed == 0 ? "COMPLETED" : "COMPLETED_WITH_ERRORS");
         run.setRouteMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getRouteMatched())).count());
+        run.setToolMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getToolMatched())).count());
+        run.setLocalityMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getLocalityMatched())).count());
         run.setFinalStatusMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getFinalStatusMatched())).count());
         run.setShopMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getShopMatched())).count());
         run.setCompletedCount((int) (results.size() - failed));

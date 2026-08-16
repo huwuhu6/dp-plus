@@ -9,6 +9,8 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
@@ -32,11 +34,12 @@ public class SpringAiTextClient {
         log.info("[AI][spring-ai] action={} model={} messages={} event=REQUEST", action,
                 aiProperties.getModel(), rawMessages == null ? 0 : rawMessages.size());
         try {
-            String content = chatClient.prompt().messages(toMessages(rawMessages)).call().content();
+            ChatResponse response = chatClient.prompt().messages(toMessages(rawMessages)).call().chatResponse();
+            String content = response == null || response.getResult() == null ? null : response.getResult().getOutput().getText();
             if (content == null || content.isBlank()) {
                 throw new IllegalStateException("Model did not return text content");
             }
-            modelCallTracker.recordSuccess();
+            modelCallTracker.recordSuccess(promptTokens(response), completionTokens(response));
             log.info("[AI][spring-ai] action={} model={} event=SUCCESS durationMs={} chars={}", action,
                     aiProperties.getModel(), System.currentTimeMillis() - startedAt, content.length());
             return content;
@@ -63,5 +66,15 @@ public class SpringAiTextClient {
             else messages.add(new UserMessage(content));
         }
         return messages;
+    }
+
+    private Integer promptTokens(ChatResponse response) {
+        Usage usage = response == null || response.getMetadata() == null ? null : response.getMetadata().getUsage();
+        return usage == null ? null : usage.getPromptTokens();
+    }
+
+    private Integer completionTokens(ChatResponse response) {
+        Usage usage = response == null || response.getMetadata() == null ? null : response.getMetadata().getUsage();
+        return usage == null ? null : usage.getCompletionTokens();
     }
 }

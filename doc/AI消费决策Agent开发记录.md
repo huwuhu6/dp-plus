@@ -743,6 +743,12 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 
 每个轨迹用例以 JSON 保存连续用户输入及可选浏览器坐标，实际执行时逐轮调用 `ChatOrchestrationService`，即与调试台完全相同的服务入口。结果持久化每轮路由、最终决策状态、推荐商户集合、截断后的输出、耗时与异常；运行级别汇总路由命中、最终状态命中、商户命中和平均耗时。当前 `conversation-v1` 覆盖福州附近日料追问、附近烤肉营业时间追问，以及“羽毛球馆”非餐饮需求不进入餐饮决策链路三条基线。接口为 `POST /ai/evaluations/conversation-runs` 与 `GET /ai/evaluations/conversation-runs/{runId}`，评测运行仍要求登录用户，结果按创建者隔离。
 
+## 2026-08-16：对话工具与模型用量评测
+
+`V24__conversation_evaluation_tool_and_locality_metrics.sql` 为对话轨迹增加预期工具序列和预期城市。运行结果会从 `ai_agent_tool_call` 读取实际工具序列，并按最终推荐商户的 `tb_shop.city` 校验本地性；因此“福州会话出现杭州商户”会自动记为 locality 失败，而不再只依赖人工看截图。
+
+`V25__model_token_usage_metrics.sql` 让模型调用跟踪器直接读取供应商响应的 usage 字段：OpenAI-compatible 响应读取 `prompt_tokens` 与 `completion_tokens`，Spring AI 响应读取 `ChatResponseMetadata.Usage`。Token 数落入决策指标、单用例评测结果和评测运行聚合，可与已有模型成功率、P95 延迟、Recall@K/MRR 一起比较。供应商未返回 usage 时记为 0，不使用字符数估算，以免把不可靠的成本数据写入评测。
+
 ## 2026-08-16：行政区位置槽位与检索预过滤
 
 地点解析候选被用户确认后，除经纬度外还会把 `province`、`city`、`district` 写入会话位置槽位，并在位置过期或用户拒绝位置时一并清空。新建推荐会透传这些字段到 `DecisionRequest`，检索阶段优先使用 `tb_shop` 的行政区联合索引收敛候选集，再执行坐标半径、结构化约束和语义召回排序。

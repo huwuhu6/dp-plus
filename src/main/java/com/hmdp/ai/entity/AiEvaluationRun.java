@@ -24,6 +24,8 @@ public class AiEvaluationRun {
     private Integer modelCallCount;
     private Integer modelSuccessCount;
     private Integer modelFailureCount;
+    private Integer promptTokenCount;
+    private Integer completionTokenCount;
     private Long avgTotalDurationMs;
     private Long p95TotalDurationMs;
     private Long avgExtractingDurationMs;

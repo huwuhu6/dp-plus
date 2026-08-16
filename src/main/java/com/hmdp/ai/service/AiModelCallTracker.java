@@ -12,10 +12,16 @@ public class AiModelCallTracker {
     }
 
     public void recordSuccess() {
+        recordSuccess(null, null);
+    }
+
+    public void recordSuccess(Integer promptTokens, Integer completionTokens) {
         DecisionMetrics metrics = metricsHolder.get();
         if (metrics == null) return;
         metrics.setModelCallCount(metrics.getModelCallCount() + 1);
         metrics.setModelSuccessCount(metrics.getModelSuccessCount() + 1);
+        metrics.setPromptTokenCount(metrics.getPromptTokenCount() + value(promptTokens));
+        metrics.setCompletionTokenCount(metrics.getCompletionTokenCount() + value(completionTokens));
     }
 
     public void recordFailure() {
@@ -27,5 +33,9 @@ public class AiModelCallTracker {
 
     public void clear() {
         metricsHolder.remove();
+    }
+
+    private int value(Integer value) {
+        return value == null ? 0 : Math.max(0, value);
     }
 }

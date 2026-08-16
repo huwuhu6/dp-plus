@@ -737,6 +737,8 @@ public class ConsumptionDecisionService {
         metric.setModelCallCount(metrics.getModelCallCount());
         metric.setModelSuccessCount(metrics.getModelSuccessCount());
         metric.setModelFailureCount(metrics.getModelFailureCount());
+        metric.setPromptTokenCount(metrics.getPromptTokenCount());
+        metric.setCompletionTokenCount(metrics.getCompletionTokenCount());
         metric.setInitialCandidateCount(metrics.getInitialCandidateCount());
         metric.setHardMatchedCandidateCount(metrics.getHardMatchedCandidateCount());
         metric.setFinalCandidateCount(metrics.getFinalCandidateCount());
