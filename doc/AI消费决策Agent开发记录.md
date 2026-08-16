@@ -1,5 +1,13 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-08-16：可复现运行与跨机器索引策略
+
+补充项目 README，明确 Spring AI 当前承担 OpenAI-compatible Embedding 与 Milvus VectorStore，既有聊天路由、Function Calling 和业务状态机仍使用项目内客户端，避免将“已接入 Spring AI”误表述为所有模型调用均已迁移。
+
+Milvus 是可重建索引而非事实源：新机器使用空 collection 时，需要在导入 MySQL 的商户画像和评价证据后调用索引重建接口；迁移同一 Docker volume 或复用远程 collection，且 Embedding 模型、维度和 collection 名称都不变时，不需要重新向量化。模型/维度/文本拼接规则变更则必须使用新 collection 或重建索引。
+
+当前迭代优先级是先以真实对话形成评测用例和基线，再用主评测集与保留集判断是否引入 rerank。仅当硬约束候选集正确、但排序指标和人工判断仍持续不达标时，引入 rerank 才有可验证的价值。
+
 ## 2026-08-16：JDK 21、Spring Boot 3 与混合检索底座
 
 ### 改造
