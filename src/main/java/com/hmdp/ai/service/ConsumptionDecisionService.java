@@ -187,6 +187,9 @@ public class ConsumptionDecisionService {
                 return pauseForLocation(session, response, metrics, start);
             }
             applyNearbyDefaultRadius(constraints, session.getId());
+            // Keep the durable snapshot aligned with the constraints behind rendered options.
+            session.setConstraintsJson(objectMapper.writeValueAsString(constraints));
+            sessionMapper.updateById(session);
 
             List<DecisionRecommendation> candidates = retrieveAndRank(request, constraints, response, metrics);
             response.setRecommendations(candidates);

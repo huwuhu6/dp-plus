@@ -205,6 +205,41 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
+    void expandsDefaultNearbyRadiusAfterLocationWasProvided() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setNearby(true);
+        when(constraintExtractor.extract("\u627e\u9644\u8fd1\u7684\u706b\u9505")).thenReturn(constraints);
+        when(shopMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(profileMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("\u627e\u9644\u8fd1\u7684\u706b\u9505");
+        assertEquals("CLARIFYING", service.decide(request).getStatus());
+
+        ArgumentCaptor<AiDecisionSession> sessionCaptor = ArgumentCaptor.forClass(AiDecisionSession.class);
+        verify(sessionMapper).insert(sessionCaptor.capture());
+        AiDecisionSession session = sessionCaptor.getValue();
+        when(sessionMapper.selectById(100L)).thenReturn(session);
+
+        DecisionFollowUpRequest provideLocation = new DecisionFollowUpRequest();
+        provideLocation.setSelectedOptionId("PROVIDE_LOCATION");
+        provideLocation.setLatitude(26.08D);
+        provideLocation.setLongitude(119.30D);
+        DecisionResponse paused = service.continueDecision(100L, provideLocation);
+
+        assertEquals("WAITING_RELAXATION", paused.getStatus());
+        assertEquals("EXPAND_RADIUS", paused.getOptions().get(0).getId());
+        assertEquals(3D, paused.getConstraints().getRadiusKm());
+
+        DecisionFollowUpRequest expandRadius = new DecisionFollowUpRequest();
+        expandRadius.setSelectedOptionId("EXPAND_RADIUS");
+        DecisionResponse retried = service.continueDecision(100L, expandRadius);
+
+        assertEquals("WAITING_RELAXATION", retried.getStatus());
+        assertEquals(5D, retried.getConstraints().getRadiusKm());
+    }
+
+    @Test
     void concurrentFollowUpIsRejectedWhenAnotherRequestAlreadyClaimedTheSession() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setNearby(true);
