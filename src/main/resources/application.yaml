@@ -78,6 +78,7 @@ ai:
     vector-enabled: ${AI_RETRIEVAL_VECTOR_ENABLED:false}
     semantic-weight: ${AI_RETRIEVAL_SEMANTIC_WEIGHT:18}
     semantic-top-k: ${AI_RETRIEVAL_SEMANTIC_TOP_K:80}
-  retrieval-strategy-version: structured-profile-evidence-v2
+    semantic-min-score: ${AI_RETRIEVAL_SEMANTIC_MIN_SCORE:0.35}
+  retrieval-strategy-version: structured-profile-evidence-vector-v3
   evaluation-dataset-version: seed-v2
   holdout-dataset-version: holdout-v1

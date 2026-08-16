@@ -794,3 +794,8 @@ Redis 的 30 分钟聊天记忆适合低延迟上下文，但不适合作为可�
 对话工具评测不再只将 `expected_tool_names_json` 与实际调用序列做严格相等比较。评测结果新增实际工具调用摘要（工具名、输入、执行状态）、期望工具数、已覆盖工具数和额外调用数；`toolMatched` 调整为“必要工具均覆盖”，允许模型以不同顺序或附加合理只读工具完成任务。预留 `expected_tool_arguments_json` 与 `toolArgumentsMatched`，用于后续对 `shopId`、城市、候选列表等关键参数做子集断言。运行层新增 `toolExpectedCount`/`toolCoveredCount`，可计算工具覆盖率，而非只报一个二元命中数。
 
 此前 `src/main/resources/db/migration` 中的 SQL 文件未被运行时自动执行，原因是项目没有 Flyway 依赖。现新增 `flyway-mysql`，开发环境对已有数据库以 V27 基线初始化 `flyway_schema_history`，启动时自动执行 V28。实际启动日志确认 V28 成功落库；真实开发集回放运行 #5 写入了 `toolExpectedCount=6`、`toolCoveredCount=4`。该轮路由和工具数存在模型调用波动，属于需要通过基线/留出集对比观察的真实质量数据，不应被固定输出或放宽断言掩盖。
+# 2026-08-16：语义召回阈值与可审计混合检索
+
+当前 RAG 链路为“行政区/预算/菜系/半径/营业时间等结构化硬过滤 -> Milvus 向量召回仅在硬过滤候选白名单内匹配 -> 语义分数加权确定性重排 -> 证据展示”，并非单纯向量相似度查询。为避免低相关文档对候选排序产生隐性影响，新增 `ai.retrieval.semantic-min-score`（默认 `0.35`，可由 `AI_RETRIEVAL_SEMANTIC_MIN_SCORE` 覆盖）；低于阈值或不在结构化候选白名单内的文档不会产生语义加分。
+
+语义召回日志现在同时输出向量返回数、接受数、丢弃数、命中商户数和实际阈值。新增 `MilvusSemanticShopRetrieverTest` 覆盖高分白名单命中、低分命中和高分但越过结构化白名单三种情况，验证向量检索不会破坏业务硬约束。检索策略版本更新为 `structured-profile-evidence-vector-v3`，后续可通过既有 Recall@K、MRR、证据覆盖率和延迟指标与旧版本对比。

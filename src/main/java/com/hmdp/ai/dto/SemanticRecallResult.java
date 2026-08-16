@@ -10,6 +10,8 @@ import java.util.Map;
 public class SemanticRecallResult {
     private Map<Long, Double> shopScores = new LinkedHashMap<>();
     private int matchedDocumentCount;
+    private int acceptedDocumentCount;
+    private int discardedDocumentCount;
     private long durationMs;
     private boolean available;
 

@@ -37,6 +37,7 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
     @Resource private AiShopProfileMapper profileMapper;
     @Resource private AiReviewDocumentMapper reviewMapper;
     @Value("${ai.retrieval.semantic-top-k:80}") private int semanticTopK;
+    @Value("${ai.retrieval.semantic-min-score:0.35}") private double semanticMinScore;
 
     @Override
     public SemanticRecallResult recall(String query, List<Shop> hardMatchedShops,
@@ -56,18 +57,25 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
                     .similarityThresholdAll()
                     .build());
             Map<Long, Double> scoreByShopId = new HashMap<>();
+            int discarded = 0;
             for (Document document : documents) {
                 Long shopId = toLong(document.getMetadata().get("shopId"));
-                if (shopId == null || !allowedShopIds.contains(shopId)) continue;
                 double score = document.getScore() == null ? 0D : document.getScore();
+                if (shopId == null || !allowedShopIds.contains(shopId) || score < semanticMinScore) {
+                    discarded++;
+                    continue;
+                }
                 scoreByShopId.merge(shopId, score, Math::max);
             }
             result.setShopScores(scoreByShopId);
             result.setMatchedDocumentCount(documents.size());
+            result.setAcceptedDocumentCount(documents.size() - discarded);
+            result.setDiscardedDocumentCount(discarded);
             result.setAvailable(true);
             result.setDurationMs(System.currentTimeMillis() - startedAt);
-            log.info("[AI][semantic] action=RECALL query={} hardWhitelist={} vectorDocuments={} matchedShops={} durationMs={}",
-                    compact(query), allowedShopIds.size(), documents.size(), scoreByShopId.size(), result.getDurationMs());
+            log.info("[AI][semantic] action=RECALL query={} hardWhitelist={} vectorDocuments={} acceptedDocuments={} discardedDocuments={} matchedShops={} minScore={} durationMs={}",
+                    compact(query), allowedShopIds.size(), documents.size(), result.getAcceptedDocumentCount(),
+                    result.getDiscardedDocumentCount(), scoreByShopId.size(), semanticMinScore, result.getDurationMs());
             return result;
         } catch (Exception e) {
             result.setDurationMs(System.currentTimeMillis() - startedAt);
