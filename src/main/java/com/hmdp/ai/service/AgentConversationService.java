@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
+import com.hmdp.ai.client.SpringAiTextClient;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentConversationRequest;
 import com.hmdp.ai.dto.AgentConversationResponse;
@@ -40,6 +41,7 @@ public class AgentConversationService {
     @Resource private AiAgentToolCallMapper toolCallMapper;
     @Resource private AgentToolRegistry toolRegistry;
     @Resource private OpenAiCompatibleClient aiClient;
+    @Resource private SpringAiTextClient springAiTextClient;
     @Resource private AiProperties aiProperties;
     @Resource private ObjectMapper objectMapper;
 
@@ -220,7 +222,7 @@ public class AgentConversationService {
     private String polishAnswer(String userMessage, String factualAnswer, boolean planningUsedModel) {
         if (!planningUsedModel || !Boolean.TRUE.equals(aiProperties.getNarrativeEnabled())) return factualAnswer;
         try {
-            String answer = aiClient.chatText(java.util.Arrays.asList(
+            String answer = springAiTextClient.chatText(java.util.Arrays.asList(
                     message("system", "你是点评消费决策助手。基于已检索到的事实，用简洁自然的中文回答用户。不得补充、猜测或改写任何事实；证据不足时直接说明。"),
                     message("user", "用户问题：" + userMessage + "\n已检索事实：\n" + factualAnswer)),
                     "AGENT_ANSWER_POLISH", aiProperties.getAnswerPolishTimeoutMs()).trim();

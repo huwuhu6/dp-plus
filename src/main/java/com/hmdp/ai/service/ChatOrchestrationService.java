@@ -3,6 +3,7 @@ package com.hmdp.ai.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
+import com.hmdp.ai.client.SpringAiTextClient;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentConversationRequest;
 import com.hmdp.ai.dto.ChatMessageRequest;
@@ -30,6 +31,7 @@ import java.util.regex.Pattern;
 public class ChatOrchestrationService {
     private static final Logger log = LoggerFactory.getLogger(ChatOrchestrationService.class);
     @Resource private OpenAiCompatibleClient aiClient;
+    @Resource private SpringAiTextClient springAiTextClient;
     @Resource private AiProperties aiProperties;
     @Resource private ConsumptionDecisionService decisionService;
     @Resource private AgentConversationService conversationService;
@@ -198,7 +200,7 @@ public class ChatOrchestrationService {
             messages.add(message("system", "你是本地餐饮消费决策助手。基于对话上下文自然、简短地回答。仅支持餐厅、用餐、菜品、餐饮优惠和已推荐餐饮商户的事实查询；面对游泳、运动场馆、医疗、住宿、交通等非餐饮需求，要友好说明当前暂不具备对应数据和检索能力，不得编造或推荐餐饮商户。"));
             messages.addAll(chatHistory);
             messages.add(message("user", message));
-            String answer = aiClient.chatText(messages, "GENERAL_CHAT");
+            String answer = springAiTextClient.chatText(messages, "GENERAL_CHAT");
             if (containsUngroundedRecommendation(answer)) {
                 log.warn("[AI][chat] action=GENERAL_CHAT event=UNGROUNDED_RECOMMENDATION_BLOCKED");
                 return "抱歉，我不能在没有检索到本地商户数据的情况下直接列出餐厅或消费建议。你可以告诉我想吃什么、预算和地点，我会先查询餐饮数据后再推荐。";
@@ -418,6 +420,9 @@ public class ChatOrchestrationService {
         if (location != null) {
             request.setLatitude(location.getLatitude());
             request.setLongitude(location.getLongitude());
+            request.setProvince(location.getProvince());
+            request.setCity(location.getCity());
+            request.setDistrict(location.getDistrict());
             request.setLocationStatus("AVAILABLE");
             request.setUseLocationScope(true);
             log.info("[AI][chat] event=SLOT_REUSED chatId={} slot=location source={} latitude={} longitude={}",

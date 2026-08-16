@@ -719,6 +719,24 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 
 补充路由修复：已完成推荐后的“那有适合约会的店吗”过去可能被模型误判为针对上一家店的追问。现增加服务端确定性守卫：包含“有没有/还有/推荐”等新候选表达，且按约会、聚餐、安静、清淡、性价比等场景筛店时，强制进入 `START_DECISION`；只有“这家/那家/上一家”等明确指向已展示商户的问题才进入 `BUSINESS_FOLLOW_UP`。日志通过 `ROUTE_GUARD_MATCHED source=NEW_RECOMMENDATION` 标记该分流，避免由模型偶发路由造成状态串线。
 
+## 2026-08-16：商户地理行政区与本地演示证据标识
+
+`tb_shop` 原先仅有商圈、文本地址和经纬度，不适合按省、市、区县做确定性预过滤。新增 `province`、`city`、`district`、`county` 四个可空行政区字段，以及联合索引 `idx_tb_shop_geo_admin`；完整地址继续复用既有 `address` 字段。后续检索先以行政区缩小候选集，再使用坐标半径与语义召回排序。
+
+历史评价证据的 `SEED_DEMO` 来源统一迁移为 `LOCAL_DEMO`，明确其为本地演示数据但不再将内部来源标签渲染到用户回答中。该变更不会改变证据内容、情感标签或向量索引主键；向量元数据会在下一次索引重建时同步为新来源值。
+
+## 2026-08-16：Spring AI 对话模型迁移第一阶段
+
+新增独立的 `agentChatClient`，通过 Spring AI 的 `OpenAiChatModel` 与 `ChatClient` 调用对话模型。该客户端显式使用 `ai.base-url`、`ai.api-key` 与 `ai.model`，与用于向量嵌入的 `spring.ai.openai.embedding` 配置隔离，因此对话模型和 embedding 模型可以使用不同供应商。
+
+通用闲聊、推荐文案和工具结果润色等纯文本生成已迁移到 Spring AI；原有路由和动态业务工具规划暂时保留 OpenAI 兼容协议，以维持会话状态、工具参数审计和人工确认边界。下一阶段将为 `BaseAgentTool` 建立 Spring AI `ToolCallback` 适配层，再逐步迁移工具调用循环。
+
+## 2026-08-16：行政区位置槽位与检索预过滤
+
+地点解析候选被用户确认后，除经纬度外还会把 `province`、`city`、`district` 写入会话位置槽位，并在位置过期或用户拒绝位置时一并清空。新建推荐会透传这些字段到 `DecisionRequest`，检索阶段优先使用 `tb_shop` 的行政区联合索引收敛候选集，再执行坐标半径、结构化约束和语义召回排序。
+
+该过滤只对地图解析并确认的地点生效。浏览器提供的纯坐标没有可靠行政区信息，仍仅按原有半径策略检索；因此不会把旧城市或猜测行政区错误带入后续会话。日志以 `ADMIN_SCOPE_FILTER` 记录实际生效的范围和候选数量。
+
 ## 2026-08-16：聊天记录持久化与非检索回答防幻觉
 
 Redis 的 30 分钟聊天记忆适合低延迟上下文，但不适合作为可审计的唯一来源。新增 `V18__chat_memory.sql` 创建 `ai_chat_message`：按 `chat_id`、用户、关联决策会话、角色、路由、内容和时间持久化每一轮聊天。`ChatMemoryService` 先读 Redis，缓存缺失时从该表恢复最近 8 条消息并回填缓存。原有 `ai_decision_message` 仍仅记录餐饮决策状态机中的用户补充、澄清与工具追问；`ai_decision_session.result_json` 保存一次决策的最终结构化结果；`ai_agent_tool_call` 保存工具审计。普通聊天与决策入口的完整记录现在由 `ai_chat_message` 覆盖。

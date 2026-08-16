@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
+import com.hmdp.ai.client.SpringAiTextClient;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
@@ -54,6 +55,7 @@ public class ConsumptionDecisionService {
     @Resource private ConstraintExtractor constraintExtractor;
     @Resource private AiModelCallTracker modelCallTracker;
     @Resource private OpenAiCompatibleClient aiClient;
+    @Resource private SpringAiTextClient springAiTextClient;
     @Resource private AiProperties aiProperties;
     @Resource private ObjectMapper objectMapper;
     @Resource private ShopMapper shopMapper;
@@ -491,7 +493,15 @@ public class ConsumptionDecisionService {
     private List<DecisionRecommendation> retrieveAndRank(DecisionRequest request, DecisionConstraints constraints,
                                                           DecisionResponse response, DecisionMetrics metrics) {
         long retrievingStart = System.currentTimeMillis();
-        List<Shop> shops = shopMapper.selectList(null);
+        QueryWrapper<Shop> shopQuery = new QueryWrapper<Shop>();
+        if (hasText(request.getProvince())) shopQuery.eq("province", request.getProvince());
+        if (hasText(request.getCity())) shopQuery.eq("city", request.getCity());
+        if (hasText(request.getDistrict())) shopQuery.eq("district", request.getDistrict());
+        List<Shop> shops = shopMapper.selectList(shopQuery);
+        if (hasAdministrativeScope(request)) {
+            log.info("[AI][session={}] state=RETRIEVING action=ADMIN_SCOPE_FILTER province={} city={} district={} candidates={}",
+                    response.getSessionId(), request.getProvince(), request.getCity(), request.getDistrict(), shops.size());
+        }
         metrics.setInitialCandidateCount(shops.size());
         List<AiShopProfile> profiles = profileMapper.selectList(null);
         Map<Long, AiShopProfile> profileByShopId = profiles.stream().collect(Collectors.toMap(
@@ -578,6 +588,14 @@ public class ConsumptionDecisionService {
         return isOpenAt(shop.getOpenHours(), constraints.getArrivalTime());
     }
 
+    private boolean hasAdministrativeScope(DecisionRequest request) {
+        return hasText(request.getProvince()) || hasText(request.getCity()) || hasText(request.getDistrict());
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
     private boolean matchesCuisine(String profileCuisine, String requestedCuisine) {
         if (contains(profileCuisine, requestedCuisine)) return true;
         boolean requestedGrill = requestedCuisine.contains("烧烤") || requestedCuisine.contains("烤肉");
@@ -653,7 +671,7 @@ public class ConsumptionDecisionService {
             List<Map<String, Object>> messages = new ArrayList<>();
             messages.add(message("system", "你是消费决策助手。仅输出一到两句泛化的取舍建议，不得出现店名、数字、价格、距离、地址、营业时间、评分、证据原文或未提供的事实。"));
             messages.add(message("user", "用户需求：" + query + "\n已满足的偏好：" + objectMapper.writeValueAsString(items.get(0).getMatchedReasons())));
-            String generated = aiClient.chatText(messages, "NARRATIVE_GENERATION").trim();
+            String generated = springAiTextClient.chatText(messages, "NARRATIVE_GENERATION").trim();
             if (isSafeNarrative(generated, items)) {
                 narrative = generated;
                 log.info("[AI][session={}] state=ANSWERING action=MODEL_NARRATIVE_ACCEPTED", sessionId);

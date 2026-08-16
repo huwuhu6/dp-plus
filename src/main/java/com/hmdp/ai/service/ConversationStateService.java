@@ -59,6 +59,9 @@ public class ConversationStateService {
             location.setStatus("EXPIRED");
             location.setLatitude(null);
             location.setLongitude(null);
+            location.setProvince(null);
+            location.setCity(null);
+            location.setDistrict(null);
             updateSlots(state, stateSlots);
             log.info("[AI][state] event=SLOT_EXPIRED chatId={} slot=location", state.getChatId());
             return null;
@@ -105,6 +108,9 @@ public class ConversationStateService {
         input.setSource(candidate.getSource());
         acceptLocation(state, input);
         slots = slots(state);
+        slots.getLocation().setProvince(candidate.getProvince());
+        slots.getLocation().setCity(candidate.getCity());
+        slots.getLocation().setDistrict(candidate.getDistrict());
         slots.setPendingLocationCandidates(new java.util.ArrayList<>());
         updateSlots(state, slots);
         log.info("[AI][state] event=LOCATION_CANDIDATE_CONFIRMED chatId={} index={} label={} latitude={} longitude={}",
@@ -118,6 +124,9 @@ public class ConversationStateService {
         location.setStatus("DECLINED");
         location.setLatitude(null);
         location.setLongitude(null);
+        location.setProvince(null);
+        location.setCity(null);
+        location.setDistrict(null);
         location.setAccuracyMeters(null);
         location.setSource("USER_DECLINED");
         location.setCapturedAt(LocalDateTime.now());

@@ -109,7 +109,7 @@ spring.ai:
 - `V16__agent_business_demo_data.sql`：补充杭州演示餐饮数据、画像、评价证据、券和探店数据。
 - `V17_fuzhou_data.sql`：补充福州/闽侯/上街大学城演示数据。
 
-所有 `SEED_DEMO` 评价均为本地演示数据，不能表述为真实线上评价。
+所有 `LOCAL_DEMO` 评价均为本地演示数据，不能表述为真实线上评价。
 
 ### 4. 启动 Milvus
 

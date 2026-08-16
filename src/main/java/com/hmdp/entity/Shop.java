@@ -53,6 +53,18 @@ public class Shop implements Serializable {
      */
     private String area;
 
+    /** 省级行政区 */
+    private String province;
+
+    /** 市级行政区 */
+    private String city;
+
+    /** 区级行政区 */
+    private String district;
+
+    /** 县级行政区，直辖市或未适用时为空 */
+    private String county;
+
     /**
      * 地址
      */

@@ -38,7 +38,7 @@ public class SearchShopEvidenceTool extends BaseAgentTool {
         List<AiReviewDocument> documents = reviewMapper.selectList(new QueryWrapper<AiReviewDocument>().eq("shop_id", shopId).orderByDesc("sentiment").last("limit 4"));
         for (AiReviewDocument document : documents) {
             if (!topic.trim().isEmpty() && !contains(document.getContent(), topic) && !contains(document.getTags(), topic)) continue;
-            evidence.add("[" + document.getSourceType() + "] " + document.getContent());
+            evidence.add(document.getContent());
         }
         List<Blog> blogs = blogMapper.selectList(new QueryWrapper<Blog>().eq("shop_id", shopId).orderByDesc("liked").last("limit 2"));
         for (Blog blog : blogs) {
