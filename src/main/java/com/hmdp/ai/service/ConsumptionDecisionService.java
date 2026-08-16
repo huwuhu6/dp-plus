@@ -248,6 +248,12 @@ public class ConsumptionDecisionService {
             }
             removeMissingInformation(constraints, "场景", "约会");
         }
+        if (isLightTasteIntent(request.getQuery())) {
+            if (!constraints.getSoftPreferences().contains("口味清淡")) {
+                constraints.getSoftPreferences().add("口味清淡");
+            }
+            removeMissingInformation(constraints, "口味", "饮食偏好");
+        }
         if (request.getQuery().contains("晚上") && !EVENING_WITH_EXPLICIT_TIME.matcher(request.getQuery()).find()) {
             constraints.setArrivalTime("19:00");
             if (!constraints.getSoftPreferences().contains("“晚上”按默认 19:00 解释")) {
@@ -291,6 +297,10 @@ public class ConsumptionDecisionService {
         return query.contains("约会") || query.contains("女朋友") || query.contains("男朋友") || query.contains("情侣");
     }
 
+    private boolean isLightTasteIntent(String query) {
+        return query.contains("清淡") || query.contains("少油") || query.contains("不油腻") || query.contains("清爽");
+    }
+
     private void applyNearbyDefaultRadius(DecisionConstraints constraints, Long sessionId) {
         if (Boolean.TRUE.equals(constraints.getNearby()) && constraints.getRadiusKm() <= 0) {
             constraints.setRadiusKm(3D);
@@ -330,6 +340,9 @@ public class ConsumptionDecisionService {
         if (Boolean.TRUE.equals(constraints.getAvoidQueue())) {
             response.getOptions().add(new DecisionOption("ALLOW_QUEUE", "保留其他条件，允许存在排队风险"));
         }
+        if (requiresLightTasteEvidence(constraints)) {
+            response.getOptions().add(new DecisionOption("RELAX_LIGHT_TASTE", "保留其他条件，不再强制清淡口味"));
+        }
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
         recordStep(response, session.getId(), "WAITING_RELAXATION", "候选为空，等待用户明确选择放宽项", startedAt);
         return finishPausedDecision(session, response, metrics, "WAITING_RELAXATION", "RELAXATION", startedAt);
@@ -364,6 +377,8 @@ public class ConsumptionDecisionService {
             constraints.setQuiet(false);
         } else if ("ALLOW_QUEUE".equals(optionId) && Boolean.TRUE.equals(constraints.getAvoidQueue())) {
             constraints.setAvoidQueue(false);
+        } else if ("RELAX_LIGHT_TASTE".equals(optionId) && requiresLightTasteEvidence(constraints)) {
+            constraints.getSoftPreferences().remove("口味清淡");
         } else {
             throw new IllegalArgumentException("selectedOptionId 无效或不适用于当前约束");
         }
@@ -491,17 +506,20 @@ public class ConsumptionDecisionService {
 
         List<Shop> hardMatched = shops.stream().filter(shop -> matchesHardConstraints(shop, profileByShopId.get(shop.getId()), request, constraints))
                 .collect(Collectors.toList());
+        if (requiresLightTasteEvidence(constraints)) {
+            List<Long> shopIds = hardMatched.stream().map(Shop::getId).collect(Collectors.toList());
+            Map<Long, List<AiReviewDocument>> preferenceDocuments = loadReviewsByShopId(shopIds);
+            hardMatched = hardMatched.stream().filter(shop -> hasLightTasteEvidence(preferenceDocuments.get(shop.getId())))
+                    .collect(Collectors.toList());
+            log.info("[AI][session={}] state=RETRIEVING action=EVIDENCE_PREFERENCE_FILTER preference=LIGHT_TASTE matched={}",
+                    response.getSessionId(), hardMatched.size());
+        }
         metrics.setHardMatchedCandidateCount(hardMatched.size());
         log.info("[AI][session={}] state=RETRIEVING action=HARD_FILTER initial={} hardMatched={}",
                 response.getSessionId(), shops.size(), hardMatched.size());
 
         List<Long> shopIds = hardMatched.stream().map(Shop::getId).collect(Collectors.toList());
-        Map<Long, List<AiReviewDocument>> reviewsByShopId = new HashMap<>();
-        if (!shopIds.isEmpty()) {
-            List<AiReviewDocument> documents = reviewMapper.selectList(new QueryWrapper<AiReviewDocument>()
-                    .in("shop_id", shopIds));
-            reviewsByShopId = documents.stream().collect(Collectors.groupingBy(AiReviewDocument::getShopId));
-        }
+        Map<Long, List<AiReviewDocument>> reviewsByShopId = loadReviewsByShopId(shopIds);
         metrics.setRetrievingDurationMs(System.currentTimeMillis() - retrievingStart);
 
         long rerankingStart = System.currentTimeMillis();
@@ -526,12 +544,39 @@ public class ConsumptionDecisionService {
         return result;
     }
 
+    private Map<Long, List<AiReviewDocument>> loadReviewsByShopId(List<Long> shopIds) {
+        if (shopIds == null || shopIds.isEmpty()) return new HashMap<>();
+        List<AiReviewDocument> documents = reviewMapper.selectList(new QueryWrapper<AiReviewDocument>()
+                .in("shop_id", shopIds));
+        return documents.stream().collect(Collectors.groupingBy(AiReviewDocument::getShopId));
+    }
+
+    private boolean requiresLightTasteEvidence(DecisionConstraints constraints) {
+        return constraints.getSoftPreferences().contains("口味清淡");
+    }
+
+    private boolean hasLightTasteEvidence(List<AiReviewDocument> documents) {
+        if (documents == null) return false;
+        for (AiReviewDocument document : documents) {
+            String content = document.getContent() == null ? "" : document.getContent();
+            if (content.contains("清淡") || content.contains("不油腻") || content.contains("清爽") || content.contains("少油")) return true;
+        }
+        return false;
+    }
+
     private boolean matchesHardConstraints(Shop shop, AiShopProfile profile, DecisionRequest request, DecisionConstraints constraints) {
         if (constraints.getBudgetPerPerson() > 0 && (shop.getAvgPrice() == null || shop.getAvgPrice() > constraints.getBudgetPerPerson())) return false;
-        if (!constraints.getCuisine().isEmpty() && (profile == null || !contains(profile.getCuisine(), constraints.getCuisine()))) return false;
+        if (!constraints.getCuisine().isEmpty() && (profile == null || !matchesCuisine(profile.getCuisine(), constraints.getCuisine()))) return false;
         if (constraints.getRadiusKm() > 0 && request.getLatitude() != null && request.getLongitude() != null
                 && distanceKm(request.getLatitude(), request.getLongitude(), shop.getY(), shop.getX()) > constraints.getRadiusKm()) return false;
         return isOpenAt(shop.getOpenHours(), constraints.getArrivalTime());
+    }
+
+    private boolean matchesCuisine(String profileCuisine, String requestedCuisine) {
+        if (contains(profileCuisine, requestedCuisine)) return true;
+        boolean requestedGrill = requestedCuisine.contains("烧烤") || requestedCuisine.contains("烤肉");
+        boolean profileGrill = profileCuisine.contains("烧烤") || profileCuisine.contains("烤肉");
+        return requestedGrill && profileGrill;
     }
 
     public boolean matchesFollowUpConstraints(Shop shop, AiShopProfile profile, DecisionRequest request,
@@ -555,6 +600,10 @@ public class ConsumptionDecisionService {
         if (profile != null && !constraints.getCuisine().isEmpty()) {
             score += 20D;
             item.getMatchedReasons().add("菜系：" + profile.getCuisine());
+        }
+        if (requiresLightTasteEvidence(constraints) && hasLightTasteEvidence(documents)) {
+            score += 12D;
+            item.getMatchedReasons().add("评价证据表明口味清淡");
         }
         if (profile != null && !constraints.getOccasion().isEmpty() && contains(profile.getSceneTags(), constraints.getOccasion())) {
             score += 12D;

@@ -11,6 +11,7 @@ import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.entity.AiDecisionSession;
+import com.hmdp.ai.entity.AiReviewDocument;
 import com.hmdp.ai.entity.AiShopProfile;
 import com.hmdp.ai.mapper.AiDecisionMessageMapper;
 import com.hmdp.ai.mapper.AiDecisionMetricMapper;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -51,6 +53,7 @@ class ConsumptionDecisionServiceTest {
     private AiDecisionSessionMapper sessionMapper;
     private AiDecisionMetricMapper metricMapper;
     private AiDecisionMessageMapper messageMapper;
+    private AiReviewDocumentMapper reviewMapper;
 
     @BeforeEach
     void setUp() {
@@ -68,7 +71,8 @@ class ConsumptionDecisionServiceTest {
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         ReflectionTestUtils.setField(service, "shopMapper", shopMapper);
         ReflectionTestUtils.setField(service, "profileMapper", profileMapper);
-        ReflectionTestUtils.setField(service, "reviewMapper", mock(AiReviewDocumentMapper.class));
+        reviewMapper = mock(AiReviewDocumentMapper.class);
+        ReflectionTestUtils.setField(service, "reviewMapper", reviewMapper);
         ReflectionTestUtils.setField(service, "sessionMapper", sessionMapper);
         ReflectionTestUtils.setField(service, "stepMapper", mock(AiDecisionStepMapper.class));
         ReflectionTestUtils.setField(service, "metricMapper", metricMapper);
@@ -160,6 +164,57 @@ class ConsumptionDecisionServiceTest {
         assertEquals(0, response.getMetrics().getModelCallCount());
         verify(shopMapper, never()).selectList(any());
         verify(metricMapper).insert(any());
+    }
+
+    @Test
+    void treatsBarbecueAndGrilledMeatAsOneCuisineFamily() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("烧烤");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("烤肉,韩式");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void lightTasteOnlyReturnsShopsWithSupportingReviewEvidence() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        when(constraintExtractor.extract("我想吃点清淡的")).thenReturn(constraints);
+        Shop lightShop = new Shop();
+        lightShop.setId(1L);
+        lightShop.setName("清淡面馆");
+        lightShop.setScore(40);
+        lightShop.setOpenHours("10:00-22:00");
+        Shop grilledShop = new Shop();
+        grilledShop.setId(2L);
+        grilledShop.setName("烤肉店");
+        grilledShop.setScore(50);
+        grilledShop.setOpenHours("10:00-22:00");
+        when(shopMapper.selectList(any())).thenReturn(Arrays.asList(lightShop, grilledShop));
+        when(profileMapper.selectList(any())).thenReturn(Collections.emptyList());
+        AiReviewDocument lightEvidence = new AiReviewDocument();
+        lightEvidence.setShopId(1L);
+        lightEvidence.setSourceType("TEST");
+        lightEvidence.setContent("汤头清淡不油腻，适合晚餐。");
+        AiReviewDocument grilledEvidence = new AiReviewDocument();
+        grilledEvidence.setShopId(2L);
+        grilledEvidence.setSourceType("TEST");
+        grilledEvidence.setContent("五花肉很香，建议提前排队。");
+        when(reviewMapper.selectList(any())).thenReturn(Arrays.asList(lightEvidence, grilledEvidence));
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("我想吃点清淡的");
+        DecisionResponse response = service.decide(request);
+
+        assertEquals("COMPLETED", response.getStatus());
+        assertEquals(1, response.getRecommendations().size());
+        assertEquals(1L, response.getRecommendations().get(0).getShopId());
+        assertTrue(response.getRecommendations().get(0).getMatchedReasons().contains("评价证据表明口味清淡"));
     }
 
     @Test
