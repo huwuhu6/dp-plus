@@ -52,6 +52,7 @@ public class ConsumptionDecisionService {
     private static final Logger log = LoggerFactory.getLogger(ConsumptionDecisionService.class);
     private static final Pattern EVENING_WITH_EXPLICIT_TIME = Pattern.compile("(?:晚上|晚)\\s*\\d{1,2}(?::\\d{2})?(?:点)?");
     private static final Map<String, double[]> DEMO_PLACE_COORDINATES = demoPlaceCoordinates();
+    private static final String PLACE_DISAMBIGUATION = "PLACE_DISAMBIGUATION";
     @Resource private ConstraintExtractor constraintExtractor;
     @Resource private AiModelCallTracker modelCallTracker;
     @Resource private OpenAiCompatibleClient aiClient;
@@ -105,8 +106,24 @@ public class ConsumptionDecisionService {
             DecisionConstraints constraints = objectMapper.readValue(session.getConstraintsJson(), DecisionConstraints.class);
             String pausedStatus = session.getStatus();
             boolean resumedWithRelaxation = "WAITING_RELAXATION".equals(pausedStatus);
+            boolean resolvedPlaceDisambiguation = false;
             if ("CLARIFYING".equals(pausedStatus)) {
-                if ("DECLINE_LOCATION".equals(followUp == null ? null : followUp.getSelectedOptionId())) {
+                boolean awaitingPlaceDisambiguation = PLACE_DISAMBIGUATION.equals(session.getPendingType());
+                if (awaitingPlaceDisambiguation && followUp != null && hasText(followUp.getMessage())) {
+                    request.setQuery(request.getQuery() + " " + followUp.getMessage().trim());
+                    request.setUseLocationScope(true);
+                    resolveDemoPlace(request, constraints);
+                    if (request.getLatitude() == null || request.getLongitude() == null) {
+                        throw new IllegalArgumentException("地点仍不明确，请补充城市和区域，例如“福州鼓楼”");
+                    }
+                    request.setLocationStatus("NAMED_PLACE");
+                    resolvedPlaceDisambiguation = true;
+                    log.info("[AI][session={}] state=CLARIFYING action=PLACE_DISAMBIGUATED query={} latitude={} longitude={}",
+                            sessionId, compact(followUp.getMessage()), request.getLatitude(), request.getLongitude());
+                } else if ("DECLINE_LOCATION".equals(followUp == null ? null : followUp.getSelectedOptionId())) {
+                    if (awaitingPlaceDisambiguation) {
+                        throw new IllegalArgumentException("“" + ambiguousPlace(request.getQuery()) + "”存在歧义，请补充城市或提供当前位置");
+                    }
                     log.info("[AI][session={}] state=CLARIFYING action=LOCATION_DECLINED searchScope=CITYWIDE", sessionId);
                     request.setLocationStatus("DECLINED");
                     constraints.setNearby(false);
@@ -139,7 +156,11 @@ public class ConsumptionDecisionService {
                 throw new IllegalArgumentException("当前决策已被其他续聊请求处理，请刷新后查看最新结果");
             }
             if ("CLARIFYING".equals(pausedStatus)) {
-                saveMessage(sessionId, "USER", "LOCATION", "DECLINE_LOCATION".equals(followUp.getSelectedOptionId()) ? "未提供位置，按全城搜索" : "已提供当前位置坐标");
+                String messageType = resolvedPlaceDisambiguation ? "PLACE_DISAMBIGUATION" : "LOCATION";
+                String message = "DECLINE_LOCATION".equals(followUp.getSelectedOptionId())
+                        ? "未提供位置，按全城搜索"
+                        : (hasText(followUp.getMessage()) ? followUp.getMessage() : "已提供当前位置坐标");
+                saveMessage(sessionId, "USER", messageType, message);
             } else {
                 saveMessage(sessionId, "USER", "RELAXATION_SELECTION", followUp.getSelectedOptionId());
             }
@@ -188,8 +209,8 @@ public class ConsumptionDecisionService {
                         session.getId(), constraints.getCuisine(), constraints.getBudgetPerPerson(), constraints.getRadiusKm(),
                         constraints.getNearby(), constraints.getQuiet(), constraints.getAvoidQueue());
             }
-            if (requiresLocation(constraints, request)) {
-                return pauseForLocation(session, response, metrics, start);
+            if (requiresLocation(request)) {
+                return pauseForLocation(session, response, metrics, start, request);
             }
             applyNearbyDefaultRadius(constraints, session.getId());
             // Keep the durable snapshot aligned with the constraints behind rendered options.
@@ -233,9 +254,9 @@ public class ConsumptionDecisionService {
         }
     }
 
-    private boolean requiresLocation(DecisionConstraints constraints, DecisionRequest request) {
-        return (constraints.getRadiusKm() > 0 || Boolean.TRUE.equals(constraints.getNearby()))
-                && (request.getLatitude() == null || request.getLongitude() == null);
+    private boolean requiresLocation(DecisionRequest request) {
+        if (request.getLatitude() != null && request.getLongitude() != null) return false;
+        return !"DECLINED".equals(request.getLocationStatus());
     }
 
     private void reconcileRequestFacts(DecisionConstraints constraints, DecisionRequest request) {
@@ -318,14 +339,24 @@ public class ConsumptionDecisionService {
     }
 
     private DecisionResponse pauseForLocation(AiDecisionSession session, DecisionResponse response,
-                                              DecisionMetrics metrics, long startedAt) throws Exception {
+                                              DecisionMetrics metrics, long startedAt,
+                                              DecisionRequest request) throws Exception {
+        String ambiguousPlace = ambiguousPlace(request.getQuery());
+        boolean requiresPlaceDisambiguation = ambiguousPlace != null;
         response.setStatus("CLARIFYING");
-        response.setQuestion("你提到了附近或距离范围，请提供当前位置的 latitude 和 longitude 后继续搜索。");
+        response.setQuestion(requiresPlaceDisambiguation
+                ? "“" + ambiguousPlace + "”可能对应多个城市或区域，请补充城市（例如“福州鼓楼”），或提供当前位置后继续搜索。"
+                : "为了按你的实际位置推荐餐饮商户，请授权并提供当前位置的 latitude 和 longitude；也可以直接告诉我明确的城市和区域。"
+        );
         response.getOptions().add(new DecisionOption("PROVIDE_LOCATION", "提交当前位置坐标后继续"));
-        response.getOptions().add(new DecisionOption("DECLINE_LOCATION", "不提供位置，按全城搜索"));
+        if (!requiresPlaceDisambiguation) {
+            response.getOptions().add(new DecisionOption("DECLINE_LOCATION", "不提供位置，按全城搜索"));
+        }
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
-        recordStep(response, session.getId(), "CLARIFYING", "缺少位置坐标，等待用户补充", startedAt);
-        return finishPausedDecision(session, response, metrics, "CLARIFYING", "LOCATION", startedAt);
+        recordStep(response, session.getId(), "CLARIFYING",
+                requiresPlaceDisambiguation ? "地点存在歧义，等待用户补充城市" : "默认需要位置，等待用户授权或补充", startedAt);
+        return finishPausedDecision(session, response, metrics, "CLARIFYING",
+                requiresPlaceDisambiguation ? PLACE_DISAMBIGUATION : "LOCATION", startedAt);
     }
 
     private DecisionResponse pauseForRelaxation(AiDecisionSession session, DecisionResponse response,
@@ -432,6 +463,7 @@ public class ConsumptionDecisionService {
             if (request.getQuery().contains(entry.getKey())) {
                 request.setLatitude(entry.getValue()[0]);
                 request.setLongitude(entry.getValue()[1]);
+                request.setUseLocationScope(true);
                 constraints.getSoftPreferences().add("演示地点“" + entry.getKey() + "”已转换为坐标");
                 removeMissingInformation(constraints, "位置", "坐标", "起点");
                 return;
@@ -444,11 +476,26 @@ public class ConsumptionDecisionService {
         places.put("福州鼓楼", new double[]{26.0871D, 119.2998D});
         places.put("上街大学城", new double[]{26.0745D, 119.1978D});
         places.put("闽侯", new double[]{26.0745D, 119.1978D});
-        places.put("鼓楼", new double[]{26.0871D, 119.2998D});
         places.put("西湖文化广场", new double[]{30.3127D, 120.1467D});
         places.put("运河上街", new double[]{30.3186D, 120.1486D});
         places.put("武林广场", new double[]{30.3252D, 120.1505D});
         return places;
+    }
+
+    public boolean isAwaitingPlaceDisambiguation(Long sessionId) {
+        AiDecisionSession session = sessionMapper.selectById(sessionId);
+        return session != null && "CLARIFYING".equals(session.getStatus())
+                && PLACE_DISAMBIGUATION.equals(session.getPendingType());
+    }
+
+    private String ambiguousPlace(String query) {
+        if (query == null) return null;
+        if (query.contains("鼓楼") && !query.contains("福州鼓楼")) return "鼓楼";
+        return null;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private void logDecisionOutput(Long sessionId, DecisionResponse response) {

@@ -169,6 +169,50 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
+    void restaurantRecommendationDefaultsToLocationClarification() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("日料");
+        when(constraintExtractor.extract("推荐一家日料")).thenReturn(constraints);
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("推荐一家日料");
+        DecisionResponse response = service.decide(request);
+
+        assertEquals("CLARIFYING", response.getStatus());
+        assertTrue(response.getQuestion().contains("实际位置"));
+        verify(shopMapper, never()).selectList(any());
+    }
+
+    @Test
+    void ambiguousPlaceDoesNotResolveToDemoCoordinates() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("火锅");
+        when(constraintExtractor.extract("帮我看看鼓楼的火锅")).thenReturn(constraints);
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("帮我看看鼓楼的火锅");
+        DecisionResponse response = service.decide(request);
+
+        assertEquals("CLARIFYING", response.getStatus());
+        assertTrue(response.getQuestion().contains("鼓楼"));
+        assertEquals(2, response.getOptions().size());
+        verify(shopMapper, never()).selectList(any());
+    }
+
+    @Test
+    void explicitCityAndAreaUsesNamedPlaceCoordinates() {
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("帮我看看福州鼓楼的火锅");
+        DecisionConstraints constraints = new DecisionConstraints();
+
+        ReflectionTestUtils.invokeMethod(service, "reconcileRequestFacts", constraints, request);
+
+        assertEquals(26.0871D, request.getLatitude());
+        assertEquals(119.2998D, request.getLongitude());
+        assertTrue(request.getUseLocationScope());
+    }
+
+    @Test
     void treatsBarbecueAndGrilledMeatAsOneCuisineFamily() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setCuisine("烧烤");
@@ -211,6 +255,7 @@ class ConsumptionDecisionServiceTest {
 
         DecisionRequest request = new DecisionRequest();
         request.setQuery("我想吃点清淡的");
+        request.setLocationStatus("DECLINED");
         DecisionResponse response = service.decide(request);
 
         assertEquals("COMPLETED", response.getStatus());
@@ -264,6 +309,7 @@ class ConsumptionDecisionServiceTest {
 
         DecisionRequest request = new DecisionRequest();
         request.setQuery("想吃不存在菜系");
+        request.setLocationStatus("DECLINED");
         DecisionResponse paused = service.decide(request);
         assertEquals("WAITING_RELAXATION", paused.getStatus());
         assertEquals("RELAX_CUISINE", paused.getOptions().get(0).getId());
@@ -400,6 +446,7 @@ class ConsumptionDecisionServiceTest {
 
         DecisionRequest request = new DecisionRequest();
         request.setQuery("想吃不存在菜系");
+        request.setLocationStatus("DECLINED");
         DecisionResponse paused = service.decide(request);
         assertEquals("WAITING_RELAXATION", paused.getStatus());
 

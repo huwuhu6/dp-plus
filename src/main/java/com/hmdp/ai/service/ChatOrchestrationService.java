@@ -57,6 +57,14 @@ public class ChatOrchestrationService {
             eventResponse.setUsedModel(false);
             return handleDecisionEvent(chatId, message, request, state, activeSessionId, eventResponse);
         }
+        if (activeDecision != null && "CLARIFYING".equals(activeDecision.getStatus())
+                && decisionService.isAwaitingPlaceDisambiguation(activeSessionId)) {
+            ChatMessageResponse eventResponse = new ChatMessageResponse();
+            eventResponse.setChatId(chatId);
+            eventResponse.setRoute("DECISION_EVENT");
+            eventResponse.setUsedModel(false);
+            return handleDecisionEvent(chatId, message, request, state, activeSessionId, eventResponse);
+        }
         if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null && isRestaurantSearch(message)) {
             DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
             cancel.setSelectedOptionId("END_DECISION");
