@@ -57,7 +57,8 @@ public class ChatOrchestrationService {
             eventResponse.setUsedModel(false);
             return handleDecisionEvent(chatId, message, request, state, activeSessionId, eventResponse);
         }
-        String route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
+        String route = resolveContextualFollowUpRoute(chatId, message, state, activeSessionId, activeDecision);
+        if (route == null) route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
         log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
         ChatMessageResponse response = new ChatMessageResponse();
         response.setChatId(chatId);
@@ -171,6 +172,24 @@ public class ChatOrchestrationService {
         return hasDecision && "COMPLETED".equals(decisionStatus) ? "BUSINESS_FOLLOW_UP" : "START_DECISION";
     }
 
+    private String resolveContextualFollowUpRoute(String chatId, String message, AiChatSession state,
+                                                  Long activeSessionId, DecisionResponse activeDecision) {
+        Long sessionId = resolveFollowUpSessionId(chatId, state, activeSessionId);
+        if (sessionId == null || hasExplicitNewDecisionIntent(message)) return null;
+        DecisionResponse decision = activeDecision;
+        if (decision == null || !sessionId.equals(activeSessionId)) decision = decisionService.getDecision(sessionId);
+        if (decision == null || !"COMPLETED".equals(decision.getStatus())) return null;
+        if (!conversationService.hasCandidateReference(sessionId, message)) return null;
+        log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} sessionId={} route=BUSINESS_FOLLOW_UP query={}",
+                chatId, sessionId, compact(message));
+        return "BUSINESS_FOLLOW_UP";
+    }
+
+    private boolean hasExplicitNewDecisionIntent(String message) {
+        return message.contains("我想吃") || message.contains("想找") || message.contains("帮我找")
+                || message.contains("给我推荐") || message.contains("重新推荐") || message.contains("再推荐");
+    }
+
     private Map<String, Object> routeTool() {
         Map<String, Object> route = new LinkedHashMap<String, Object>();
         route.put("type", "string");
@@ -261,8 +280,13 @@ public class ChatOrchestrationService {
     private Long resolveFollowUpSessionId(String chatId, AiChatSession state, Long activeSessionId) {
         if (activeSessionId != null) return activeSessionId;
         Long sessionId = state.getLastDecisionSessionId();
-        if (sessionId == null) sessionId = chatMemoryService.findLatestDecisionSessionId(chatId);
-        if (sessionId != null) conversationStateService.rememberLastDecision(state, sessionId);
+        boolean restoredFromHistory = false;
+        if (sessionId == null) {
+            sessionId = chatMemoryService.findLatestDecisionSessionId(chatId);
+            restoredFromHistory = sessionId != null && sessionId > 0;
+        }
+        if (sessionId != null && sessionId <= 0) sessionId = null;
+        if (restoredFromHistory) conversationStateService.rememberLastDecision(state, sessionId);
         log.info("[AI][chat] event=FOLLOW_UP_CONTEXT_RESOLVED chatId={} sessionId={} source={}", chatId, sessionId,
                 activeSessionId != null ? "ACTIVE" : (state.getLastDecisionSessionId() == null ? "MESSAGE_HISTORY" : "LAST"));
         return sessionId;

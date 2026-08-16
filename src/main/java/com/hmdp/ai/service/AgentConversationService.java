@@ -108,6 +108,24 @@ public class AgentConversationService {
                 .eq("session_id", sessionId).orderByAsc("turn_no").orderByAsc("id"));
     }
 
+    /**
+     * Checks only durable candidate context. Routing must not let a model discard an explicit reference.
+     */
+    public boolean hasCandidateReference(Long sessionId, String message) {
+        AiDecisionSession session = sessionMapper.selectById(sessionId);
+        if (session == null || !"COMPLETED".equals(session.getStatus())) return false;
+        ensureOwner(session);
+        try {
+            AgentSessionContext context = loadContext(session);
+            ReferenceResolution reference = resolveShopReference(message == null ? "" : message.trim(), context);
+            return reference.shop != null || reference.isAmbiguous() || hasFocusedShopPronoun(message, context);
+        } catch (Exception e) {
+            log.warn("[AI][agent] event=REFERENCE_GUARD_FALLBACK sessionId={} errorType={}", sessionId,
+                    e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
     private ToolPlanningResult runToolLoop(Long sessionId, AgentSessionContext context, String userMessage, Long explicitlyReferencedShopId) {
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         if (!aiProperties.isConfigured()) return new ToolPlanningResult(results, false);
@@ -292,6 +310,12 @@ public class AgentConversationService {
             }
         }
         return false;
+    }
+
+    private boolean hasFocusedShopPronoun(String message, AgentSessionContext context) {
+        if (message == null || context.getFocusedShopId() == null) return false;
+        return message.contains("这家") || message.contains("这个店") || message.contains("那家")
+                || message.contains("上一家") || message.contains("刚才那家");
     }
 
     private boolean isSingleShopTool(String toolName) {

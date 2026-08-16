@@ -94,7 +94,47 @@ class ChatOrchestrationServiceTest {
         assertEquals(36L, response.getDecisionSessionId());
         assertEquals("COMPLETED", response.getDecisionStatus());
         verify(conversationService).converse(any(), any());
-        verify(sessionStateService).rememberLastDecision(state, 36L);
+        verify(sessionStateService, org.mockito.Mockito.never()).rememberLastDecision(state, 36L);
+    }
+
+    @Test
+    void candidateReferenceOverridesModelAndStaysInBusinessFollowUp() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        AgentConversationService conversationService = mock(AgentConversationService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", conversationService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setLastDecisionSessionId(36L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        DecisionResponse completed = new DecisionResponse();
+        completed.setSessionId(36L);
+        completed.setStatus("COMPLETED");
+        when(decisionService.getDecision(36L)).thenReturn(completed);
+        when(conversationService.hasCandidateReference(36L, "这个日本料理怎么样")).thenReturn(true);
+        AgentConversationResponse conversation = new AgentConversationResponse();
+        conversation.setAnswer("筑地日本料理（上街店）的评价如下。");
+        when(conversationService.converse(any(), any())).thenReturn(conversation);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("这个日本料理怎么样");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("BUSINESS_FOLLOW_UP", response.getRoute());
+        assertEquals("筑地日本料理（上街店）的评价如下。", response.getAnswer());
+        verify(conversationService).converse(any(), any());
+        verifyNoInteractions(aiClient);
     }
 
     @Test
