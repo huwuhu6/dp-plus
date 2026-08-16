@@ -37,6 +37,8 @@ nginx-1.18.0.zip
 dp.sql
 
 nginx-1.18.0
+jmeter/results/
+jmeter.log
 src/main/resources/application-dev.yml
 logs/
 .env

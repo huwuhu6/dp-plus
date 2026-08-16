@@ -180,4 +180,6 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8081/ai/retrieval/indexes/r
 mvn -q test
 ```
 
+AI 决策链路的本地 JMeter 基线计划和执行方式见 [jmeter/README.md](jmeter/README.md)。默认只运行 4 次真实模型请求；提高并发前需要先确认供应商配额与成本边界。
+
 架构与关键决策的演进记录见 [AI消费决策Agent开发记录.md](doc/AI消费决策Agent开发记录.md)。

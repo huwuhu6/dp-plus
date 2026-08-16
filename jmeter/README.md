@@ -1,0 +1,15 @@
+# AI 链路压测
+
+`ai-decision-baseline.jmx` 压测 `POST /ai/decisions` 的完整决策路径，默认使用低并发，避免把本地聊天模型 API 误当成普通 CRUD 服务压垮。
+
+在 PowerShell 中执行：
+
+```powershell
+& 'D:\03_software\02_安装路径\02_开发工具\apache-jmeter-5.6.3\apache-jmeter-5.6.3\bin\jmeter.bat' -n `
+  -t jmeter\ai-decision-baseline.jmx `
+  -l jmeter\results\ai-decision-baseline.jtl `
+  -e -o jmeter\results\ai-decision-baseline-report `
+  -Jthreads=2 -Jloops=2 -JrampUpSeconds=5
+```
+
+提高并发前先确认模型供应商配额和本地 Milvus、MySQL、Redis 都可用。每次策略或模型改动后，应保留 `.jtl`、HTML 报告和对应的评测运行 ID，用于结合错误率、P95 延迟、Token 和质量指标判断是否回归。
