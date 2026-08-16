@@ -39,7 +39,7 @@ public class ChatMemoryService {
         try {
             String value = stringRedisTemplate.opsForValue().get(key(chatId));
             if (value != null && !value.trim().isEmpty()) {
-                return objectMapper.readValue(value, new TypeReference<List<Map<String, Object>>>() { });
+                return normalizeMessages(objectMapper.readValue(value, new TypeReference<List<Map<String, Object>>>() { }));
             }
             List<Map<String, Object>> restored = restoreFromDatabase(chatId);
             if (!restored.isEmpty()) cache(chatId, restored);
@@ -85,7 +85,7 @@ public class ChatMemoryService {
         record.setChatId(chatId);
         record.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
         record.setDecisionSessionId(decisionSessionId);
-        record.setRole(role);
+        record.setRole(normalizeRole(role));
         record.setRoute(route);
         record.setContent(content == null ? "" : content);
         chatMessageMapper.insert(record);
@@ -97,7 +97,7 @@ public class ChatMemoryService {
 
     private Map<String, Object> message(String role, String content) {
         Map<String, Object> item = new LinkedHashMap<String, Object>();
-        item.put("role", role);
+        item.put("role", normalizeRole(role));
         String value = content == null ? "" : content.replaceAll("[\\r\\n\\t]+", " ");
         item.put("content", value.length() > 600 ? value.substring(0, 600) + "..." : value);
         return item;
@@ -105,5 +105,20 @@ public class ChatMemoryService {
 
     private String key(String chatId) {
         return KEY_PREFIX + chatId;
+    }
+
+    private List<Map<String, Object>> normalizeMessages(List<Map<String, Object>> messages) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> item : messages) {
+            result.add(message(String.valueOf(item.get("role")), String.valueOf(item.get("content"))));
+        }
+        return result;
+    }
+
+    private String normalizeRole(String role) {
+        if (role == null) return "user";
+        if ("USER".equalsIgnoreCase(role)) return "user";
+        if ("ASSISTANT".equalsIgnoreCase(role)) return "assistant";
+        return role.toLowerCase();
     }
 }

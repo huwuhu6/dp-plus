@@ -572,6 +572,16 @@ V14 为用例增加数据集版本，新增 `holdout-v1` 的四条独立表达�
 
 日志保留 `query -> route -> tool plan -> tool result -> polished answer` 的关键审计信息。`AGENT_ANSWER_POLISH` 不再将完整证据正文作为 query 打印，底层模型文本日志仅记录长度，避免同一份评价证据和润色答案在 INFO 日志中重复多次。
 
+## 2026-08-16：聊天记忆角色协议兼容修复
+
+### 问题
+
+`ai_chat_message.role` 最初按 Java 枚举风格写入了大写的 `USER` 与 `ASSISTANT`。Redis 缓存未命中后，`ChatMemoryService` 会直接从 MySQL 恢复这些记录并传给 OpenAI 兼容接口；DeepSeek 仅接受小写的 `system`、`user`、`assistant`、`tool` 等角色名，因此路由与普通聊天请求都会被上游以 400 拒绝，日志表现为 `messages[n].role: unknown variant USER`。
+
+### 修复
+
+`ChatMemoryService` 在三个边界统一规范角色名：持久化前写入小写值、从 Redis 读取旧缓存后规范化、从 MySQL 恢复旧记录后经同一转换构造成模型消息。已将开发库现存的 `USER`/`ASSISTANT` 记录迁移为 `user`/`assistant`。该处理同时兼容已存在的旧缓存和旧数据，避免缓存过期后再次触发同类模型请求失败。
+
 ## 2026-08-16：聊天记录持久化与非检索回答防幻觉
 
 Redis 的 30 分钟聊天记忆适合低延迟上下文，但不适合作为可审计的唯一来源。新增 `V18__chat_memory.sql` 创建 `ai_chat_message`：按 `chat_id`、用户、关联决策会话、角色、路由、内容和时间持久化每一轮聊天。`ChatMemoryService` 先读 Redis，缓存缺失时从该表恢复最近 8 条消息并回填缓存。原有 `ai_decision_message` 仍仅记录餐饮决策状态机中的用户补充、澄清与工具追问；`ai_decision_session.result_json` 保存一次决策的最终结构化结果；`ai_agent_tool_call` 保存工具审计。普通聊天与决策入口的完整记录现在由 `ai_chat_message` 覆盖。
