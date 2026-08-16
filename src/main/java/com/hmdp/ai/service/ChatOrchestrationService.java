@@ -57,6 +57,18 @@ public class ChatOrchestrationService {
             eventResponse.setUsedModel(false);
             return handleDecisionEvent(chatId, message, request, state, activeSessionId, eventResponse);
         }
+        if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null && isRestaurantSearch(message)) {
+            DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
+            cancel.setSelectedOptionId("END_DECISION");
+            cancel.setMessage("被新的餐饮需求替代：" + message);
+            decisionService.continueDecision(activeSessionId, cancel);
+            conversationStateService.clearActiveDecision(state);
+            log.info("[AI][chat] event=PENDING_DECISION_SUPERSEDED chatId={} previousSessionId={} query={}",
+                    chatId, activeSessionId, compact(message));
+            log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route=START_DECISION source=PENDING_SUPERSEDE",
+                    chatId, activeSessionId);
+            return startDecision(chatId, message, state, false);
+        }
         String route = resolveContextualFollowUpRoute(chatId, message, state, activeSessionId, activeDecision);
         if (route == null) route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
         log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
@@ -65,18 +77,7 @@ public class ChatOrchestrationService {
         response.setRoute(route);
         response.setUsedModel(aiProperties.isConfigured());
         if ("START_DECISION".equals(route)) {
-            DecisionRequest decisionRequest = new DecisionRequest();
-            decisionRequest.setQuery(message);
-            decisionRequest.setMaxCandidates(3);
-            applyLocationSlot(decisionRequest, state);
-            DecisionResponse decision = decisionService.decide(decisionRequest);
-            response.setDecision(decision);
-            response.setDecisionSessionId(decision.getSessionId());
-            response.setDecisionStatus(decision.getStatus());
-            response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
-            conversationStateService.activateDecision(state, decision.getSessionId());
-            recordTurn(chatId, message, response);
-            return response;
+            return startDecision(chatId, message, state, aiProperties.isConfigured());
         }
         if ("BUSINESS_FOLLOW_UP".equals(route)) {
             Long followUpSessionId = resolveFollowUpSessionId(chatId, state, activeSessionId);
@@ -121,6 +122,25 @@ public class ChatOrchestrationService {
             response.setDegradedReason("模型服务未配置：当前后端进程没有读取到 DEEPSEEK_API_KEY，本次使用本地对话降级回复。");
             log.warn("[AI][chat] action=GENERAL_CHAT event=MODEL_NOT_CONFIGURED");
         }
+        recordTurn(chatId, message, response);
+        return response;
+    }
+
+    private ChatMessageResponse startDecision(String chatId, String message, AiChatSession state, boolean usedModel) {
+        DecisionRequest decisionRequest = new DecisionRequest();
+        decisionRequest.setQuery(message);
+        decisionRequest.setMaxCandidates(3);
+        applyLocationSlot(decisionRequest, state);
+        DecisionResponse decision = decisionService.decide(decisionRequest);
+        ChatMessageResponse response = new ChatMessageResponse();
+        response.setChatId(chatId);
+        response.setRoute("START_DECISION");
+        response.setUsedModel(usedModel);
+        response.setDecision(decision);
+        response.setDecisionSessionId(decision.getSessionId());
+        response.setDecisionStatus(decision.getStatus());
+        response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
+        conversationStateService.activateDecision(state, decision.getSessionId());
         recordTurn(chatId, message, response);
         return response;
     }
@@ -188,6 +208,19 @@ public class ChatOrchestrationService {
     private boolean hasExplicitNewDecisionIntent(String message) {
         return message.contains("我想吃") || message.contains("想找") || message.contains("帮我找")
                 || message.contains("给我推荐") || message.contains("重新推荐") || message.contains("再推荐");
+    }
+
+    private boolean isPausedDecision(DecisionResponse decision) {
+        return decision != null && ("CLARIFYING".equals(decision.getStatus())
+                || "WAITING_RELAXATION".equals(decision.getStatus()));
+    }
+
+    private boolean isRestaurantSearch(String message) {
+        String[] keywords = {"吃", "餐厅", "餐馆", "饭店", "饭", "菜", "烧烤", "烤肉", "火锅", "日料", "料理", "小吃", "咖啡", "奶茶"};
+        for (String keyword : keywords) {
+            if (message.contains(keyword)) return true;
+        }
+        return false;
     }
 
     private Map<String, Object> routeTool() {

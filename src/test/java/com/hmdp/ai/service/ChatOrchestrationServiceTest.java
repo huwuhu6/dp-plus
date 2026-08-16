@@ -8,9 +8,11 @@ import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ConversationLocationSlot;
+import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.entity.AiChatSession;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Collections;
@@ -134,6 +136,59 @@ class ChatOrchestrationServiceTest {
         assertEquals("BUSINESS_FOLLOW_UP", response.getRoute());
         assertEquals("筑地日本料理（上街店）的评价如下。", response.getAnswer());
         verify(conversationService).converse(any(), any());
+        verifyNoInteractions(aiClient);
+    }
+
+    @Test
+    void newRestaurantNeedSupersedesPausedDecisionAndReusesLocation() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        ConversationLocationSlot location = new ConversationLocationSlot();
+        location.setStatus("AVAILABLE");
+        location.setLatitude(26.054D);
+        location.setLongitude(119.186D);
+        when(stateService.usableLocation(state)).thenReturn(location);
+        DecisionResponse paused = new DecisionResponse();
+        paused.setSessionId(100L);
+        paused.setStatus("WAITING_RELAXATION");
+        when(decisionService.getDecision(100L)).thenReturn(paused);
+        DecisionResponse cancelled = new DecisionResponse();
+        cancelled.setSessionId(100L);
+        cancelled.setStatus("CANCELLED");
+        when(decisionService.continueDecision(org.mockito.Mockito.eq(100L), any())).thenReturn(cancelled);
+        DecisionResponse started = new DecisionResponse();
+        started.setSessionId(101L);
+        started.setStatus("COMPLETED");
+        started.setAnswer("已找到附近烤肉店");
+        when(decisionService.decide(any())).thenReturn(started);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("那烤肉店呢");
+        ChatMessageResponse response = service.chat(request);
+
+        ArgumentCaptor<DecisionFollowUpRequest> cancellation = ArgumentCaptor.forClass(DecisionFollowUpRequest.class);
+        verify(decisionService).continueDecision(org.mockito.Mockito.eq(100L), cancellation.capture());
+        assertEquals("END_DECISION", cancellation.getValue().getSelectedOptionId());
+        assertEquals("START_DECISION", response.getRoute());
+        assertEquals(101L, response.getDecisionSessionId());
+        verify(stateService).clearActiveDecision(state);
+        verify(stateService).activateDecision(state, 101L);
         verifyNoInteractions(aiClient);
     }
 
