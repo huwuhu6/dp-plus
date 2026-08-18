@@ -2,6 +2,8 @@
 
 `ai-decision-baseline.jmx` 压测 `POST /ai/decisions` 的完整决策路径，默认使用低并发，避免把本地聊天模型 API 误当成普通 CRUD 服务压垮。
 
+商铺热点缓存的受控并发对比见 [商铺缓存 L1 与并发合并记录](../doc/商铺缓存L1与并发合并可靠性开发记录.md)。脚本为 `shop-cache-singleflight.jmx`，结果必须同时核对 `/internal/cache/shop/stats` 的 L2 回源次数与 HTTP 延迟，不能只看 HTTP 200。
+
 在 PowerShell 中执行：
 
 ```powershell

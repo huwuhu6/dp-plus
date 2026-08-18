@@ -62,6 +62,13 @@ mybatis-plus:
 logging:
   level:
     com.hmdp: info
+shop:
+  cache:
+    l1:
+      enabled: ${SHOP_CACHE_L1_ENABLED:true}
+      maximum-size: ${SHOP_CACHE_L1_MAXIMUM_SIZE:5000}
+      refresh-after-write-seconds: ${SHOP_CACHE_L1_REFRESH_SECONDS:5}
+      expire-after-write-seconds: ${SHOP_CACHE_L1_EXPIRE_SECONDS:30}
 ai:
   location:
     mcp:

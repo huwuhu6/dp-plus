@@ -4,6 +4,7 @@ import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.hmdp.cache.ShopLocalCache;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
@@ -12,9 +13,13 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.CacheClient;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RedisData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import jakarta.annotation.Resource;
 
@@ -36,12 +41,15 @@ import static com.hmdp.utils.RedisConstants.*;
  */
 @Service
 public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IShopService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ShopServiceImpl.class);
 
     @Resource
     private  StringRedisTemplate stringRedisTemplate;
 
     @Resource
     private CacheClient cacheClient;
+    @Resource
+    private ShopLocalCache shopLocalCache;
 
     /**
      *查询店铺信息
@@ -49,13 +57,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
      * @return
      */
     public Result queryById(Long id) {
-        //缓存穿透
-        //Shop shop =cacheClient.queryWithPassThrough(CACHE_SHOP_KEY,id,Shop.class,this::getById,CACHE_SHOP_TTL,TimeUnit.MINUTES);
-        Shop shop =queryWithPassThrough(id);
-        //互斥锁解决缓存击穿
-        //Shop shop=queryWithMutex(id);
-        //逻辑过期 解决缓存击穿
-        //Shop shop=cacheClient.queryWithLogicalExpire(CACHE_SHOP_KEY,id,Shop.class,this::getById,CACHE_SHOP_TTL,TimeUnit.MINUTES);
+        Shop shop = shopLocalCache.get(id);
         if(shop==null){
             return Result.fail("店铺不存在");
         }
@@ -230,10 +232,36 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         if (id==null){
             return Result.fail("店铺id不能为空");
         }
-        updateById(shop);
-        //2.删除缓存
-        stringRedisTemplate.delete(CACHE_SHOP_KEY+id);
+        boolean updated = updateById(shop);
+        if (!updated) return Result.fail("更新失败");
+        // Commit first so a rollback never evicts a still-valid cache entry.
+        afterCommit(() -> invalidateShopCache(id));
         return Result.ok();
+    }
+
+    private void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+            return;
+        }
+        action.run();
+    }
+
+    private void invalidateShopCache(Long id) {
+        try {
+            stringRedisTemplate.delete(CACHE_SHOP_KEY + id);
+        } catch (RuntimeException e) {
+            // L1 is still removed below; Redis failure only leaves a bounded L2 stale window.
+            LOGGER.warn("[CACHE][shop] event=L2_INVALIDATE_FAILURE shopId={} errorType={}", id, e.getClass().getSimpleName());
+        } finally {
+            shopLocalCache.invalidate(id);
+        }
     }
 
     @Override
