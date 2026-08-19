@@ -3,11 +3,13 @@ package com.hmdp.cache;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
+import org.springframework.data.redis.connection.DefaultMessage;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -109,6 +111,28 @@ class ShopLocalCacheTest {
     }
 
     @Test
+    void broadcastInvalidationEvictsOnlyTheReceivingJvmLocalEntry() {
+        FakeStringRedisTemplate redisTemplate = new FakeStringRedisTemplate((key, callNumber) -> {
+            if (callNumber == 1) return JSONUtil.toJsonStr(shop(1L, "广播前"));
+            return JSONUtil.toJsonStr(shop(1L, "广播后"));
+        });
+        ShopLocalCache cache = new ShopLocalCache(redisTemplate, mapperReturning(null), properties(), directExecutor());
+        ShopCacheInvalidationListener listener = new ShopCacheInvalidationListener(cache);
+        try {
+            assertEquals("广播前", cache.get(1L).getName());
+            listener.onMessage(message("1"), null);
+            assertEquals("广播后", cache.get(1L).getName());
+            assertEquals(2, redisTemplate.getCount("cache:shop:1"));
+
+            listener.onMessage(message("not-a-shop-id"), null);
+            assertEquals("广播后", cache.get(1L).getName());
+            assertEquals(2, redisTemplate.getCount("cache:shop:1"));
+        } finally {
+            cache.shutdown();
+        }
+    }
+
+    @Test
     void separateJvmLocalCachesEachLoadTheSameKeyOnce() {
         FakeStringRedisTemplate redisTemplate = new FakeStringRedisTemplate(
                 (key, callNumber) -> JSONUtil.toJsonStr(shop(1L, "双实例热点商铺")));
@@ -142,6 +166,11 @@ class ShopLocalCacheTest {
 
     private Executor directExecutor() {
         return Runnable::run;
+    }
+
+    private DefaultMessage message(String payload) {
+        return new DefaultMessage(ShopCacheInvalidationPublisher.CHANNEL.getBytes(StandardCharsets.UTF_8),
+                payload.getBytes(StandardCharsets.UTF_8));
     }
 
     private void shutdownExecutor(ExecutorService executor) {

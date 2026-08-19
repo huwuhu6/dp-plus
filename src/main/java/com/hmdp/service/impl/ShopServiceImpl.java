@@ -5,6 +5,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.cache.ShopLocalCache;
+import com.hmdp.cache.ShopCacheInvalidationPublisher;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
@@ -50,6 +51,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     private CacheClient cacheClient;
     @Resource
     private ShopLocalCache shopLocalCache;
+    @Resource
+    private ShopCacheInvalidationPublisher shopCacheInvalidationPublisher;
 
     /**
      *查询店铺信息
@@ -261,6 +264,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             LOGGER.warn("[CACHE][shop] event=L2_INVALIDATE_FAILURE shopId={} errorType={}", id, e.getClass().getSimpleName());
         } finally {
             shopLocalCache.invalidate(id);
+            shopCacheInvalidationPublisher.publish(id);
         }
     }
 
