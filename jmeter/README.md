@@ -30,3 +30,9 @@
 ```
 
 JMeter 只断言响应结构，不把业务拒绝标为 HTTP 错误。运行后必须查询 `tb_voucher_fulfillment_audit` 和 `tb_voucher_certificate`：20 个不同请求号应产生恰好 `1` 条 `VERIFY/SUCCESS`、`19` 条 `VERIFY/REJECTED`，券最终为 `USED`。这才是 CAS 正确性的结论；延迟、吞吐和 HTTP 200 仅是辅助指标。
+
+`run-voucher-fulfillment-dual-instance.sh` 是双 JVM 版本：应用分别启动在 `8083`、`8084` 并共享 Redis/MySQL 后，向两端各发送 10 个同券核销请求。它用于证明 CAS 的跨实例正确性，不是吞吐压测：
+
+```bash
+bash jmeter/run-voucher-fulfillment-dual-instance.sh VC替换为新建测试券码 测试登录token
+```
