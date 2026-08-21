@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 public class VoucherFulfillmentServiceImpl implements IVoucherFulfillmentService {
@@ -84,6 +85,11 @@ public class VoucherFulfillmentServiceImpl implements IVoucherFulfillmentService
         VoucherCertificate certificate = certificateMapper.selectOne(new LambdaUpdateWrapper<VoucherCertificate>()
                 .eq(VoucherCertificate::getCertificateNo, certificateNo));
         if (certificate == null) return Result.fail("券码不存在");
+        VoucherPackageOrder lockedOrder = lockPackageOrder(certificate.getPackageOrderId());
+        if (lockedOrder == null) return Result.fail("套餐订单不存在");
+        List<VoucherCertificate> lockedCertificates = lockCertificates(lockedOrder.getId());
+        certificate = findCertificate(lockedCertificates, certificate.getId());
+        if (certificate == null) return Result.fail("券码不存在");
         VoucherFulfillmentAudit duplicate = findAudit(request.getRequestId());
         if (duplicate != null) return replay(duplicate, "CANCEL_VERIFY", certificate.getId(), request.getOperatorId());
         VoucherFulfillmentAudit audit = audit(certificate.getId(), request, "CANCEL_VERIFY", "PROCESSING", "MERCHANT", null);
@@ -106,11 +112,12 @@ public class VoucherFulfillmentServiceImpl implements IVoucherFulfillmentService
                 .set(VoucherCertificate::getStatus, UNUSED).set(VoucherCertificate::getUsedTime, null)
                 .set(VoucherCertificate::getUpdateTime, now));
         if (changed != 1) return reject(audit, "券状态已被其他履约操作改变或已超过撤销时限");
+        certificate.setStatus(UNUSED).setUsedTime(null).setUpdateTime(now);
 
         audit.setResult("SUCCESS").setDetail("shopId=" + request.getShopId() + ", cancelWindowMinutes="
                 + VoucherVerificationCancellationPolicy.WINDOW_MINUTES);
         auditMapper.updateById(audit);
-        refreshOrderStatus(certificate.getPackageOrderId());
+        refreshOrderStatus(lockedOrder, lockedCertificates);
         return Result.ok(audit);
     }
 
@@ -129,6 +136,11 @@ public class VoucherFulfillmentServiceImpl implements IVoucherFulfillmentService
         VoucherCertificate certificate = certificateMapper.selectOne(new LambdaUpdateWrapper<VoucherCertificate>()
                 .eq(VoucherCertificate::getCertificateNo, certificateNo));
         if (certificate == null) return Result.fail("券码不存在");
+        VoucherPackageOrder lockedOrder = lockPackageOrder(certificate.getPackageOrderId());
+        if (lockedOrder == null) return Result.fail("套餐订单不存在");
+        List<VoucherCertificate> lockedCertificates = lockCertificates(lockedOrder.getId());
+        certificate = findCertificate(lockedCertificates, certificate.getId());
+        if (certificate == null) return Result.fail("券码不存在");
         VoucherFulfillmentAudit duplicate = findAudit(request.getRequestId());
         if (duplicate != null) return replay(duplicate, action, certificate.getId(), request.getOperatorId());
 
@@ -143,8 +155,7 @@ public class VoucherFulfillmentServiceImpl implements IVoucherFulfillmentService
             return reject(audit, "门店无权核销该券");
         }
         if (!requireShopMatch) {
-            VoucherPackageOrder order = packageOrderMapper.selectById(certificate.getPackageOrderId());
-            if (order == null || !order.getUserId().equals(request.getOperatorId())) {
+            if (!lockedOrder.getUserId().equals(request.getOperatorId())) {
                 return reject(audit, "无权退款该券");
             }
         }
@@ -159,11 +170,14 @@ public class VoucherFulfillmentServiceImpl implements IVoucherFulfillmentService
         if (certificateMapper.update(null, cas) != 1) {
             return reject(audit, "券状态已被其他履约操作改变");
         }
+        certificate.setStatus(targetStatus).setUpdateTime(now);
+        if (USED.equals(targetStatus)) certificate.setUsedTime(now);
+        else certificate.setRefundedTime(now);
 
         audit.setCertificateId(certificate.getId()).setResult("SUCCESS")
                 .setDetail(requireShopMatch ? "shopId=" + request.getShopId() : "未使用券退款");
         auditMapper.updateById(audit);
-        refreshOrderStatus(certificate.getPackageOrderId());
+        refreshOrderStatus(lockedOrder, lockedCertificates);
         return Result.ok(audit);
     }
 
@@ -193,16 +207,22 @@ public class VoucherFulfillmentServiceImpl implements IVoucherFulfillmentService
                 .eq(VoucherFulfillmentAudit::getRequestId, requestId));
     }
 
-    private void refreshOrderStatus(Long orderId) {
-        VoucherPackageOrder order = packageOrderMapper.selectById(orderId);
-        if (order == null) return;
-        long unused = certificateMapper.selectCount(new LambdaUpdateWrapper<VoucherCertificate>()
-                .eq(VoucherCertificate::getPackageOrderId, orderId).eq(VoucherCertificate::getStatus, UNUSED));
-        long used = certificateMapper.selectCount(new LambdaUpdateWrapper<VoucherCertificate>()
-                .eq(VoucherCertificate::getPackageOrderId, orderId).eq(VoucherCertificate::getStatus, USED));
-        String status = VoucherPackageStatus.resolve(order.getQuantity(), unused, used);
+    private VoucherPackageOrder lockPackageOrder(Long orderId) {
+        return packageOrderMapper.selectByIdForUpdate(orderId);
+    }
+
+    private List<VoucherCertificate> lockCertificates(Long orderId) {
+        return certificateMapper.selectByPackageOrderIdForUpdate(orderId);
+    }
+
+    private VoucherCertificate findCertificate(List<VoucherCertificate> certificates, Long certificateId) {
+        return certificates.stream().filter(item -> Objects.equals(item.getId(), certificateId)).findFirst().orElse(null);
+    }
+
+    private void refreshOrderStatus(VoucherPackageOrder lockedOrder, List<VoucherCertificate> lockedCertificates) {
+        String status = VoucherPackageAggregation.resolve(lockedOrder, lockedCertificates);
         packageOrderMapper.update(null, new LambdaUpdateWrapper<VoucherPackageOrder>()
-                .eq(VoucherPackageOrder::getId, orderId).set(VoucherPackageOrder::getStatus, status)
+                .eq(VoucherPackageOrder::getId, lockedOrder.getId()).set(VoucherPackageOrder::getStatus, status)
                 .set(VoucherPackageOrder::getUpdateTime, LocalDateTime.now()));
     }
 }

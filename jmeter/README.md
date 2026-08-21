@@ -36,3 +36,11 @@ JMeter 只断言响应结构，不把业务拒绝标为 HTTP 错误。运行后�
 ```bash
 bash jmeter/run-voucher-fulfillment-dual-instance.sh VC替换为新建测试券码 测试登录token
 ```
+
+`run-voucher-package-aggregation-dual-instance.sh` 覆盖同一套餐内不同券并发履约时的订单状态聚合。创建一笔恰好两张券的套餐，应用启动在 `8083`、`8084` 后执行：
+
+```bash
+bash jmeter/run-voucher-package-aggregation-dual-instance.sh 券码A 券码B 测试登录token
+```
+
+运行后必须核对两张券均为 `USED`，父套餐订单也为 `USED`。这验证的是跨 JVM 的聚合状态正确性，不能用两次 HTTP 200 替代数据库核验。
