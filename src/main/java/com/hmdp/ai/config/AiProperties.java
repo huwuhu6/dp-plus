@@ -14,6 +14,7 @@ public class AiProperties {
     private Boolean narrativeEnabled = true;
     private Integer toolPlanningTimeoutMs = 8000;
     private Integer answerPolishTimeoutMs = 8000;
+    private QueryRewriteProperties queryRewrite = new QueryRewriteProperties();
     private String retrievalStrategyVersion = "structured-profile-evidence-v2";
     private String evaluationDatasetVersion = "seed-v2";
     private String holdoutDatasetVersion = "holdout-v1";
@@ -22,5 +23,19 @@ public class AiProperties {
 
     public boolean isConfigured() {
         return apiKey != null && !apiKey.trim().isEmpty();
+    }
+
+    @Data
+    public static class QueryRewriteProperties {
+        private Boolean enabled = true;
+        private String provider = "dashscope";
+        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+        private String apiKey;
+        private String model = "qwen-flash";
+        private Integer timeoutMs = 8000;
+
+        public boolean isConfigured() {
+            return Boolean.TRUE.equals(enabled) && apiKey != null && !apiKey.trim().isEmpty();
+        }
     }
 }

@@ -842,6 +842,18 @@ Redis 的 30 分钟聊天记忆适合低延迟上下文，但不适合作为可�
 
 修正后重新执行真实开发集（运行 #8）：11 条轨迹均完成，路由命中 `11/11`、上下文改写命中 `1/1`、本地性命中 `11/11`、目标商户命中 `11/11`、必要工具覆盖 `7/8`、最终状态命中 `9/11`，平均端到端耗时 `12055ms`。工具覆盖和最终状态未满分的用例保留为后续数据、工具规划和放宽策略优化目标，不通过放宽断言掩盖。
 
+## 2026-08-24：DashScope 主模型通道与轻量查询改写
+
+主模型的供应商通道统一切换为 DashScope OpenAI 兼容接口：`ai.base-url` 默认指向 `https://dashscope.aliyuncs.com/compatible-mode/v1`，`ai.api-key` 读取 `DASHSCOPE_API_KEY`，主模型仍为 `deepseek-v4-flash`。生产或团队环境可通过 `DASHSCOPE_COMPATIBLE_BASE_URL` 切换到百炼业务空间的北京地域域名；`AI_BASE_URL`、`AI_API_KEY` 与 `AI_MODEL` 仍可用于显式覆盖。这样路由、约束提取、工具规划、通用闲聊和叙述生成均使用同一百炼通道，避免开发环境保留直连供应商密钥。
+
+## 2026-08-24：DashScope 轻量模型用于上下文改写
+
+上下文改写只负责将“第二家怎么样”“这家有优惠券吗”这类省略表达还原为可被路由器和业务工具消费的独立 Query，不需要承担主 Agent 的工具规划与回答生成。为避免改写模型与主模型耦合，新增 `QueryRewriteClient`，通过 DashScope 的 OpenAI 兼容 `chat/completions` 协议调用 `qwen-flash`；主链路的路由、约束提取、工具规划和叙述生成继续保持 `deepseek-v4-flash`。
+
+配置位于 `ai.query-rewrite`：默认读取 `DASHSCOPE_API_KEY`，可通过 `AI_QUERY_REWRITE_MODEL`、`AI_QUERY_REWRITE_BASE_URL` 和 `AI_QUERY_REWRITE_TIMEOUT_MS` 覆盖。改写请求固定 `temperature=0`，仅携带工作记忆、紧凑历史和当前用户输入，不携带业务工具 schema；返回值仍按 OpenAI 兼容响应的 `choices[0].message.content` 解析。模型未配置、超时或返回空内容时，`ConversationContextRewriter` 回退到原始 Query，并将原因写入 `contextRewrite`，不会阻断推荐或商户追问链路。
+
+单元测试覆盖候选序号指代进入独立改写客户端，以及自包含 Query 不触发模型调用；全量 `mvn -q test` 通过。使用真实 DeepSeek、DashScope、MySQL、Redis、Milvus 和工具链重跑 `conversation-v1`（运行 #10）共 12 条轨迹：路由命中 `12/12`、上下文改写 `1/1`、本地性 `12/12`、目标商户 `12/12`、最终状态 `8/12`，平均端到端耗时 `9698ms`，较运行 #9 的 `12292ms` 降低约 `21.1%`。必要工具覆盖为 `6/8`，较基线少 1 条；该维度由主模型工具规划决定，不属于改写模型迁移的直接回归，保留为后续工具规划稳定性观测项。
+
 ## 2026-08-24：会话级 Working Memory 与条件增量合并
 
 此前位置槽位存放在 `ai_chat_session.slots_json`，而候选商户、焦点商户和条件快照存放在 `ai_decision_session.agent_context_json`；跨轮引用虽然可用，但事实状态分散，新的推荐请求无法以确定方式继承或覆盖上一轮条件。新增 `V32__chat_session_working_memory.sql` 与 `ConversationWorkingMemory`，在聊天会话中持久化位置、待确认地点、`activeCriteria`、候选池、焦点商户、会话阶段和来源决策会话。旧的 `slots_json` 继续同步写入，保证已存在会话的定位数据可兼容读取；单次决策会话仍保留执行期快照和审计信息，不再是跨轮业务事实源。

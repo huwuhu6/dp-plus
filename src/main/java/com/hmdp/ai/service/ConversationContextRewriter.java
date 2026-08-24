@@ -1,7 +1,6 @@
 package com.hmdp.ai.service;
 
-import com.hmdp.ai.client.SpringAiTextClient;
-import com.hmdp.ai.config.AiProperties;
+import com.hmdp.ai.client.QueryRewriteClient;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
@@ -19,8 +18,7 @@ import java.util.Map;
 @Service
 public class ConversationContextRewriter {
     private static final Logger log = LoggerFactory.getLogger(ConversationContextRewriter.class);
-    @Resource private SpringAiTextClient springAiTextClient;
-    @Resource private AiProperties aiProperties;
+    @Resource private QueryRewriteClient queryRewriteClient;
 
     public ContextRewriteResult rewrite(String query, List<Map<String, Object>> history, AgentSessionContext context) {
         if (query == null || query.trim().isEmpty()) return ContextRewriteResult.unchanged(query, "EMPTY_QUERY");
@@ -28,7 +26,7 @@ public class ConversationContextRewriter {
             return ContextRewriteResult.unchanged(query, "NO_WORKING_MEMORY");
         }
         if (!needsRewrite(query)) return ContextRewriteResult.unchanged(query, "SELF_CONTAINED");
-        if (!aiProperties.isConfigured()) return ContextRewriteResult.unchanged(query, "MODEL_UNAVAILABLE");
+        if (!queryRewriteClient.isConfigured()) return ContextRewriteResult.unchanged(query, "MODEL_UNAVAILABLE");
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
             messages.add(message("system", "你是餐饮 Agent 的上下文改写器。根据工作记忆把用户的省略句改写成一条自包含的中文业务查询。只输出改写后的查询，不回答问题、不编造商户或事实。若问第一家/第二家，必须使用候选列表对应名称；若说这家/那家，使用当前聚焦商户；若说换个便宜点的，明确为在当前候选范围寻找更低人均的备选。"));
@@ -37,7 +35,7 @@ public class ConversationContextRewriter {
                 messages.add(message("system", "最近对话：" + compactHistory(history)));
             }
             messages.add(message("user", query));
-            String rewritten = springAiTextClient.chatText(messages, "CONTEXT_REWRITE").trim();
+            String rewritten = queryRewriteClient.rewrite(messages).trim();
             if (rewritten.isEmpty() || rewritten.length() > 300) {
                 return ContextRewriteResult.unchanged(query, "INVALID_MODEL_OUTPUT");
             }

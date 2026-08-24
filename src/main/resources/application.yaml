@@ -66,13 +66,20 @@ ai:
   location:
     mcp:
       enabled: ${AI_LOCATION_MCP_ENABLED:false}
-  provider: ${AI_PROVIDER}
-  base-url: ${AI_BASE_URL}
-  api-key: ${DEEPSEEK_API_KEY}
-  model: ${AI_MODEL}
+  provider: ${AI_PROVIDER:dashscope}
+  base-url: ${AI_BASE_URL:${DASHSCOPE_COMPATIBLE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}}
+  api-key: ${AI_API_KEY:${DASHSCOPE_API_KEY:}}
+  model: ${AI_MODEL:deepseek-v4-flash}
   timeout-ms: ${AI_TIMEOUT_MS:20000}
   tool-planning-timeout-ms: ${AI_TOOL_PLANNING_TIMEOUT_MS:8000}
   answer-polish-timeout-ms: ${AI_ANSWER_POLISH_TIMEOUT_MS:8000}
+  query-rewrite:
+    enabled: ${AI_QUERY_REWRITE_ENABLED:true}
+    provider: ${AI_QUERY_REWRITE_PROVIDER:dashscope}
+    base-url: ${AI_QUERY_REWRITE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    api-key: ${DASHSCOPE_API_KEY:}
+    model: ${AI_QUERY_REWRITE_MODEL:qwen-flash}
+    timeout-ms: ${AI_QUERY_REWRITE_TIMEOUT_MS:8000}
   narrative-enabled: ${AI_NARRATIVE_ENABLED:true}
   retrieval:
     vector-enabled: ${AI_RETRIEVAL_VECTOR_ENABLED:false}
