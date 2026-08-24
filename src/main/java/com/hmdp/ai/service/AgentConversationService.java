@@ -130,6 +130,19 @@ public class AgentConversationService {
         }
     }
 
+    public AgentSessionContext loadWorkingMemory(Long sessionId) {
+        AiDecisionSession session = sessionMapper.selectById(sessionId);
+        if (session == null) return null;
+        ensureOwner(session);
+        try {
+            return loadContext(session);
+        } catch (Exception e) {
+            log.warn("[AI][agent] event=WORKING_MEMORY_LOAD_FAILURE sessionId={} errorType={}", sessionId,
+                    e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
     private ToolPlanningResult runToolLoop(Long sessionId, AgentSessionContext context, String userMessage, Long explicitlyReferencedShopId) {
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         if (!aiProperties.isConfigured()) return new ToolPlanningResult(results, false);

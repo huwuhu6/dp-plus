@@ -12,6 +12,8 @@ import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.ConversationLocationSlot;
+import com.hmdp.ai.dto.AgentSessionContext;
+import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,7 @@ public class ChatOrchestrationService {
     @Resource private ChatMemoryService chatMemoryService;
     @Resource private ConversationStateService conversationStateService;
     @Resource private AmapMcpLocationResolutionService locationResolutionService;
+    @Resource private ConversationContextRewriter contextRewriter;
     @Resource private ObjectMapper objectMapper;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
@@ -67,32 +70,39 @@ public class ChatOrchestrationService {
             ChatMessageResponse locationResponse = resolveNamedLocation(chatId, message, state, activeSessionId, activeDecision);
             if (locationResponse != null) return locationResponse;
         }
-        if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null && isNewRecommendationIntent(message)) {
+        ContextRewriteResult contextRewrite = rewriteContext(message, chatHistory, state, activeSessionId);
+        String effectiveMessage = contextRewrite.getRewrittenQuery();
+        if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null && isNewRecommendationIntent(effectiveMessage)) {
             DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
             cancel.setSelectedOptionId("END_DECISION");
-            cancel.setMessage("被新的餐饮需求替代：" + message);
+            cancel.setMessage("被新的餐饮需求替代：" + effectiveMessage);
             decisionService.continueDecision(activeSessionId, cancel);
             conversationStateService.clearActiveDecision(state);
             log.info("[AI][chat] event=PENDING_DECISION_SUPERSEDED chatId={} previousSessionId={} query={}",
-                    chatId, activeSessionId, compact(message));
+                    chatId, activeSessionId, compact(effectiveMessage));
             log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route=START_DECISION source=PENDING_SUPERSEDE",
                     chatId, activeSessionId);
-            return startDecision(chatId, message, state, false);
+            return startDecision(chatId, message, effectiveMessage, state, false, contextRewrite);
         }
-        if (isNewRecommendationIntent(message)) {
+        String route = resolveContextualFollowUpRoute(chatId, effectiveMessage, state, activeSessionId, activeDecision,
+                contextRewrite);
+        if ("BUSINESS_FOLLOW_UP".equals(route)) {
+            log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
+        } else if (isNewRecommendationIntent(message)) {
             log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} activeSessionId={} route=START_DECISION source=NEW_RECOMMENDATION query={}",
                     chatId, activeSessionId, compact(message));
-            return startDecision(chatId, message, state, aiProperties.isConfigured());
+            return startDecision(chatId, message, effectiveMessage, state, aiProperties.isConfigured(), contextRewrite);
+        } else {
+            if (route == null) route = route(effectiveMessage, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
+            log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
         }
-        String route = resolveContextualFollowUpRoute(chatId, message, state, activeSessionId, activeDecision);
-        if (route == null) route = route(message, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
-        log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
         ChatMessageResponse response = new ChatMessageResponse();
         response.setChatId(chatId);
         response.setRoute(route);
         response.setUsedModel(aiProperties.isConfigured());
+        response.setContextRewrite(contextRewrite);
         if ("START_DECISION".equals(route)) {
-            return startDecision(chatId, message, state, aiProperties.isConfigured());
+            return startDecision(chatId, message, effectiveMessage, state, aiProperties.isConfigured(), contextRewrite);
         }
         if ("BUSINESS_FOLLOW_UP".equals(route)) {
             Long followUpSessionId = resolveFollowUpSessionId(chatId, state, activeSessionId);
@@ -110,7 +120,7 @@ public class ChatOrchestrationService {
                 return response;
             }
             AgentConversationRequest followUp = new AgentConversationRequest();
-            followUp.setMessage(message);
+            followUp.setMessage(effectiveMessage);
             response.setConversation(conversationService.converse(followUpSessionId, followUp));
             response.setDecisionSessionId(followUpSessionId);
             response.setDecisionStatus(followUpDecision.getStatus());
@@ -141,11 +151,13 @@ public class ChatOrchestrationService {
         return response;
     }
 
-    private ChatMessageResponse startDecision(String chatId, String message, AiChatSession state, boolean usedModel) {
+    private ChatMessageResponse startDecision(String chatId, String originalMessage, String effectiveMessage,
+                                              AiChatSession state, boolean usedModel,
+                                              ContextRewriteResult contextRewrite) {
         DecisionRequest decisionRequest = new DecisionRequest();
-        decisionRequest.setQuery(message);
+        decisionRequest.setQuery(effectiveMessage);
         decisionRequest.setMaxCandidates(3);
-        String explicitLocationScope = extractExplicitLocationScope(message);
+        String explicitLocationScope = extractExplicitLocationScope(originalMessage);
         if (explicitLocationScope == null) {
             applyLocationSlot(decisionRequest, state);
         } else {
@@ -157,7 +169,7 @@ public class ChatOrchestrationService {
         DecisionResponse decision = decisionService.decide(decisionRequest);
         conversationStateService.activateDecision(state, decision.getSessionId());
         if (explicitLocationScope != null && isLocationClarification(decision)) {
-            ChatMessageResponse locationResponse = buildLocationResolutionResponse(chatId, message, state,
+            ChatMessageResponse locationResponse = buildLocationResolutionResponse(chatId, originalMessage, state,
                     decision.getSessionId(), decision, explicitLocationScope);
             if (locationResponse != null) return locationResponse;
         }
@@ -169,8 +181,20 @@ public class ChatOrchestrationService {
         response.setDecisionSessionId(decision.getSessionId());
         response.setDecisionStatus(decision.getStatus());
         response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
-        recordTurn(chatId, message, response);
+        response.setContextRewrite(contextRewrite);
+        recordTurn(chatId, originalMessage, response);
         return response;
+    }
+
+    private ContextRewriteResult rewriteContext(String message, List<Map<String, Object>> history,
+                                                AiChatSession state, Long activeSessionId) {
+        if (contextRewriter == null || conversationService == null) {
+            return ContextRewriteResult.unchanged(message, "REWRITER_UNAVAILABLE");
+        }
+        Long sessionId = activeSessionId == null ? state.getLastDecisionSessionId() : activeSessionId;
+        if (sessionId == null) return ContextRewriteResult.unchanged(message, "NO_DECISION_CONTEXT");
+        AgentSessionContext context = conversationService.loadWorkingMemory(sessionId);
+        return contextRewriter.rewrite(message, history, context);
     }
 
     private String route(String message, String decisionStatus, List<Map<String, Object>> chatHistory) {
@@ -221,12 +245,19 @@ public class ChatOrchestrationService {
     }
 
     private String resolveContextualFollowUpRoute(String chatId, String message, AiChatSession state,
-                                                  Long activeSessionId, DecisionResponse activeDecision) {
+                                                  Long activeSessionId, DecisionResponse activeDecision,
+                                                  ContextRewriteResult contextRewrite) {
         Long sessionId = resolveFollowUpSessionId(chatId, state, activeSessionId);
-        if (sessionId == null || hasExplicitNewDecisionIntent(message)) return null;
+        if (sessionId == null) return null;
         DecisionResponse decision = activeDecision;
         if (decision == null || !sessionId.equals(activeSessionId)) decision = decisionService.getDecision(sessionId);
         if (decision == null || !"COMPLETED".equals(decision.getStatus())) return null;
+        if (Boolean.TRUE.equals(contextRewrite.getApplied())) {
+            log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} sessionId={} route=BUSINESS_FOLLOW_UP source=CONTEXT_REWRITE query={}",
+                    chatId, sessionId, compact(message));
+            return "BUSINESS_FOLLOW_UP";
+        }
+        if (hasExplicitNewDecisionIntent(message)) return null;
         if (!conversationService.hasCandidateReference(sessionId, message)) return null;
         log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} sessionId={} route=BUSINESS_FOLLOW_UP query={}",
                 chatId, sessionId, compact(message));
@@ -236,7 +267,7 @@ public class ChatOrchestrationService {
     private boolean hasExplicitNewDecisionIntent(String message) {
         return message.contains("我想吃") || message.contains("想找") || message.contains("帮我找")
                 || message.contains("给我推荐") || message.contains("重新推荐") || message.contains("再推荐")
-                || isNewRecommendationIntent(message);
+                || message.contains("换个餐厅") || message.contains("换一家餐厅");
     }
 
     private boolean isNewRecommendationIntent(String message) {

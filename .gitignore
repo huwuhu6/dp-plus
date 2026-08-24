@@ -42,4 +42,6 @@ jmeter.log
 src/main/resources/application-dev.yml
 logs/
 .env
-nginx-1.18.0
+nginx-1.18.0/
+hs_err_pid*.log
+replay_pid*.log

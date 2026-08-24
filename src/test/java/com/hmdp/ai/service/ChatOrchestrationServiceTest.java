@@ -31,6 +31,59 @@ import static org.mockito.Mockito.when;
 
 class ChatOrchestrationServiceTest {
     @Test
+    void usesRewrittenQueryDownstreamButPersistsOriginalUserMessage() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        AgentConversationService conversationService = mock(AgentConversationService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ConversationContextRewriter rewriter = mock(ConversationContextRewriter.class);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", conversationService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "contextRewriter", rewriter);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setLastDecisionSessionId(36L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        DecisionResponse completed = new DecisionResponse();
+        completed.setSessionId(36L);
+        completed.setStatus("COMPLETED");
+        when(decisionService.getDecision(36L)).thenReturn(completed);
+        com.hmdp.ai.dto.AgentSessionContext context = new com.hmdp.ai.dto.AgentSessionContext();
+        when(conversationService.loadWorkingMemory(36L)).thenReturn(context);
+        com.hmdp.ai.dto.ContextRewriteResult rewrite = new com.hmdp.ai.dto.ContextRewriteResult();
+        rewrite.setOriginalQuery("第二家怎么样？");
+        rewrite.setRewrittenQuery("筑地日本料理（上街店）怎么样？");
+        rewrite.setApplied(true);
+        rewrite.setUsedModel(true);
+        rewrite.setReason("ELLIPSIS_RESOLVED");
+        when(rewriter.rewrite(any(), any(), any())).thenReturn(rewrite);
+        when(conversationService.hasCandidateReference(36L, rewrite.getRewrittenQuery())).thenReturn(true);
+        AgentConversationResponse conversation = new AgentConversationResponse();
+        conversation.setAnswer("筑地日本料理（上街店）的评价如下。");
+        when(conversationService.converse(org.mockito.Mockito.eq(36L), any())).thenReturn(conversation);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("第二家怎么样？");
+        ChatMessageResponse response = service.chat(request);
+
+        ArgumentCaptor<com.hmdp.ai.dto.AgentConversationRequest> followUp =
+                ArgumentCaptor.forClass(com.hmdp.ai.dto.AgentConversationRequest.class);
+        verify(conversationService).converse(org.mockito.Mockito.eq(36L), followUp.capture());
+        assertEquals(rewrite.getRewrittenQuery(), followUp.getValue().getMessage());
+        verify(memoryService).appendTurn(org.mockito.Mockito.eq("test-chat"),
+                org.mockito.Mockito.eq("第二家怎么样？"), any(), any(), any());
+        verify(decisionService, org.mockito.Mockito.never()).decide(any());
+        assertTrue(response.getContextRewrite().getApplied());
+    }
+
+    @Test
     void keepsGeneralChatOutsideDecisionWorkflowWhenModelIsUnavailable() {
         ChatOrchestrationService service = new ChatOrchestrationService();
         ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);

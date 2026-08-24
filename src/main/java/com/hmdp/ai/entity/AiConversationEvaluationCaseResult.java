@@ -14,14 +14,18 @@ public class AiConversationEvaluationCaseResult {
     private Long caseId;
     private String chatId;
     private String actualRoutesJson;
+    private String actualContextRewritesJson;
     private String actualToolNamesJson;
     private String actualToolCallsJson;
     private Integer expectedToolCount;
     private Integer coveredToolCount;
     private Integer unexpectedToolCount;
+    private Integer expectedContextRewriteCount;
+    private Integer matchedContextRewriteCount;
     private String actualFinalStatus;
     private String recommendedShopIds;
     private Boolean routeMatched;
+    private Boolean contextRewriteMatched;
     private Boolean toolMatched;
     private Boolean toolArgumentsMatched;
     private Boolean localityMatched;

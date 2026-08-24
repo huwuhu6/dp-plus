@@ -14,6 +14,7 @@ public class AiConversationEvaluationCase {
     private String datasetVersion;
     private String turnsJson;
     private String expectedRoutesJson;
+    private String expectedContextRewritesJson;
     private String expectedToolNamesJson;
     private String expectedToolArgumentsJson;
     private String expectedFinalStatus;

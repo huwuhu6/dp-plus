@@ -15,6 +15,8 @@ public class AiConversationEvaluationRun {
     private String datasetVersion;
     private Integer caseCount;
     private Integer routeMatchedCount;
+    private Integer contextRewriteExpectedCount;
+    private Integer contextRewriteMatchedCount;
     private Integer toolMatchedCount;
     private Integer toolExpectedCount;
     private Integer toolCoveredCount;

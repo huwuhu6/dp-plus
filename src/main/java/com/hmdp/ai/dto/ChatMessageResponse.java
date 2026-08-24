@@ -13,4 +13,5 @@ public class ChatMessageResponse {
     private AgentConversationResponse conversation;
     private Boolean usedModel;
     private String degradedReason;
+    private ContextRewriteResult contextRewrite;
 }
