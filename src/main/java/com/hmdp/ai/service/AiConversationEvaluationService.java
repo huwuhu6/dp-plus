@@ -174,6 +174,7 @@ public class AiConversationEvaluationService {
             Set<Long> decisionSessionIds = new HashSet<>();
             List<Map<String, Object>> outputs = new ArrayList<>();
             List<ContextRewriteResult> contextRewrites = new ArrayList<>();
+            List<List<DecisionRecommendation>> recommendationSnapshots = new ArrayList<>();
             String finalStatus = null;
             for (Map<String, Object> turn : turns) {
                 ChatMessageRequest request = new ChatMessageRequest();
@@ -194,6 +195,8 @@ public class AiConversationEvaluationService {
                         for (DecisionRecommendation item : response.getDecision().getRecommendations()) finalShopIds.add(item.getShopId());
                     }
                 }
+                recommendationSnapshots.add(response.getDecision() == null
+                        ? Collections.emptyList() : new ArrayList<>(response.getDecision().getRecommendations()));
                 Map<String, Object> output = new LinkedHashMap<>();
                 output.put("route", response.getRoute());
                 output.put("decisionStatus", response.getDecisionStatus());
@@ -208,7 +211,7 @@ public class AiConversationEvaluationService {
             result.setRecommendedShopIds(finalShopIds.stream().distinct().map(String::valueOf).collect(Collectors.joining(",")));
             result.setRouteMatched(expectedRoutes.equals(routes));
             ContextRewriteCoverage rewriteCoverage = evaluateContextRewriteCoverage(
-                    evaluationCase.getExpectedContextRewritesJson(), contextRewrites);
+                    evaluationCase.getExpectedContextRewritesJson(), contextRewrites, recommendationSnapshots);
             result.setContextRewriteMatched(rewriteCoverage.matched);
             result.setExpectedContextRewriteCount(rewriteCoverage.expectedCount);
             result.setMatchedContextRewriteCount(rewriteCoverage.matchedCount);
@@ -338,7 +341,8 @@ public class AiConversationEvaluationService {
     }
 
     private ContextRewriteCoverage evaluateContextRewriteCoverage(String expectedJson,
-                                                                   List<ContextRewriteResult> actual) throws Exception {
+                                                                   List<ContextRewriteResult> actual,
+                                                                   List<List<DecisionRecommendation>> recommendationSnapshots) throws Exception {
         if (expectedJson == null || expectedJson.trim().isEmpty()) return new ContextRewriteCoverage(0, 0, true);
         List<Map<String, Object>> expected = objectMapper.readValue(expectedJson,
                 new TypeReference<List<Map<String, Object>>>() { });
@@ -349,19 +353,34 @@ public class AiConversationEvaluationService {
             if (expectation == null || expectation.isEmpty()) continue;
             expectedCount++;
             ContextRewriteResult actualResult = index < actual.size() ? actual.get(index) : null;
-            if (matchesRewriteExpectation(expectation, actualResult)) matchedCount++;
+            if (matchesRewriteExpectation(expectation, actualResult, recommendationSnapshots, index)) matchedCount++;
         }
         return new ContextRewriteCoverage(expectedCount, matchedCount, expectedCount == matchedCount);
     }
 
-    private boolean matchesRewriteExpectation(Map<String, Object> expectation, ContextRewriteResult actual) {
+    private boolean matchesRewriteExpectation(Map<String, Object> expectation, ContextRewriteResult actual,
+                                              List<List<DecisionRecommendation>> recommendationSnapshots, int turnIndex) {
         if (actual == null) return false;
         if (expectation.containsKey("applied")
                 && !Boolean.valueOf(String.valueOf(expectation.get("applied"))).equals(actual.getApplied())) return false;
         String contains = stringValue(expectation.get("contains"));
         if (contains != null && (actual.getRewrittenQuery() == null || !actual.getRewrittenQuery().contains(contains))) return false;
+        Integer candidateOrdinal = integerValue(expectation.get("candidateOrdinal"));
+        if (candidateOrdinal != null) {
+            String candidateName = candidateNameAtOrdinal(recommendationSnapshots, turnIndex, candidateOrdinal);
+            if (candidateName == null || actual.getRewrittenQuery() == null || !actual.getRewrittenQuery().contains(candidateName)) return false;
+        }
         String reason = stringValue(expectation.get("reason"));
         return reason == null || reason.equals(actual.getReason());
+    }
+
+    private String candidateNameAtOrdinal(List<List<DecisionRecommendation>> snapshots, int turnIndex, int ordinal) {
+        if (ordinal < 1) return null;
+        for (int index = Math.min(turnIndex - 1, snapshots.size() - 1); index >= 0; index--) {
+            List<DecisionRecommendation> candidates = snapshots.get(index);
+            if (candidates != null && candidates.size() >= ordinal) return candidates.get(ordinal - 1).getShopName();
+        }
+        return null;
     }
 
     private List<Map<String, Object>> compactContextRewrites(List<ContextRewriteResult> rewrites) {
@@ -385,6 +404,15 @@ public class AiConversationEvaluationService {
         if (value == null) return null;
         String text = String.valueOf(value).trim();
         return text.isEmpty() ? null : text;
+    }
+
+    private Integer integerValue(Object value) {
+        if (value instanceof Number) return ((Number) value).intValue();
+        try {
+            return value == null ? null : Integer.valueOf(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private Boolean toolArgumentsMatched(String expectedJson, List<AiAgentToolCall> calls) throws Exception {

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ContextRewriteResult;
+import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.ConversationEvaluationRunResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunComparisonResponse;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
@@ -96,12 +97,12 @@ class AiConversationEvaluationServiceTest {
         evaluationCase.setCaseCode("CONTEXT_REWRITE");
         evaluationCase.setTurnsJson("[{\"message\":\"推荐附近日料\"},{\"message\":\"第二家怎么样？\"}]");
         evaluationCase.setExpectedRoutesJson("[\"START_DECISION\",\"BUSINESS_FOLLOW_UP\"]");
-        evaluationCase.setExpectedContextRewritesJson("[null,{\"applied\":true,\"contains\":\"筑地日本料理\"}]");
+        evaluationCase.setExpectedContextRewritesJson("[null,{\"applied\":true,\"candidateOrdinal\":2}]");
         evaluationCase.setExpectedToolNamesJson("[]");
         when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(13L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
-        when(chatService.chat(any())).thenReturn(response("START_DECISION", "COMPLETED"),
+        when(chatService.chat(any())).thenReturn(responseWithCandidates("START_DECISION", "COMPLETED", "第一家", "筑地日本料理（上街店）"),
                 responseWithRewrite("BUSINESS_FOLLOW_UP", "COMPLETED", "第二家怎么样？", "查询筑地日本料理（上街店）怎么样？"));
         when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
 
@@ -223,6 +224,20 @@ class AiConversationEvaluationServiceTest {
         rewrite.setUsedModel(true);
         rewrite.setReason("REWRITTEN");
         response.setContextRewrite(rewrite);
+        return response;
+    }
+
+    private ChatMessageResponse responseWithCandidates(String route, String status, String... names) {
+        ChatMessageResponse response = response(route, status);
+        com.hmdp.ai.dto.DecisionResponse decision = new com.hmdp.ai.dto.DecisionResponse();
+        decision.setStatus(status);
+        for (int index = 0; index < names.length; index++) {
+            DecisionRecommendation recommendation = new DecisionRecommendation();
+            recommendation.setShopId((long) index + 1);
+            recommendation.setShopName(names[index]);
+            decision.getRecommendations().add(recommendation);
+        }
+        response.setDecision(decision);
         return response;
     }
 
