@@ -14,4 +14,6 @@ public class ChatMessageResponse {
     private Boolean usedModel;
     private String degradedReason;
     private ContextRewriteResult contextRewrite;
+    private String policyAction;
+    private String policyReason;
 }

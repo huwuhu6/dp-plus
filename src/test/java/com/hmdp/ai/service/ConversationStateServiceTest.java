@@ -7,6 +7,7 @@ import com.hmdp.ai.dto.CriteriaMergeResult;
 import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionRecommendation;
+import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.mapper.AiChatSessionMapper;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,29 @@ class ConversationStateServiceTest {
         assertEquals(0, updated.getCandidatePool().size());
         assertNull(updated.getFocusedShopId());
         assertEquals(26.0789D, updated.getLocation().getLatitude());
+    }
+
+    @Test
+    void keepsDeviceLocationWhenSearchDestinationIsConfirmed() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        ConversationLocationSlot device = memory.getLocation();
+        device.setStatus("AVAILABLE"); device.setLatitude(26.0789D); device.setLongitude(119.1945D);
+        device.setCity("福州市");
+        ResolvedLocationCandidate destination = new ResolvedLocationCandidate();
+        destination.setLabel("重庆市"); destination.setLatitude(29.563D); destination.setLongitude(106.551D);
+        destination.setCity("重庆市"); destination.setSource("AMAP_MCP");
+        memory.setPendingLocationCandidates(Arrays.asList(destination));
+        AiChatSession state = state(memory, "target-location-test");
+
+        service.acceptPendingSearchLocation(state, 0);
+
+        ConversationWorkingMemory updated = service.workingMemory(state);
+        assertEquals(26.0789D, updated.getLocation().getLatitude());
+        assertEquals("福州市", updated.getLocation().getCity());
+        assertEquals(29.563D, updated.getSearchLocation().getLatitude());
+        assertEquals("重庆市", updated.getSearchLocation().getCity());
+        assertEquals(29.563D, service.usableSearchLocation(state).getLatitude());
     }
 
     private ConversationStateService service() {

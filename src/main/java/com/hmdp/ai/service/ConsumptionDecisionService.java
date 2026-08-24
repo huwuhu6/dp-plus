@@ -128,6 +128,9 @@ public class ConsumptionDecisionService {
                 } else {
                     request.setLatitude(followUp.getLatitude());
                     request.setLongitude(followUp.getLongitude());
+                    request.setProvince(followUp.getProvince());
+                    request.setCity(followUp.getCity());
+                    request.setDistrict(followUp.getDistrict());
                     request.setLocationStatus("AVAILABLE");
                     log.info("[AI][session={}] state=CLARIFYING action=LOCATION_ACCEPTED latitude={} longitude={}",
                             sessionId, request.getLatitude(), request.getLongitude());

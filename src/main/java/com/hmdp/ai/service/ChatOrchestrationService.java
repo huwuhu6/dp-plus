@@ -12,9 +12,11 @@ import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.ConversationLocationSlot;
+import com.hmdp.ai.dto.ConversationSlots;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
+import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.entity.AiChatSession;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
@@ -43,6 +45,7 @@ public class ChatOrchestrationService {
     @Resource private ConversationContextRewriter contextRewriter;
     @Resource private ConstraintExtractor constraintExtractor;
     @Resource private ConversationCriteriaMerger criteriaMerger;
+    @Resource private PolicyDecisionEngine policyDecisionEngine;
     @Resource private ObjectMapper objectMapper;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
@@ -84,27 +87,26 @@ public class ChatOrchestrationService {
                     chatId, activeSessionId, compact(effectiveMessage));
             log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route=START_DECISION source=PENDING_SUPERSEDE",
                     chatId, activeSessionId);
-            return startDecision(chatId, message, effectiveMessage, state, false, contextRewrite);
+            return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null, false, contextRewrite);
+        }
+        // A new search must take precedence over candidate references from the previous result.
+        // Otherwise "重新推荐福州小吃" can be incorrectly treated as a follow-up to a Hangzhou shop.
+        if (isNewRecommendationIntent(message)) {
+            log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} activeSessionId={} route=START_DECISION source=NEW_RECOMMENDATION query={}",
+                    chatId, activeSessionId, compact(message));
+            return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null, aiProperties.isConfigured(), contextRewrite);
         }
         String route = resolveContextualFollowUpRoute(chatId, effectiveMessage, state, activeSessionId, activeDecision,
                 contextRewrite);
-        if ("BUSINESS_FOLLOW_UP".equals(route)) {
-            log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
-        } else if (isNewRecommendationIntent(message)) {
-            log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} activeSessionId={} route=START_DECISION source=NEW_RECOMMENDATION query={}",
-                    chatId, activeSessionId, compact(message));
-            return startDecision(chatId, message, effectiveMessage, state, aiProperties.isConfigured(), contextRewrite);
-        } else {
-            if (route == null) route = route(effectiveMessage, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
-            log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
-        }
+        if (route == null) route = route(effectiveMessage, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
+        log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
         ChatMessageResponse response = new ChatMessageResponse();
         response.setChatId(chatId);
         response.setRoute(route);
         response.setUsedModel(aiProperties.isConfigured());
         response.setContextRewrite(contextRewrite);
         if ("START_DECISION".equals(route)) {
-            return startDecision(chatId, message, effectiveMessage, state, aiProperties.isConfigured(), contextRewrite);
+            return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null, aiProperties.isConfigured(), contextRewrite);
         }
         if ("BUSINESS_FOLLOW_UP".equals(route)) {
             Long followUpSessionId = resolveFollowUpSessionId(chatId, state, activeSessionId);
@@ -123,6 +125,9 @@ public class ChatOrchestrationService {
             }
             AgentConversationRequest followUp = new AgentConversationRequest();
             followUp.setMessage(effectiveMessage);
+            PolicyDecision policy = policyDecisionEngine == null ? null : policyDecisionEngine.decideFollowUp(effectiveMessage);
+            recordPolicy(state, chatId, followUpSessionId, policy);
+            applyPolicy(response, policy);
             response.setConversation(conversationService.converse(followUpSessionId, followUp));
             conversationStateService.snapshotFollowUp(state, followUpSessionId,
                     response.getConversation().getFocusedShopId(), response.getConversation().getFocusedShopName());
@@ -156,12 +161,13 @@ public class ChatOrchestrationService {
     }
 
     private ChatMessageResponse startDecision(String chatId, String originalMessage, String effectiveMessage,
-                                              AiChatSession state, boolean usedModel,
+                                              AiChatSession state, boolean submittedDeviceLocation, boolean usedModel,
                                               ContextRewriteResult contextRewrite) {
         DecisionRequest decisionRequest = new DecisionRequest();
         decisionRequest.setQuery(effectiveMessage);
         decisionRequest.setMaxCandidates(3);
-        String explicitLocationScope = extractExplicitLocationScope(originalMessage);
+        String explicitLocationScope = submittedDeviceLocation && refersToCurrentDeviceLocation(originalMessage)
+                ? null : extractExplicitLocationScope(originalMessage);
         if (explicitLocationScope == null) {
             applyLocationSlot(decisionRequest, state);
         } else {
@@ -175,7 +181,7 @@ public class ChatOrchestrationService {
             // Keeps isolated gateway tests compatible with the pre-working-memory state mock.
             DecisionResponse decision = decisionService.decide(decisionRequest);
             conversationStateService.activateDecision(state, decision.getSessionId());
-            return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, explicitLocationScope, decision);
+            return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, explicitLocationScope, decision, null);
         }
         com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(memory.getActiveCriteria(),
                 constraintExtractor.extract(effectiveMessage), originalMessage);
@@ -183,15 +189,18 @@ public class ChatOrchestrationService {
         log.info("[AI][chat] event=CRITERIA_MERGED chatId={} inherited={} replaced={} appended={} cleared={} invalidated={} query={}", chatId,
                 mergeResult.getInherited(), mergeResult.getReplaced(), mergeResult.getAppended(), mergeResult.getCleared(),
                 mergeResult.getInvalidated(), compact(effectiveMessage));
+        PolicyDecision policy = policyDecisionEngine == null ? null : policyDecisionEngine.decideRecommendation(
+                decisionRequest, mergeResult.getConstraints(), memory, explicitLocationScope);
+        recordPolicy(state, chatId, null, policy);
         DecisionResponse decision = decisionService.decide(decisionRequest, mergeResult.getConstraints());
         conversationStateService.activateDecision(state, decision.getSessionId());
         conversationStateService.snapshotDecision(state, decision);
-        return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, explicitLocationScope, decision);
+        return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, explicitLocationScope, decision, policy);
     }
 
     private ChatMessageResponse buildDecisionResponse(String chatId, String originalMessage, AiChatSession state, boolean usedModel,
-                                                      ContextRewriteResult contextRewrite, String explicitLocationScope,
-                                                      DecisionResponse decision) {
+                                                       ContextRewriteResult contextRewrite, String explicitLocationScope,
+                                                       DecisionResponse decision, PolicyDecision policy) {
         if (explicitLocationScope != null && isLocationClarification(decision)) {
             ChatMessageResponse locationResponse = buildLocationResolutionResponse(chatId, originalMessage, state,
                     decision.getSessionId(), decision, explicitLocationScope);
@@ -206,6 +215,7 @@ public class ChatOrchestrationService {
         response.setDecisionStatus(decision.getStatus());
         response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
         response.setContextRewrite(contextRewrite);
+        applyPolicy(response, policy);
         recordTurn(chatId, originalMessage, response);
         return response;
     }
@@ -310,12 +320,20 @@ public class ChatOrchestrationService {
                 || message.contains("奶茶") || message.contains("川菜") || message.contains("粤菜");
         boolean refinement = message.contains("换成") || message.contains("改成") || message.contains("便宜点")
                 || message.contains("贵点") || message.contains("不要辣") || message.contains("不吃辣");
-        return (asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory)) || (refinement && hasDiningCategory);
+        boolean explicitSearchVerb = message.contains("帮我找") || message.contains("帮我搜") || message.contains("找一下")
+                || message.contains("推荐一下") || message.contains("给我推荐");
+        return (asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory))
+                || (hasDiningCategory && explicitSearchVerb) || (refinement && hasDiningCategory);
     }
 
     private boolean isFocusedShopQuestion(String message) {
         return message.contains("这家") || message.contains("那家") || message.contains("这一个")
                 || message.contains("上一家") || message.contains("刚才那家");
+    }
+
+    private boolean refersToCurrentDeviceLocation(String message) {
+        return message.contains("当前定位") || message.contains("当前位置") || message.contains("现在位置")
+                || message.contains("我这里") || message.contains("我身边");
     }
 
     private boolean isPausedDecision(DecisionResponse decision) {
@@ -329,8 +347,14 @@ public class ChatOrchestrationService {
 
     private boolean isPotentialNamedLocation(String message) {
         if (!locationResolutionService.isAvailable()) return false;
-        if (message.length() > 40 || message.contains("?") || message.contains("？")) return false;
-        return !message.contains("算了") && !message.contains("结束") && !message.contains("不找了");
+        String normalized = message == null ? "" : message.replaceAll("\\s+", "").trim();
+        if (normalized.length() < 2 || normalized.length() > 24 || normalized.contains("?") || normalized.contains("？")) return false;
+        String[] nonLocationWords = {"这家", "那家", "第一家", "第二家", "评价", "优惠", "代金券", "团购", "营业", "几点",
+                "怎么样", "对比", "推荐", "找", "吃", "餐", "店", "火锅", "烧烤", "日料", "小吃", "算了", "结束", "不找了"};
+        for (String word : nonLocationWords) {
+            if (normalized.contains(word)) return false;
+        }
+        return normalized.matches("^(?:我在|去|到)?[\\p{IsHan}]{2,16}(?:省|市|区|县|镇|乡|街道|大学城|商圈)?$");
     }
 
     private ChatMessageResponse resolveNamedLocation(String chatId, String message, AiChatSession state,
@@ -342,10 +366,11 @@ public class ChatOrchestrationService {
                                                                 Long activeSessionId, DecisionResponse activeDecision,
                                                                 String locationQuery) {
         if (!locationServiceAvailable()) return null;
-        List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(locationQuery);
+        String normalizedLocationQuery = normalizeLocationQuery(locationQuery);
+        List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(normalizedLocationQuery);
         if (candidates.isEmpty()) {
             log.info("[AI][chat] event=LOCATION_RESOLUTION_EMPTY chatId={} sessionId={} query={}",
-                    chatId, activeSessionId, compact(locationQuery));
+                    chatId, activeSessionId, compact(normalizedLocationQuery));
             return null;
         }
         conversationStateService.rememberLocationCandidates(state, candidates);
@@ -369,7 +394,7 @@ public class ChatOrchestrationService {
         response.setDecisionStatus(decision.getStatus());
         response.setAnswer(decision.getQuestion());
         log.info("[AI][chat] event=LOCATION_RESOLUTION_CANDIDATES chatId={} sessionId={} query={} candidates={}",
-                chatId, activeSessionId, compact(locationQuery), candidates.size());
+                chatId, activeSessionId, compact(normalizedLocationQuery), candidates.size());
         recordTurn(chatId, message, response);
         return response;
     }
@@ -382,13 +407,54 @@ public class ChatOrchestrationService {
         if (!locationServiceAvailable()) return null;
         String normalized = message.replaceAll("\\s+", "").trim();
         if (normalized.length() > 80) return null;
+        // Keep the search verb out of the geographical entity before generic relative matching.
+        Pattern searchNearDestinationFirst = Pattern.compile("(?:找|搜|推荐)([\\p{IsHan}]{2,12}?)(?:附近|周边|当地|那边).*(?:吃|餐|店|火锅|烧烤|日料|小吃)");
+        Matcher searchNearDestinationFirstMatcher = searchNearDestinationFirst.matcher(normalized);
+        if (searchNearDestinationFirstMatcher.find()) {
+            String scope = searchNearDestinationFirstMatcher.group(1);
+            if (isUsableExplicitLocationScope(scope)) return scope;
+        }
         Pattern relativePlace = Pattern.compile("(?:^|[，,。；;]|在|去|到)([\\p{IsHan}]{2,12}?)(?:那边|附近|周边|一带|当地)");
         Matcher relativeMatcher = relativePlace.matcher(normalized);
-        if (relativeMatcher.find()) return relativeMatcher.group(1);
+        if (relativeMatcher.find()) {
+            String scope = relativeMatcher.group(1);
+            if (isUsableExplicitLocationScope(scope)) return scope;
+        }
+        // Covers destination queries without an administrative suffix, e.g. "重庆有什么好吃的".
+        Pattern destinationQuestion = Pattern.compile("(?:在|去|到|看|查)([\\p{IsHan}]{2,12}?)(?:有什么|有啥|哪里|那边|当地).*(?:吃|餐|店)");
+        Matcher destinationMatcher = destinationQuestion.matcher(normalized);
+        if (destinationMatcher.find()) {
+            String scope = destinationMatcher.group(1);
+            if (isUsableExplicitLocationScope(scope)) return scope;
+        }
+        Pattern leadingDestinationQuestion = Pattern.compile("^([\\p{IsHan}]{2,12}?)(?:有什么|有啥|哪里).*(?:吃|餐|店)");
+        Matcher leadingDestinationMatcher = leadingDestinationQuestion.matcher(normalized);
+        if (leadingDestinationMatcher.find()) {
+            String scope = leadingDestinationMatcher.group(1);
+            if (isUsableExplicitLocationScope(scope)) return scope;
+        }
+        Pattern searchNearDestination = Pattern.compile("(?:找|搜|推荐)([\\p{IsHan}]{2,12}?)(?:附近|周边|当地|那边).*(?:吃|餐|店|火锅|烧烤|日料|小吃)");
+        Matcher searchNearDestinationMatcher = searchNearDestination.matcher(normalized);
+        if (searchNearDestinationMatcher.find()) {
+            String scope = searchNearDestinationMatcher.group(1);
+            if (isUsableExplicitLocationScope(scope)) return scope;
+        }
         Pattern administrativePlace = Pattern.compile("([\\p{IsHan}]{2,12}(?:省|市|区|县|镇|乡|街道|大学城|商圈))");
         Matcher administrativeMatcher = administrativePlace.matcher(normalized);
-        if (administrativeMatcher.find()) return administrativeMatcher.group(1);
+        if (administrativeMatcher.find()) {
+            String scope = administrativeMatcher.group(1);
+            if (isUsableExplicitLocationScope(scope)) return scope;
+        }
         return null;
+    }
+
+    private boolean isUsableExplicitLocationScope(String scope) {
+        if (scope == null || scope.length() < 2) return false;
+        return !scope.contains("帮") && !scope.contains("找") && !scope.contains("搜")
+                && !scope.contains("推荐") && !scope.contains("看") && !scope.contains("一家")
+                && !scope.contains("什么") && !scope.contains("好吃") && !scope.contains("餐")
+                && !scope.contains("店") && !scope.contains("火锅") && !scope.contains("烧烤")
+                && !scope.contains("日料") && !scope.contains("料理") && !scope.contains("小吃");
     }
 
     private String buildLocationConfirmationQuestion(List<ResolvedLocationCandidate> candidates) {
@@ -397,6 +463,25 @@ public class ChatOrchestrationService {
             return "已通过地图服务解析到“" + candidate.getLabel() + "”。确认使用该位置搜索附近餐饮商户吗？";
         }
         return "地图服务解析到多个可能地点，请选择要作为搜索中心的位置。";
+    }
+
+    private String normalizeLocationQuery(String locationQuery) {
+        if (locationQuery == null) return "";
+        return locationQuery.trim().replaceAll("(?:附近|周边|那边|当地|一带).*$", "");
+    }
+
+    private void recordPolicy(AiChatSession state, String chatId, Long sessionId, PolicyDecision policy) {
+        if (policy == null) return;
+        conversationStateService.recordPolicy(state, policy);
+        log.info("[AI][policy] event=POLICY_DECIDED chatId={} sessionId={} action={} blocking={} reason={} scope={}",
+                chatId, sessionId, policy.getAction(), policy.isBlocking(), compact(policy.getReason()),
+                compact(policy.getExplicitLocationScope()));
+    }
+
+    private void applyPolicy(ChatMessageResponse response, PolicyDecision policy) {
+        if (policy == null) return;
+        response.setPolicyAction(policy.getAction());
+        response.setPolicyReason(policy.getReason());
     }
 
     private boolean isRestaurantSearch(String message) {
@@ -448,7 +533,7 @@ public class ChatOrchestrationService {
         String optionId = request.getSelectedOptionId();
         if (optionId.startsWith("CONFIRM_RESOLVED_LOCATION_")) {
             int index = Integer.parseInt(optionId.substring("CONFIRM_RESOLVED_LOCATION_".length()));
-            ResolvedLocationCandidate candidate = conversationStateService.acceptPendingLocation(state, index);
+            ResolvedLocationCandidate candidate = conversationStateService.acceptPendingSearchLocation(state, index);
             optionId = "PROVIDE_LOCATION";
             log.info("[AI][chat] event=LOCATION_RESOLUTION_CONFIRMED chatId={} sessionId={} label={} latitude={} longitude={}",
                     chatId, activeSessionId, candidate.getLabel(), candidate.getLatitude(), candidate.getLongitude());
@@ -458,10 +543,14 @@ public class ChatOrchestrationService {
         followUp.setSelectedOptionId(optionId);
         followUp.setMessage(message);
         if ("PROVIDE_LOCATION".equals(optionId)) {
-            ConversationLocationSlot location = conversationStateService.usableLocation(state);
+            ConversationLocationSlot location = conversationStateService.usableSearchLocation(state);
+            if (location == null) location = conversationStateService.usableLocation(state);
             if (location == null) throw new IllegalArgumentException("当前没有有效位置，请重新授权定位后继续");
             followUp.setLatitude(location.getLatitude());
             followUp.setLongitude(location.getLongitude());
+            followUp.setProvince(location.getProvince());
+            followUp.setCity(location.getCity());
+            followUp.setDistrict(location.getDistrict());
         }
         log.info("[AI][chat] event=DECISION_EVENT chatId={} sessionId={} optionId={}", chatId, activeSessionId, optionId);
         DecisionResponse decision = decisionService.continueDecision(activeSessionId, followUp);
@@ -477,7 +566,8 @@ public class ChatOrchestrationService {
     }
 
     private void applyLocationSlot(DecisionRequest request, AiChatSession state) {
-        ConversationLocationSlot location = conversationStateService.usableLocation(state);
+        ConversationLocationSlot location = conversationStateService.usableSearchLocation(state);
+        if (location == null) location = conversationStateService.usableLocation(state);
         if (location != null) {
             request.setLatitude(location.getLatitude());
             request.setLongitude(location.getLongitude());
@@ -490,7 +580,9 @@ public class ChatOrchestrationService {
                     state.getChatId(), location.getSource(), location.getLatitude(), location.getLongitude());
             return;
         }
-        String status = conversationStateService.slots(state).getLocation().getStatus();
+        ConversationSlots slots = conversationStateService.slots(state);
+        ConversationLocationSlot deviceLocation = slots == null ? null : slots.getLocation();
+        String status = deviceLocation == null ? null : deviceLocation.getStatus();
         request.setLocationStatus(status == null ? "MISSING" : status);
         log.info("[AI][chat] event=SLOT_READ chatId={} slot=location status={}", state.getChatId(), request.getLocationStatus());
     }

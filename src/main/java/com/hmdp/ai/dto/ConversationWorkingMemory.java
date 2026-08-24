@@ -11,7 +11,10 @@ import java.util.List;
  */
 @Data
 public class ConversationWorkingMemory {
+    /** Device-provided location. It must never be overwritten by a named search destination. */
     private ConversationLocationSlot location = new ConversationLocationSlot();
+    /** Explicit destination used by the current recommendation task, such as "重庆" or "上街大学城". */
+    private ConversationLocationSlot searchLocation = new ConversationLocationSlot();
     private List<ResolvedLocationCandidate> pendingLocationCandidates = new ArrayList<ResolvedLocationCandidate>();
     private DecisionConstraints activeCriteria = new DecisionConstraints();
     private List<DecisionRecommendation> candidatePool = new ArrayList<DecisionRecommendation>();
@@ -19,4 +22,6 @@ public class ConversationWorkingMemory {
     private String focusedShopName;
     private String dialogPhase = "IDLE";
     private Long sourceDecisionSessionId;
+    private String lastPolicyAction = "NONE";
+    private String lastPolicyReason;
 }

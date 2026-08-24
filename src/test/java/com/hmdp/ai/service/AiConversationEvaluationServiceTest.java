@@ -34,6 +34,18 @@ import static org.mockito.Mockito.when;
 
 class AiConversationEvaluationServiceTest {
     @Test
+    void acceptsDeclaredSafeTerminalStatusAlternatives() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+
+        assertEquals(true, ReflectionTestUtils.invokeMethod(service, "equalsExpected",
+                "COMPLETED|WAITING_RELAXATION", "COMPLETED"));
+        assertEquals(true, ReflectionTestUtils.invokeMethod(service, "equalsExpected",
+                "COMPLETED|WAITING_RELAXATION", "WAITING_RELAXATION"));
+        assertEquals(false, ReflectionTestUtils.invokeMethod(service, "equalsExpected",
+                "COMPLETED|WAITING_RELAXATION", "FAILED"));
+    }
+
+    @Test
     void runsScriptedTurnsThroughChatEntryAndAggregatesRouteMetrics() {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);

@@ -11,6 +11,7 @@ import com.hmdp.ai.dto.CriteriaMergeResult;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.mapper.AiChatSessionMapper;
@@ -89,6 +90,13 @@ public class ConversationStateService {
         return location;
     }
 
+    /** An explicit destination is independent from, and takes precedence over, device location. */
+    public ConversationLocationSlot usableSearchLocation(AiChatSession state) {
+        ConversationWorkingMemory memory = workingMemory(state);
+        ConversationLocationSlot target = usable(memory.getSearchLocation());
+        return target == null ? usableLocation(state) : target;
+    }
+
     public void acceptLocation(AiChatSession state, ChatLocationInput input) {
         if (input == null || input.getLatitude() == null || input.getLongitude() == null) throw new IllegalArgumentException("Location event requires latitude and longitude");
         ConversationWorkingMemory memory = workingMemory(state);
@@ -114,18 +122,36 @@ public class ConversationStateService {
     }
 
     public ResolvedLocationCandidate acceptPendingLocation(AiChatSession state, int index) {
+        return acceptPendingSearchLocation(state, index);
+    }
+
+    public ResolvedLocationCandidate acceptPendingSearchLocation(AiChatSession state, int index) {
         ConversationWorkingMemory memory = workingMemory(state);
         List<ResolvedLocationCandidate> candidates = memory.getPendingLocationCandidates();
         if (candidates == null || index < 0 || index >= candidates.size()) throw new IllegalArgumentException("Location candidate has expired");
         ResolvedLocationCandidate candidate = candidates.get(index);
-        ChatLocationInput input = new ChatLocationInput(); input.setLatitude(candidate.getLatitude()); input.setLongitude(candidate.getLongitude()); input.setSource(candidate.getSource());
-        acceptLocation(state, input);
-        memory = workingMemory(state);
-        memory.getLocation().setProvince(candidate.getProvince()); memory.getLocation().setCity(candidate.getCity()); memory.getLocation().setDistrict(candidate.getDistrict());
+        ConversationLocationSlot target = memory.getSearchLocation();
+        boolean changed = materialLocationChange(target, candidate.getLatitude(), candidate.getLongitude());
+        target.setStatus("AVAILABLE"); target.setLatitude(candidate.getLatitude()); target.setLongitude(candidate.getLongitude());
+        target.setProvince(candidate.getProvince()); target.setCity(candidate.getCity()); target.setDistrict(candidate.getDistrict());
+        target.setSource(candidate.getSource()); target.setCapturedAt(LocalDateTime.now()); target.setExpiresAt(target.getCapturedAt().plusMinutes(LOCATION_TTL_MINUTES));
+        if (changed) {
+            int previousCandidateCount = invalidateCandidatePool(memory);
+            log.info("[AI][state] event=CASCADE_INVALIDATED chatId={} reason=SEARCH_LOCATION_CHANGED previousCandidates={}",
+                    state.getChatId(), previousCandidateCount);
+        }
         memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>());
         updateWorkingMemory(state, memory);
-        log.info("[AI][state] event=LOCATION_CANDIDATE_CONFIRMED chatId={} index={} label={} latitude={} longitude={}", state.getChatId(), index, candidate.getLabel(), candidate.getLatitude(), candidate.getLongitude());
+        log.info("[AI][state] event=SEARCH_LOCATION_CONFIRMED chatId={} index={} label={} latitude={} longitude={}", state.getChatId(), index, candidate.getLabel(), candidate.getLatitude(), candidate.getLongitude());
         return candidate;
+    }
+
+    public void recordPolicy(AiChatSession state, PolicyDecision decision) {
+        if (decision == null) return;
+        ConversationWorkingMemory memory = workingMemory(state);
+        memory.setLastPolicyAction(decision.getAction());
+        memory.setLastPolicyReason(decision.getReason());
+        updateWorkingMemory(state, memory);
     }
 
     public void declineLocation(AiChatSession state) {
@@ -203,7 +229,7 @@ public class ConversationStateService {
     private void update(AiChatSession state) { int version = state.getVersion() == null ? 0 : state.getVersion(); state.setVersion(version + 1); int updated = chatSessionMapper.update(state, new UpdateWrapper<AiChatSession>().eq("chat_id", state.getChatId()).eq("version", version)); if (updated != 1) throw new IllegalStateException("Conversation state changed concurrently"); }
     private String writeLegacySlots(ConversationWorkingMemory memory) { ConversationSlots slots = new ConversationSlots(); slots.setLocation(memory.getLocation()); slots.setPendingLocationCandidates(memory.getPendingLocationCandidates()); try { return objectMapper.writeValueAsString(slots); } catch (Exception e) { throw new IllegalStateException("Conversation location slots cannot be saved", e); } }
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
-    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (memory.getActiveCriteria() == null) memory.setActiveCriteria(new DecisionConstraints()); if (memory.getCandidatePool() == null) memory.setCandidatePool(new ArrayList<DecisionRecommendation>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); }
+    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getSearchLocation() == null) memory.setSearchLocation(new ConversationLocationSlot()); if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (memory.getActiveCriteria() == null) memory.setActiveCriteria(new DecisionConstraints()); if (memory.getCandidatePool() == null) memory.setCandidatePool(new ArrayList<DecisionRecommendation>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
     private boolean changesCandidateUniverse(CriteriaMergeResult reduction) {
         return reduction.getReplaced().stream().anyMatch(item -> item.startsWith("cuisine:"))
                 || reduction.getCleared().contains("cuisine");
@@ -220,6 +246,18 @@ public class ConversationStateService {
         double latitudeDelta = current.getLatitude() - next.getLatitude();
         double longitudeDelta = current.getLongitude() - next.getLongitude();
         return Math.sqrt(latitudeDelta * latitudeDelta + longitudeDelta * longitudeDelta) > 0.005D;
+    }
+    private boolean materialLocationChange(ConversationLocationSlot current, Double latitude, Double longitude) {
+        if (current == null || current.getLatitude() == null || current.getLongitude() == null) return false;
+        if (latitude == null || longitude == null) return true;
+        double latitudeDelta = current.getLatitude() - latitude;
+        double longitudeDelta = current.getLongitude() - longitude;
+        return Math.sqrt(latitudeDelta * latitudeDelta + longitudeDelta * longitudeDelta) > 0.005D;
+    }
+    private ConversationLocationSlot usable(ConversationLocationSlot location) {
+        if (location == null || !"AVAILABLE".equals(location.getStatus())) return null;
+        if (location.getExpiresAt() != null && !location.getExpiresAt().isAfter(LocalDateTime.now())) return null;
+        return location.getLatitude() == null || location.getLongitude() == null ? null : location;
     }
     private void clearLocation(ConversationLocationSlot location, String status) { location.setStatus(status); location.setLatitude(null); location.setLongitude(null); location.setProvince(null); location.setCity(null); location.setDistrict(null); location.setAccuracyMeters(null); location.setExpiresAt(null); }
     private void ensureOwner(AiChatSession state) { if (state.getUserId() == null) return; if (UserHolder.getUser() == null || !state.getUserId().equals(UserHolder.getUser().getId())) throw new SecurityException("No permission to access this chat session"); }

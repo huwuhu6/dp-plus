@@ -258,7 +258,11 @@ public class AiConversationEvaluationService {
     }
 
     private boolean equalsExpected(String expected, String actual) {
-        return expected == null || expected.trim().isEmpty() || expected.equals(actual);
+        if (expected == null || expected.trim().isEmpty()) return true;
+        for (String allowed : expected.split("\\|")) {
+            if (allowed.trim().equals(actual)) return true;
+        }
+        return false;
     }
 
     private boolean hasFailure(AiConversationEvaluationCaseResult result) {

@@ -8,4 +8,7 @@ public class DecisionFollowUpRequest {
     private String message;
     private Double latitude;
     private Double longitude;
+    private String province;
+    private String city;
+    private String district;
 }

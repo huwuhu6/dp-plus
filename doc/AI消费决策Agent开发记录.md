@@ -883,3 +883,17 @@ Gateway 在每次新推荐前先提取本轮约束，再经 `ConversationCriteri
 新增 `V34__conversation_evaluation_waiting_relaxation_expectations.sql`，将 `START_NEW_RECOM_CLEAR_INTENT`、`LOCATION_SWITCH_HANGZHOU_TO_FUZHOU`、`CRITERIA_REFINEMENT_RETAINS_LOCATION` 的期望最终状态修正为 `WAITING_RELAXATION`。用例说明同时要求保留放宽路径，并分别约束不得回退到旧品类、旧城市或丢弃已继承条件。后续如需细化该维度，将把放宽选项 ID 纳入轨迹断言；当前状态、本地性、目标商户和无伪造推荐的断言已覆盖该安全边界。
 
 应用 V34 后以真实 DashScope `deepseek-v4-flash`、`qwen-flash`、MySQL、Redis、Milvus 和工具链重跑 `conversation-v1`（运行 #15）：12 条轨迹均完成，路由 `12/12`、上下文改写 `1/1`、必要工具断言 `12/12`、本地性 `12/12`、目标商户 `12/12`、最终状态 `12/12`，平均端到端耗时 `13129ms`。三条严格条件无候选轨迹仍返回 `WAITING_RELAXATION`，这证明链路保持了“不用跨城或不符合条件的商户凑结果”的边界，同时把后续选择权明确交还给用户。
+
+## 2026-08-25：澄清策略决策与搜索目标位置隔离
+
+在 State Reducer 之后、业务检索之前新增 `PolicyDecisionEngine`，以确定性 Java 代码对已归约的工作记忆做策略裁决，并把 `action` 与 `reason` 写入响应、Working Memory 和 `POLICY_DECIDED` 日志。首版策略覆盖三类决策：无地理锚点时 `CLARIFY_LOCATION`、本轮明确目的地时 `RESOLVE_EXPLICIT_LOCATION`、具备地理锚点时 `EXECUTE_RECOMMENDATION`；对已推荐商户的追问则按评价证据、优惠券、对比和基础事实映射到相应的业务工具意图。模型仍可参与工具规划，但不能改变地点优先级和状态归约边界。
+
+Working Memory 的地点拆分为两份事实：`location` 保存设备/浏览器位置，`searchLocation` 保存用户确认的搜索目的地。用户在福州而说“帮我找重庆附近的火锅”时，旧的福州设备坐标不会进入重庆检索；系统先通过地图 MCP 解析重庆，确认后仅写入 `searchLocation`，同时保留设备位置。若目的地发生实质变化，旧候选池和焦点商户会级联失效，避免跨城市指代。相反，“我刚飞到福州，按我现在位置重新推荐”这类携带本轮坐标且明确指向当前设备位置的请求，优先使用本轮坐标，不会再被文本中的城市名误导到地图确认。
+
+### 真实回放与解析器修复
+
+扩充 `conversation-v1` 到 13 条轨迹，新增 `EXPLICIT_DESTINATION_OVERRIDES_DEVICE_LOCATION`：设备位置为福州、目标为重庆，断言路线必须为“地点解析 -> 用户确认事件”，最终由于重庆样本不足安全进入 `WAITING_RELAXATION`。首次启用地图 MCP 的真实回放发现地点短语规则会把“帮我找附近”“推荐一家附近”中的动作或数量词识别为地点，造成不必要的澄清；也发现澄清状态会把“这家营业到几点”误送至地图服务。现通过地点候选词法校验和“仅纯地点短语可触发地图解析”的保护修复，并补充单元测试覆盖这些反例、重庆显式目的地、设备位置优先及候选追问不被新推荐抢占。
+
+`V37__conversation_evaluation_safe_terminal_statuses.sql` 为“取消聚餐、切换单人简餐”声明 `COMPLETED|WAITING_RELAXATION` 两个安全终态：当前数据可召回合规商户时应完成推荐，无候选时应等待用户明确放宽条件；两者均不能回退到旧聚餐候选。评测器仅对该字段支持以 `|` 声明允许集合，其他断言仍维持严格匹配，避免把状态机错误掩盖为通过。
+
+最终使用真实 DashScope `deepseek-v4-flash`、`qwen-flash`、MySQL、Redis、Milvus 和高德地图 MCP 重跑 `conversation-v1`（运行 #21）：13 条轨迹均完整执行，路由命中 `13/13`、上下文改写 `1/1`、必要工具覆盖 `8/8`、本地性 `13/13`、最终状态 `13/13`、目标商户归因 `13/13`，平均端到端耗时 `12085ms`。其中“设备在福州、明确查询重庆火锅”的轨迹先解析并确认重庆，再因重庆样本不足进入 `WAITING_RELAXATION`，验证没有跨用设备位置或虚构候选；“按我当前定位重新推荐”的轨迹则直接复用本轮设备坐标，验证城市名称不会错误触发目的地确认。

@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -203,10 +204,11 @@ class ChatOrchestrationServiceTest {
         ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
         ChatMemoryService memoryService = mock(ChatMemoryService.class);
         ConversationStateService stateService = mock(ConversationStateService.class);
+        AgentConversationService conversationService = mock(AgentConversationService.class);
         ReflectionTestUtils.setField(service, "aiClient", aiClient);
         ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
         ReflectionTestUtils.setField(service, "decisionService", decisionService);
-        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "conversationService", conversationService);
         ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
         ReflectionTestUtils.setField(service, "conversationStateService", stateService);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
@@ -334,7 +336,7 @@ class ChatOrchestrationServiceTest {
         when(locationService.resolve("重庆")).thenReturn(Arrays.asList(candidate));
 
         ChatMessageRequest request = new ChatMessageRequest();
-        request.setMessage("重庆那边有什么好吃的店吗");
+        request.setMessage("帮我找重庆附近的火锅");
         ChatMessageResponse response = service.chat(request);
 
         ArgumentCaptor<DecisionRequest> decisionRequest = ArgumentCaptor.forClass(DecisionRequest.class);
@@ -346,16 +348,33 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    void nearbySearchPhraseDoesNotTreatActionWordsAsAnExplicitLocation() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        AmapMcpLocationResolutionService locationService = mock(AmapMcpLocationResolutionService.class);
+        ReflectionTestUtils.setField(service, "locationResolutionService", locationService);
+        when(locationService.isAvailable()).thenReturn(true);
+
+        assertNull(ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "帮我找附近的日料"));
+        assertNull(ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "推荐一家附近的日料店"));
+        assertEquals("重庆", ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "帮我找重庆附近的火锅"));
+        assertEquals(false, ReflectionTestUtils.invokeMethod(service, "isPotentialNamedLocation", "这家营业到几点"));
+        assertEquals(true, ReflectionTestUtils.invokeMethod(service, "isPotentialNamedLocation", "福州鼓楼区"));
+        assertEquals(true, ReflectionTestUtils.invokeMethod(service, "refersToCurrentDeviceLocation", "我刚飞到福州，按我现在位置重新推荐"));
+        assertEquals(false, ReflectionTestUtils.invokeMethod(service, "refersToCurrentDeviceLocation", "帮我找重庆附近的火锅"));
+    }
+
+    @Test
     void sceneBasedRestaurantRequestStartsNewDecisionInsteadOfBusinessFollowUp() {
         ChatOrchestrationService service = new ChatOrchestrationService();
         OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
         ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
         ChatMemoryService memoryService = mock(ChatMemoryService.class);
         ConversationStateService stateService = mock(ConversationStateService.class);
+        AgentConversationService conversationService = mock(AgentConversationService.class);
         ReflectionTestUtils.setField(service, "aiClient", aiClient);
         ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
         ReflectionTestUtils.setField(service, "decisionService", decisionService);
-        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "conversationService", conversationService);
         ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
         ReflectionTestUtils.setField(service, "conversationStateService", stateService);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
@@ -371,6 +390,9 @@ class ChatOrchestrationServiceTest {
         previous.setSessionId(55L);
         previous.setStatus("COMPLETED");
         when(decisionService.getDecision(55L)).thenReturn(previous);
+        // The previous candidate pool may still resolve "那家" references, but it must not
+        // override an explicit request to start a new recommendation.
+        when(conversationService.hasCandidateReference(55L, "那有适合约会的店吗")).thenReturn(true);
         DecisionResponse next = new DecisionResponse();
         next.setSessionId(58L);
         next.setStatus("COMPLETED");
