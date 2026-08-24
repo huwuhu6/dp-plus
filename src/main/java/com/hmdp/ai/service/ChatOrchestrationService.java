@@ -179,8 +179,10 @@ public class ChatOrchestrationService {
         }
         com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(memory.getActiveCriteria(),
                 constraintExtractor.extract(effectiveMessage), originalMessage);
-        log.info("[AI][chat] event=CRITERIA_MERGED chatId={} inherited={} replaced={} cleared={} query={}", chatId,
-                mergeResult.getInherited(), mergeResult.getReplaced(), mergeResult.getCleared(), compact(effectiveMessage));
+        conversationStateService.reduceCriteria(state, mergeResult);
+        log.info("[AI][chat] event=CRITERIA_MERGED chatId={} inherited={} replaced={} appended={} cleared={} invalidated={} query={}", chatId,
+                mergeResult.getInherited(), mergeResult.getReplaced(), mergeResult.getAppended(), mergeResult.getCleared(),
+                mergeResult.getInvalidated(), compact(effectiveMessage));
         DecisionResponse decision = decisionService.decide(decisionRequest, mergeResult.getConstraints());
         conversationStateService.activateDecision(state, decision.getSessionId());
         conversationStateService.snapshotDecision(state, decision);

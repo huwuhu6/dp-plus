@@ -27,6 +27,8 @@ public class ConversationCriteriaMerger {
         if (Boolean.TRUE.equals(delta.getQuiet())) replace(result, "quiet", String.valueOf(merged.getQuiet()), "true", () -> merged.setQuiet(true));
         if (Boolean.TRUE.equals(delta.getAvoidQueue())) replace(result, "avoidQueue", String.valueOf(merged.getAvoidQueue()), "true", () -> merged.setAvoidQueue(true));
         if (Boolean.TRUE.equals(delta.getNearby())) replace(result, "nearby", String.valueOf(merged.getNearby()), "true", () -> merged.setNearby(true));
+        append(result, "hardConstraints", merged.getHardConstraints(), delta.getHardConstraints());
+        append(result, "softPreferences", merged.getSoftPreferences(), delta.getSoftPreferences());
 
         if (containsAny(text, "不限菜系", "什么都行", "随便吃", "不限制菜系")) clear(result, "cuisine", () -> merged.setCuisine(""));
         if (containsAny(text, "预算不限", "不限制预算", "人均不限")) clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
@@ -72,6 +74,18 @@ public class ConversationCriteriaMerger {
     private void clear(CriteriaMergeResult result, String field, Runnable mutation) {
         mutation.run();
         if (!result.getCleared().contains(field)) result.getCleared().add(field);
+    }
+
+    private void append(CriteriaMergeResult result, String field, List<String> target, List<String> additions) {
+        if (additions == null || additions.isEmpty()) return;
+        if (target == null) target = new ArrayList<String>();
+        for (String item : additions) {
+            if (!hasText(item) || target.contains(item)) continue;
+            target.add(item);
+            result.getAppended().add(field + ":" + item);
+        }
+        if ("hardConstraints".equals(field)) result.getConstraints().setHardConstraints(target);
+        else result.getConstraints().setSoftPreferences(target);
     }
 
     private void addPreference(DecisionConstraints constraints, String preference) {

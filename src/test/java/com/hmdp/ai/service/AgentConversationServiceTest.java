@@ -21,6 +21,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
@@ -90,13 +91,40 @@ class AgentConversationServiceTest {
             return new AgentToolResult().summary("检索到评价").displayText("筑地日本料理的本地评价证据");
         });
         AgentConversationRequest request = new AgentConversationRequest();
-        request.setMessage("这个日本料理评价如何");
+        request.setMessage("筑地日本料理（上街店）评价如何");
 
         AgentConversationResponse response = service.converse(100L, request);
 
         assertEquals(Long.valueOf(9L), response.getFocusedShopId());
         assertEquals("筑地日本料理（上街店）", response.getFocusedShopName());
         assertEquals("search_shop_evidence", response.getToolTrace().get(0).getToolName());
+    }
+
+    @Test
+    void resolvesOtherCandidateRelativeToFocusedShop() throws Exception {
+        AgentConversationService service = serviceWithCompletedJapaneseSession();
+        AiDecisionSessionMapper sessionMapper = (AiDecisionSessionMapper) ReflectionTestUtils.getField(service, "sessionMapper");
+        AiDecisionSession session = completedSessionWithJapaneseRestaurant(new ObjectMapper());
+        when(sessionMapper.selectById(100L)).thenReturn(session);
+
+        assertTrue(service.hasCandidateReference(100L, "另一家有优惠券吗"));
+    }
+
+    @Test
+    void treatsImplicitFactQuestionAsFocusedShopFollowUp() throws Exception {
+        AgentConversationService service = serviceWithCompletedJapaneseSession();
+        AiDecisionSessionMapper sessionMapper = (AiDecisionSessionMapper) ReflectionTestUtils.getField(service, "sessionMapper");
+        AiDecisionSession session = completedSessionWithJapaneseRestaurant(new ObjectMapper());
+        when(sessionMapper.selectById(100L)).thenReturn(session);
+
+        assertTrue(service.hasCandidateReference(100L, "大家评价刺身新鲜吗"));
+    }
+
+    private AgentConversationService serviceWithCompletedJapaneseSession() {
+        AgentConversationService service = new AgentConversationService();
+        ReflectionTestUtils.setField(service, "sessionMapper", mock(AiDecisionSessionMapper.class));
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        return service;
     }
 
 
@@ -121,10 +149,14 @@ class AgentConversationServiceTest {
         DecisionRecommendation japanese = new DecisionRecommendation();
         japanese.setShopId(9L);
         japanese.setShopName("筑地日本料理（上街店）");
+        DecisionRecommendation anotherJapanese = new DecisionRecommendation();
+        anotherJapanese.setShopId(10L);
+        anotherJapanese.setShopName("三上日本料理（湖滨店）");
         DecisionResponse response = new DecisionResponse();
         response.setStatus("COMPLETED");
         response.getRecommendations().add(first);
         response.getRecommendations().add(japanese);
+        response.getRecommendations().add(anotherJapanese);
         AiDecisionSession session = new AiDecisionSession();
         session.setId(100L);
         session.setStatus("COMPLETED");

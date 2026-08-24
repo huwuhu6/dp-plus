@@ -50,4 +50,20 @@ class ConversationCriteriaMergerTest {
         assertTrue(result.getCleared().contains("cuisine"));
         assertTrue(result.getCleared().contains("budgetPerPerson"));
     }
+
+    @Test
+    void appendsNewLabelsWithoutDuplicatingExistingPreferences() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setHardConstraints(java.util.Arrays.asList("必吃榜"));
+        previous.setSoftPreferences(java.util.Arrays.asList("安静"));
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setHardConstraints(java.util.Arrays.asList("必吃榜", "有停车位"));
+        delta.setSoftPreferences(java.util.Arrays.asList("安静", "有包厢"));
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "有停车位和包厢吗");
+
+        assertEquals(java.util.Arrays.asList("必吃榜", "有停车位"), result.getConstraints().getHardConstraints());
+        assertEquals(java.util.Arrays.asList("安静", "有包厢"), result.getConstraints().getSoftPreferences());
+        assertEquals(2, result.getAppended().size());
+    }
 }

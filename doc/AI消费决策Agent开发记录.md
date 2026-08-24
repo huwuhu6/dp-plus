@@ -863,3 +863,15 @@ Gateway 在每次新推荐前先提取本轮约束，再经 `ConversationCriteri
 新增 `ConversationCriteriaMergerTest` 覆盖菜系替换、未提及条件继承和显式清除；全量 `mvn -q test` 通过。新增 V33 多轮评测轨迹 `CRITERIA_REFINEMENT_RETAINS_LOCATION`：首轮“附近人均 200 以内的川菜”，第二轮“不要辣的，换成粤菜，重新推荐”，断言两轮均进入新推荐链路，并由单元测试固定合并后的条件语义。
 
 使用真实 DeepSeek、MySQL、Redis、Milvus 和工具链执行 `conversation-v1` 运行 #9，共 12 条轨迹：路由命中 `12/12`、上下文改写 `1/1`、本地性 `12/12`、目标商户 `12/12`、必要工具覆盖 `7/8`、最终状态 `8/12`、平均端到端耗时 `12292ms`。新增条件细化轨迹两轮路由均为 `START_DECISION`，第二轮日志确认继承预算 `200` 和半径 `3.0km`、菜系从川菜替换为粤菜，并复用福州坐标；但当前上街大学城 3km、预算 200 内没有粤菜候选，故真实结果为 `WAITING_RELAXATION`。该结果作为本地粤菜商户数据覆盖不足的待优化项保留，而不修改结果或放宽断言伪造成功。
+
+## 2026-08-24：确定性 State Reducer 与候选级联失效
+
+在工作记忆已具备条件快照后，条件合并仍只是一段“合并后的结果”，缺少明确的状态归约边界：新一轮将川菜改为粤菜时，旧的候选池和焦点店仍可能在新检索完成前参与指代解析或工具调用，造成跨品类、跨地点的上下文串联。
+
+因此在约束提取和业务决策之间新增 `ConversationStateService.reduceCriteria`。`ConversationCriteriaMerger` 将本轮 Delta 归类为 `inherited`、`replaced`、`appended`、`cleared` 四类操作：标量条件按覆盖或清除执行，`hardConstraints` 与 `softPreferences` 使用并集去重。Reducer 再根据确定性的级联规则更新 `ConversationWorkingMemory`：菜系发生替换或显式清除时，先清空 `candidatePool` 与 `focusedShopId`，然后将合并后的 `activeCriteria` 持久化；位置变化超过约 0.5km 时也执行同样的候选失效。新日志 `STATE_REDUCED` 和 `CASCADE_INVALIDATED` 会输出继承、覆盖、追加、清除、失效原因及旧候选数量，形成“解析 -> 合并 -> 状态归约 -> 检索 -> 快照”的可审计层次。
+
+补充 `ConversationStateServiceTest`：验证“川菜改粤菜”会清空 1 个旧候选及焦点店，福州/杭州级的位置变化也会清空旧候选；`ConversationCriteriaMergerTest` 补充标签追加且不重复的断言。实际 smoke 路径“附近火锅 -> 换成粤菜”记录到首轮候选池为 3，第二轮 `STATE_REDUCED` 先输出 `candidatePool=3, focusedShop` 的失效记录，再完成新的候选快照。
+
+同轮诊断发现完整店名命中后仍继续以“料理”等短片段匹配其他候选，导致“和味亭日式料理有券吗”被误判为多店歧义。`AgentConversationService` 改为“候选序号 -> 完整规范化店名 -> 片段匹配 -> 焦点店隐式事实追问”的优先级；“第一家/第二家/另一家”从候选池确定性解析，“另一家”优先选择焦点店之外的唯一候选，评价、优惠、营业时间、环境等事实查询可继承当前焦点店。新增测试同时覆盖多家日本料理时完整店名优先、候选序号与隐式事实追问，避免模型路由抹掉工作记忆中的确定性事实。
+
+全量 `mvn -q test` 通过。使用真实 DashScope `deepseek-v4-flash`、`qwen-flash`、MySQL、Redis、Milvus 和工具链重跑 `conversation-v1`（运行 #14）共 12 条轨迹：路由 `12/12`、上下文改写 `1/1`、必要工具断言 `12/12`、本地性 `12/12`、目标商户 `12/12`、最终状态 `9/12`，平均端到端耗时 `12401ms`。与运行 #12 的路由 `11/12`、工具断言 `10/12` 相比，候选追问的两项回归已消除。最终状态未命中的 3 条均是筛选后无候选进入 `WAITING_RELAXATION`（清晰新推荐、杭州切福州、条件细化），属于商户数据/放宽策略覆盖缺口，不将其伪装成完成态。

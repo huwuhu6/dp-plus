@@ -7,6 +7,7 @@ import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.ConversationSlots;
 import com.hmdp.ai.dto.ConversationWorkingMemory;
+import com.hmdp.ai.dto.CriteriaMergeResult;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
@@ -92,9 +93,15 @@ public class ConversationStateService {
         if (input == null || input.getLatitude() == null || input.getLongitude() == null) throw new IllegalArgumentException("Location event requires latitude and longitude");
         ConversationWorkingMemory memory = workingMemory(state);
         ConversationLocationSlot location = memory.getLocation();
+        boolean changed = materialLocationChange(location, input);
         location.setStatus("AVAILABLE"); location.setLatitude(input.getLatitude()); location.setLongitude(input.getLongitude());
         location.setAccuracyMeters(input.getAccuracyMeters()); location.setSource(hasText(input.getSource()) ? input.getSource() : "CLIENT");
         location.setCapturedAt(LocalDateTime.now()); location.setExpiresAt(location.getCapturedAt().plusMinutes(LOCATION_TTL_MINUTES));
+        if (changed) {
+            int previousCandidateCount = invalidateCandidatePool(memory);
+            log.info("[AI][state] event=CASCADE_INVALIDATED chatId={} reason=LOCATION_CHANGED previousCandidates={}",
+                    state.getChatId(), previousCandidateCount);
+        }
         updateWorkingMemory(state, memory);
         log.info("[AI][state] event=SLOT_UPDATED chatId={} slot=location status=AVAILABLE source={} latitude={} longitude={} expiresAt={}", state.getChatId(), location.getSource(), location.getLatitude(), location.getLongitude(), location.getExpiresAt());
     }
@@ -132,6 +139,23 @@ public class ConversationStateService {
     public void activateDecision(AiChatSession state, Long decisionSessionId) {
         if (decisionSessionId == null) return;
         state.setActiveDecisionSessionId(decisionSessionId); state.setLastDecisionSessionId(decisionSessionId); update(state);
+    }
+
+    /** Applies the deterministic criteria delta before a new decision can reuse stale candidates. */
+    public void reduceCriteria(AiChatSession state, CriteriaMergeResult reduction) {
+        if (reduction == null || reduction.getConstraints() == null) return;
+        ConversationWorkingMemory memory = workingMemory(state);
+        memory.setActiveCriteria(reduction.getConstraints());
+        if (changesCandidateUniverse(reduction)) {
+            boolean hadFocusedShop = memory.getFocusedShopId() != null;
+            int previousCandidateCount = invalidateCandidatePool(memory);
+            if (previousCandidateCount > 0) reduction.getInvalidated().add("candidatePool=" + previousCandidateCount);
+            if (hadFocusedShop) reduction.getInvalidated().add("focusedShop");
+        }
+        updateWorkingMemory(state, memory);
+        log.info("[AI][state] event=STATE_REDUCED chatId={} inherited={} replaced={} appended={} cleared={} invalidated={}",
+                state.getChatId(), reduction.getInherited(), reduction.getReplaced(), reduction.getAppended(),
+                reduction.getCleared(), reduction.getInvalidated());
     }
 
     public void snapshotDecision(AiChatSession state, DecisionResponse decision) {
@@ -180,6 +204,23 @@ public class ConversationStateService {
     private String writeLegacySlots(ConversationWorkingMemory memory) { ConversationSlots slots = new ConversationSlots(); slots.setLocation(memory.getLocation()); slots.setPendingLocationCandidates(memory.getPendingLocationCandidates()); try { return objectMapper.writeValueAsString(slots); } catch (Exception e) { throw new IllegalStateException("Conversation location slots cannot be saved", e); } }
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
     private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (memory.getActiveCriteria() == null) memory.setActiveCriteria(new DecisionConstraints()); if (memory.getCandidatePool() == null) memory.setCandidatePool(new ArrayList<DecisionRecommendation>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); }
+    private boolean changesCandidateUniverse(CriteriaMergeResult reduction) {
+        return reduction.getReplaced().stream().anyMatch(item -> item.startsWith("cuisine:"))
+                || reduction.getCleared().contains("cuisine");
+    }
+    private int invalidateCandidatePool(ConversationWorkingMemory memory) {
+        int previousCandidateCount = memory.getCandidatePool().size();
+        memory.setCandidatePool(new ArrayList<DecisionRecommendation>());
+        memory.setFocusedShopId(null);
+        memory.setFocusedShopName(null);
+        return previousCandidateCount;
+    }
+    private boolean materialLocationChange(ConversationLocationSlot current, ChatLocationInput next) {
+        if (current == null || current.getLatitude() == null || current.getLongitude() == null) return false;
+        double latitudeDelta = current.getLatitude() - next.getLatitude();
+        double longitudeDelta = current.getLongitude() - next.getLongitude();
+        return Math.sqrt(latitudeDelta * latitudeDelta + longitudeDelta * longitudeDelta) > 0.005D;
+    }
     private void clearLocation(ConversationLocationSlot location, String status) { location.setStatus(status); location.setLatitude(null); location.setLongitude(null); location.setProvince(null); location.setCity(null); location.setDistrict(null); location.setAccuracyMeters(null); location.setExpiresAt(null); }
     private void ensureOwner(AiChatSession state) { if (state.getUserId() == null) return; if (UserHolder.getUser() == null || !state.getUserId().equals(UserHolder.getUser().getId())) throw new SecurityException("No permission to access this chat session"); }
     private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }

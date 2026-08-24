@@ -122,7 +122,7 @@ public class AgentConversationService {
         try {
             AgentSessionContext context = loadContext(session);
             ReferenceResolution reference = resolveShopReference(message == null ? "" : message.trim(), context);
-            return reference.shop != null || reference.isAmbiguous() || hasFocusedShopPronoun(message, context);
+            return reference.shop != null || reference.isAmbiguous();
         } catch (Exception e) {
             log.warn("[AI][agent] event=REFERENCE_GUARD_FALLBACK sessionId={} errorType={}", sessionId,
                     e.getClass().getSimpleName());
@@ -304,20 +304,80 @@ public class AgentConversationService {
     }
 
     private ReferenceResolution resolveShopReference(String message, AgentSessionContext context) {
+        DecisionRecommendation ordinalShop = resolveOrdinalReference(message, context);
+        if (ordinalShop != null) return new ReferenceResolution(ordinalShop, new ArrayList<String>());
+
+        List<DecisionRecommendation> exactMatches = new ArrayList<DecisionRecommendation>();
+        for (DecisionRecommendation item : context.getShownShops()) {
+            if (containsNormalizedShopName(message, item.getShopName())) exactMatches.add(item);
+        }
+        if (exactMatches.size() == 1) return new ReferenceResolution(exactMatches.get(0), new ArrayList<String>());
+        if (exactMatches.size() > 1) return new ReferenceResolution(null, shopNames(exactMatches));
+
         List<DecisionRecommendation> matches = new ArrayList<DecisionRecommendation>();
         for (DecisionRecommendation item : context.getShownShops()) {
             if (matchesShop(message, item.getShopName())) matches.add(item);
         }
         if (matches.size() == 1) return new ReferenceResolution(matches.get(0), new ArrayList<String>());
-        List<String> names = new ArrayList<String>();
-        for (DecisionRecommendation item : matches) names.add(item.getShopName());
+        List<String> names = shopNames(matches);
+        if (!names.isEmpty()) return new ReferenceResolution(null, names);
+
+        DecisionRecommendation focusedShop = focusedShop(context);
+        if (focusedShop != null && (hasFocusedShopPronoun(message, context) || isImplicitFocusedFactQuery(message))) {
+            return new ReferenceResolution(focusedShop, new ArrayList<String>());
+        }
         return new ReferenceResolution(null, names);
+    }
+
+    private List<String> shopNames(List<DecisionRecommendation> shops) {
+        List<String> names = new ArrayList<String>();
+        for (DecisionRecommendation item : shops) names.add(item.getShopName());
+        return names;
+    }
+
+    private boolean containsNormalizedShopName(String message, String shopName) {
+        if (message == null || shopName == null) return false;
+        String normalizedMessage = normalizeShopText(message);
+        String normalizedName = normalizeShopText(shopName);
+        return normalizedName.length() >= 2 && normalizedMessage.contains(normalizedName);
+    }
+
+    /**
+     * Candidate ordinals are resolved from durable working memory before the tool planner sees the query.
+     * "另一家" means the only candidate other than the focused shop when that relation is unambiguous.
+     */
+    private DecisionRecommendation resolveOrdinalReference(String message, AgentSessionContext context) {
+        if (message == null || context.getShownShops() == null || context.getShownShops().isEmpty()) return null;
+        List<DecisionRecommendation> candidates = context.getShownShops();
+        if (message.contains("第一家") || message.contains("首选")) return candidates.get(0);
+        if (message.contains("第三家") && candidates.size() >= 3) return candidates.get(2);
+        if (message.contains("第二家")) return candidates.size() >= 2 ? candidates.get(1) : null;
+        if (message.contains("另一家") || message.contains("另外一家")) {
+            DecisionRecommendation focusedShop = focusedShop(context);
+            if (focusedShop != null) {
+                List<DecisionRecommendation> alternatives = new ArrayList<DecisionRecommendation>();
+                for (DecisionRecommendation candidate : candidates) {
+                    if (!focusedShop.getShopId().equals(candidate.getShopId())) alternatives.add(candidate);
+                }
+                if (alternatives.size() == 1) return alternatives.get(0);
+            }
+            return candidates.size() == 2 ? candidates.get(1) : null;
+        }
+        return null;
+    }
+
+    private DecisionRecommendation focusedShop(AgentSessionContext context) {
+        if (context.getFocusedShopId() == null || context.getShownShops() == null) return null;
+        for (DecisionRecommendation item : context.getShownShops()) {
+            if (context.getFocusedShopId().equals(item.getShopId())) return item;
+        }
+        return null;
     }
 
     private boolean matchesShop(String message, String shopName) {
         if (message == null || shopName == null) return false;
-        String normalizedMessage = message.replaceAll("[（(].*?[）)]", "").replaceAll("[，。？?！!\\s]", "");
-        String normalizedName = shopName.replaceAll("[（(].*?[）)]", "").replaceAll("[，。？?！!\\s]", "");
+        String normalizedMessage = normalizeShopText(message);
+        String normalizedName = normalizeShopText(shopName);
         if (normalizedMessage.contains(normalizedName)) return true;
         for (int length = normalizedName.length(); length >= 2; length--) {
             for (int start = 0; start + length <= normalizedName.length(); start++) {
@@ -327,10 +387,24 @@ public class AgentConversationService {
         return false;
     }
 
+    private String normalizeShopText(String text) {
+        return text.replaceAll("[（(].*?[）)]", "").replaceAll("[，。？?！!\\s]", "");
+    }
+
     private boolean hasFocusedShopPronoun(String message, AgentSessionContext context) {
         if (message == null || context.getFocusedShopId() == null) return false;
         return message.contains("这家") || message.contains("这个店") || message.contains("那家")
                 || message.contains("上一家") || message.contains("刚才那家");
+    }
+
+    /** A factual predicate can safely inherit the current focus without inventing a new restaurant request. */
+    private boolean isImplicitFocusedFactQuery(String message) {
+        if (message == null || message.trim().isEmpty()) return false;
+        String[] factSignals = {"优惠", "券", "团购", "评价", "评论", "口碑", "新鲜", "营业", "开门", "地址", "位置", "环境", "包厢", "停车", "人均", "价格", "菜品", "招牌", "排队"};
+        for (String signal : factSignals) {
+            if (message.contains(signal)) return true;
+        }
+        return false;
     }
 
     private boolean isSingleShopTool(String toolName) {
