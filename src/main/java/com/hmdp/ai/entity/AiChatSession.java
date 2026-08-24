@@ -17,5 +17,6 @@ public class AiChatSession {
     private Long lastDecisionSessionId;
     private Integer version;
     private String slotsJson;
+    private String workingMemoryJson;
     private LocalDateTime updateTime;
 }

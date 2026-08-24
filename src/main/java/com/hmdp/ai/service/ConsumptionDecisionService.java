@@ -69,6 +69,14 @@ public class ConsumptionDecisionService {
     @Value("${ai.retrieval.semantic-weight:18}") private double semanticWeight;
 
     public DecisionResponse decide(DecisionRequest request) {
+        return decide(request, null);
+    }
+
+    /**
+     * Starts a new decision from a chat-level merged snapshot. Constraint extraction has
+     * already happened at the gateway, so the decision session receives a deterministic input.
+     */
+    public DecisionResponse decide(DecisionRequest request, DecisionConstraints mergedConstraints) {
         if (request == null || request.getQuery() == null || request.getQuery().trim().isEmpty()) {
             throw new IllegalArgumentException("query 不能为空");
         }
@@ -86,7 +94,7 @@ public class ConsumptionDecisionService {
         sessionMapper.insert(session);
         saveMessage(session.getId(), "USER", "INITIAL_QUERY", request.getQuery());
         log.info("[AI][session={}] state=CREATED action=SESSION_CREATED", session.getId());
-        return execute(session, request, null, true, false);
+        return execute(session, request, mergedConstraints, mergedConstraints == null, false);
     }
 
     public DecisionResponse continueDecision(Long sessionId, DecisionFollowUpRequest followUp) {

@@ -41,6 +41,8 @@ public class ChatOrchestrationService {
     @Resource private ConversationStateService conversationStateService;
     @Resource private AmapMcpLocationResolutionService locationResolutionService;
     @Resource private ConversationContextRewriter contextRewriter;
+    @Resource private ConstraintExtractor constraintExtractor;
+    @Resource private ConversationCriteriaMerger criteriaMerger;
     @Resource private ObjectMapper objectMapper;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
@@ -122,6 +124,8 @@ public class ChatOrchestrationService {
             AgentConversationRequest followUp = new AgentConversationRequest();
             followUp.setMessage(effectiveMessage);
             response.setConversation(conversationService.converse(followUpSessionId, followUp));
+            conversationStateService.snapshotFollowUp(state, followUpSessionId,
+                    response.getConversation().getFocusedShopId(), response.getConversation().getFocusedShopName());
             response.setDecisionSessionId(followUpSessionId);
             response.setDecisionStatus(followUpDecision.getStatus());
             response.setAnswer(response.getConversation().getAnswer());
@@ -166,8 +170,26 @@ public class ChatOrchestrationService {
             log.info("[AI][chat] event=EXPLICIT_LOCATION_SCOPE_DETECTED chatId={} scope={} action=SKIP_LOCATION_SLOT_REUSE",
                     chatId, compact(explicitLocationScope));
         }
-        DecisionResponse decision = decisionService.decide(decisionRequest);
+        com.hmdp.ai.dto.ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
+        if (memory == null) {
+            // Keeps isolated gateway tests compatible with the pre-working-memory state mock.
+            DecisionResponse decision = decisionService.decide(decisionRequest);
+            conversationStateService.activateDecision(state, decision.getSessionId());
+            return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, explicitLocationScope, decision);
+        }
+        com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(memory.getActiveCriteria(),
+                constraintExtractor.extract(effectiveMessage), originalMessage);
+        log.info("[AI][chat] event=CRITERIA_MERGED chatId={} inherited={} replaced={} cleared={} query={}", chatId,
+                mergeResult.getInherited(), mergeResult.getReplaced(), mergeResult.getCleared(), compact(effectiveMessage));
+        DecisionResponse decision = decisionService.decide(decisionRequest, mergeResult.getConstraints());
         conversationStateService.activateDecision(state, decision.getSessionId());
+        conversationStateService.snapshotDecision(state, decision);
+        return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, explicitLocationScope, decision);
+    }
+
+    private ChatMessageResponse buildDecisionResponse(String chatId, String originalMessage, AiChatSession state, boolean usedModel,
+                                                      ContextRewriteResult contextRewrite, String explicitLocationScope,
+                                                      DecisionResponse decision) {
         if (explicitLocationScope != null && isLocationClarification(decision)) {
             ChatMessageResponse locationResponse = buildLocationResolutionResponse(chatId, originalMessage, state,
                     decision.getSessionId(), decision, explicitLocationScope);
@@ -193,7 +215,10 @@ public class ChatOrchestrationService {
         }
         Long sessionId = activeSessionId == null ? state.getLastDecisionSessionId() : activeSessionId;
         if (sessionId == null) return ContextRewriteResult.unchanged(message, "NO_DECISION_CONTEXT");
-        AgentSessionContext context = conversationService.loadWorkingMemory(sessionId);
+        AgentSessionContext context = conversationStateService.agentContext(state);
+        if (context == null || context.getShownShops() == null || context.getShownShops().isEmpty()) {
+            context = conversationService.loadWorkingMemory(sessionId);
+        }
         return contextRewriter.rewrite(message, history, context);
     }
 
@@ -281,7 +306,9 @@ public class ChatOrchestrationService {
         boolean hasDiningCategory = message.contains("烤肉") || message.contains("烧烤") || message.contains("火锅")
                 || message.contains("日料") || message.contains("料理") || message.contains("小吃") || message.contains("咖啡")
                 || message.contains("奶茶") || message.contains("川菜") || message.contains("粤菜");
-        return asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory);
+        boolean refinement = message.contains("换成") || message.contains("改成") || message.contains("便宜点")
+                || message.contains("贵点") || message.contains("不要辣") || message.contains("不吃辣");
+        return (asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory)) || (refinement && hasDiningCategory);
     }
 
     private boolean isFocusedShopQuestion(String message) {
@@ -442,6 +469,7 @@ public class ChatOrchestrationService {
         response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
         if ("CANCELLED".equals(decision.getStatus())) conversationStateService.clearActiveDecision(state);
         else conversationStateService.activateDecision(state, decision.getSessionId());
+        conversationStateService.snapshotDecision(state, decision);
         recordTurn(chatId, message, response);
         return response;
     }

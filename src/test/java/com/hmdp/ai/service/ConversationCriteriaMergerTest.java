@@ -1,0 +1,53 @@
+package com.hmdp.ai.service;
+
+import com.hmdp.ai.dto.CriteriaMergeResult;
+import com.hmdp.ai.dto.DecisionConstraints;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class ConversationCriteriaMergerTest {
+    private final ConversationCriteriaMerger merger = new ConversationCriteriaMerger();
+
+    @Test
+    void replacesCuisineAndKeepsUnmentionedCriteriaForRefinement() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setCuisine("川菜");
+        previous.setBudgetPerPerson(200);
+        previous.setRadiusKm(3D);
+        previous.setNearby(true);
+        previous.setOccasion("聚餐");
+
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setCuisine("粤菜");
+        CriteriaMergeResult result = merger.merge(previous, delta, "不要辣的，换成粤菜，重新推荐");
+
+        assertEquals("粤菜", result.getConstraints().getCuisine());
+        assertEquals(200, result.getConstraints().getBudgetPerPerson());
+        assertEquals(3D, result.getConstraints().getRadiusKm());
+        assertTrue(result.getConstraints().getNearby());
+        assertTrue(result.getConstraints().getSoftPreferences().contains("清淡/不辣"));
+        assertTrue(result.getReplaced().stream().anyMatch(item -> item.startsWith("cuisine:")));
+        assertFalse(result.getInherited().isEmpty());
+    }
+
+    @Test
+    void explicitlyClearsOnlyRequestedCriteria() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setCuisine("川菜");
+        previous.setBudgetPerPerson(150);
+        previous.setRadiusKm(2D);
+        previous.setNearby(true);
+
+        CriteriaMergeResult result = merger.merge(previous, new DecisionConstraints(), "全城都行，预算不限，什么都行");
+
+        assertEquals("", result.getConstraints().getCuisine());
+        assertEquals(-1, result.getConstraints().getBudgetPerPerson());
+        assertEquals(-1D, result.getConstraints().getRadiusKm());
+        assertFalse(result.getConstraints().getNearby());
+        assertTrue(result.getCleared().contains("cuisine"));
+        assertTrue(result.getCleared().contains("budgetPerPerson"));
+    }
+}
