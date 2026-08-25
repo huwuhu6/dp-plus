@@ -19,6 +19,16 @@ import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.dto.RewriteIntentType;
 import com.hmdp.ai.entity.AiChatSession;
+import com.hmdp.ai.service.pipeline.BootstrapNode;
+import com.hmdp.ai.service.pipeline.ChatPipeline;
+import com.hmdp.ai.service.pipeline.ChatPipelineOperations;
+import com.hmdp.ai.service.pipeline.ChatProcessingContext;
+import com.hmdp.ai.service.pipeline.ChatPipelineNode;
+import com.hmdp.ai.service.pipeline.ContextRewriteNode;
+import com.hmdp.ai.service.pipeline.CriteriaReductionNode;
+import com.hmdp.ai.service.pipeline.ExecutionNode;
+import com.hmdp.ai.service.pipeline.IntentRoutingNode;
+import com.hmdp.ai.service.pipeline.PolicyGuardNode;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,7 +42,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 @Service
-public class ChatOrchestrationService {
+public class ChatOrchestrationService implements ChatPipelineOperations {
     private static final Logger log = LoggerFactory.getLogger(ChatOrchestrationService.class);
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private SpringAiTextClient springAiTextClient;
@@ -57,6 +67,70 @@ public class ChatOrchestrationService {
      * general-chat response to be emitted directly from the model stream.
      */
     public ChatMessageResponse chat(ChatMessageRequest request, Consumer<String> textDeltaConsumer) {
+        ChatProcessingContext context = new ChatProcessingContext(request, textDeltaConsumer);
+        chatPipeline().process(context);
+        if (context.getResponse() == null) {
+            throw new IllegalStateException("chat pipeline completed without a response");
+        }
+        return context.getResponse();
+    }
+
+    /**
+     * A request-scoped pipeline keeps intermediate values out of services and tools.
+     * The nodes deliberately do not persist state; ConversationStateService remains
+     * the only WorkingMemory writer.
+     */
+    private ChatPipeline chatPipeline() {
+        List<ChatPipelineNode> nodes = Arrays.<ChatPipelineNode>asList(
+                new BootstrapNode(this),
+                new ContextRewriteNode(this),
+                new IntentRoutingNode(this),
+                new CriteriaReductionNode(this),
+                new PolicyGuardNode(this),
+                new ExecutionNode(this));
+        return new ChatPipeline(nodes);
+    }
+
+    @Override
+    public void bootstrap(ChatProcessingContext context) {
+        ChatMessageRequest request = context.getRequest();
+        if (request == null || request.getMessage() == null || request.getMessage().trim().isEmpty()) {
+            throw new IllegalArgumentException("message cannot be blank");
+        }
+        context.setOriginalMessage(request.getMessage().trim());
+    }
+
+    @Override
+    public void rewrite(ChatProcessingContext context) {
+        // The legacy executor still owns the operational transition during this
+        // compatibility step. Keeping the raw and effective slots separate now
+        // prevents nodes from passing state through mutable service fields.
+        context.setEffectiveMessage(context.getOriginalMessage());
+    }
+
+    @Override
+    public void route(ChatProcessingContext context) {
+        // Routing remains behaviour-compatible while it is migrated into the
+        // dedicated node in the following extraction step.
+    }
+
+    @Override
+    public void reduceCriteria(ChatProcessingContext context) {
+        // Criteria reduction is executed by startDecision, which is the existing
+        // transaction boundary for reducer writes and decision snapshots.
+    }
+
+    @Override
+    public void applyPolicyGuard(ChatProcessingContext context) {
+        // Policy evaluation remains adjacent to its decision execution boundary.
+    }
+
+    @Override
+    public void execute(ChatProcessingContext context) {
+        context.setResponse(executeLegacy(context.getRequest(), context.getTextDeltaConsumer()));
+    }
+
+    private ChatMessageResponse executeLegacy(ChatMessageRequest request, Consumer<String> textDeltaConsumer) {
         if (request == null || request.getMessage() == null || request.getMessage().trim().isEmpty()) {
             throw new IllegalArgumentException("message 不能为空");
         }

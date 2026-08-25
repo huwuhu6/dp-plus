@@ -1032,3 +1032,10 @@ State Reducer 新增相对约束归约：当用户表达“太贵/更便宜”�
 同时修复 Tool Orchestrator 的参数覆盖缺陷：`explicitlyReferencedShopId` 仅在单店工具未携带有效 `shopId` 时作为兜底写入，不再覆盖模型已经规划的 `shopId`，从而保证并行多店查询中 89、74、85 等参数各自独立。
 
 新增回归覆盖：改写意图分类（优惠券追问与更便宜微调）、相对预算和相对距离归约、微调请求携带旧候选排除列表、以及规划器 `shopId` 不被焦点店覆写。全量 `mvn -q test`：`98` 项测试，`0` 失败、`0` 错误；`git diff --check` 通过。
+## 2026-08-25：聊天网关 Pipeline 化第一阶段
+
+为避免 `ChatOrchestrationService` 持续演变为承载所有阶段判断的 God Class，将 HTTP/SSE 共用的聊天入口收敛为显式 Pipeline：`Bootstrap -> ContextRewrite -> IntentRouting -> CriteriaReduction -> PolicyGuard -> Execution`。每轮请求使用独立的 `ChatProcessingContext` 承载原始问题、改写结果、路由决策、活动会话和最终响应；它不承载任何可持久化业务事实。
+
+Pipeline Node 仅负责阶段推进与提前结束，不直接读写 Redis、数据库或工具内部上下文。业务状态仍只经 `ConversationStateService` 修改，既有的槽位归约、位置仲裁、策略门禁和工具编排仍在原有事务边界内执行，保证本次为纯结构重构，不改变已验证的餐饮决策行为。新增 `ChatPipelineTest` 覆盖节点顺序与澄清分支短路，防止后续节点在已有响应后继续执行。
+
+执行 `mvn -q test` 全量回归通过；同时运行 `git diff --check`，无空白错误。后续新业务接入只需增加或替换对应节点，实现层继续通过 `ChatPipelineOperations` 边界调用领域服务，不让 Node 私藏会话状态。
