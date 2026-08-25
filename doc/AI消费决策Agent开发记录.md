@@ -949,3 +949,5 @@ Working Memory 的地点拆分为两份事实：`location` 保存设备/浏览�
 进一步将主聊天与 SSE 链路的商户追问上下文切换为 `ConversationWorkingMemory`。Gateway 在进入 `AgentConversationService` 前从 Working Memory 构造临时 `AgentSessionContext` 投影；工具归约完成后，通过 `ConversationStateService.applyAgentContext` 将候选池、焦点商户、对话阶段和来源决策会话回写到同一份 Working Memory。`AiDecisionSession.agentContextJson` 暂时只服务旧的独立 `/ai/decisions/{sessionId}/conversations` 兼容接口，不再参与 `/ai/chat/messages` 或 SSE 的上下文改写和追问处理。
 
 Query Rewrite 移除了从 `agentContextJson` 兜底读取候选池的逻辑：Working Memory 没有候选时直接标记 `NO_WORKING_MEMORY_CANDIDATES`，不以另一份可能过期的状态猜测“第一家/这家”。新增测试验证工具追问产生的候选池与焦点商户会回写到聊天状态，后续改写只读取该状态。
+
+补充修复主聊天路由的一处残留依赖：`BUSINESS_FOLLOW_UP` 的候选引用判定改为 `hasCandidateReference(message, context)` 纯函数，入参仅为当前消息和由 Working Memory 投影出的候选池，不再按 `decisionSessionId` 读取 `agentContextJson`。删除已无主链路调用的 `loadWorkingMemory` 方法，并新增回归测试，确保没有候选池时不会误判为商户追问。

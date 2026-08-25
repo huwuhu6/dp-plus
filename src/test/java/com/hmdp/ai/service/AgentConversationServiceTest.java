@@ -156,6 +156,19 @@ class AgentConversationServiceTest {
         assertTrue(service.hasCandidateReference(100L, "大家评价刺身新鲜吗"));
     }
 
+    @Test
+    void resolvesReferenceFromSuppliedWorkingMemoryProjectionWithoutLoadingDecisionSession() {
+        AgentConversationService service = new AgentConversationService();
+        com.hmdp.ai.dto.AgentSessionContext context = new com.hmdp.ai.dto.AgentSessionContext();
+        DecisionRecommendation recommendation = new DecisionRecommendation();
+        recommendation.setShopId(9L);
+        recommendation.setShopName("筑地日本料理（上街店）");
+        context.getShownShops().add(recommendation);
+
+        assertTrue(service.hasCandidateReference("这家日本料理评价如何", context));
+        assertFalse(service.hasCandidateReference("这家日本料理评价如何", new com.hmdp.ai.dto.AgentSessionContext()));
+    }
+
     private AgentConversationService serviceWithCompletedJapaneseSession() {
         AgentConversationService service = new AgentConversationService();
         ReflectionTestUtils.setField(service, "sessionMapper", mock(AiDecisionSessionMapper.class));

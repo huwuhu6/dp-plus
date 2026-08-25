@@ -295,7 +295,9 @@ public class ChatOrchestrationService {
             return "BUSINESS_FOLLOW_UP";
         }
         if (hasExplicitNewDecisionIntent(message)) return null;
-        if (!conversationService.hasCandidateReference(sessionId, message)) return null;
+        // The gateway must make this routing decision from its chat-scoped Working Memory,
+        // never from the legacy decision-session context cache.
+        if (!conversationService.hasCandidateReference(message, conversationStateService.agentContext(state))) return null;
         log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} sessionId={} route=BUSINESS_FOLLOW_UP query={}",
                 chatId, sessionId, compact(message));
         return "BUSINESS_FOLLOW_UP";

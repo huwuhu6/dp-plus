@@ -151,9 +151,7 @@ public class AgentConversationService {
         if (session == null || !"COMPLETED".equals(session.getStatus())) return false;
         ensureOwner(session);
         try {
-            AgentSessionContext context = loadContext(session);
-            ReferenceResolution reference = resolveShopReference(message == null ? "" : message.trim(), context);
-            return reference.shop != null || reference.isAmbiguous();
+            return hasCandidateReference(message, loadContext(session));
         } catch (Exception e) {
             log.warn("[AI][agent] event=REFERENCE_GUARD_FALLBACK sessionId={} errorType={}", sessionId,
                     e.getClass().getSimpleName());
@@ -161,17 +159,14 @@ public class AgentConversationService {
         }
     }
 
-    public AgentSessionContext loadWorkingMemory(Long sessionId) {
-        AiDecisionSession session = sessionMapper.selectById(sessionId);
-        if (session == null) return null;
-        ensureOwner(session);
-        try {
-            return loadContext(session);
-        } catch (Exception e) {
-            log.warn("[AI][agent] event=WORKING_MEMORY_LOAD_FAILURE sessionId={} errorType={}", sessionId,
-                    e.getClass().getSimpleName());
-            return null;
-        }
+    /**
+     * Pure candidate-reference guard for the chat gateway. Its context must be projected
+     * from ConversationWorkingMemory; it deliberately does not read a decision-session cache.
+     */
+    public boolean hasCandidateReference(String message, AgentSessionContext context) {
+        if (context == null || context.getShownShops() == null || context.getShownShops().isEmpty()) return false;
+        ReferenceResolution reference = resolveShopReference(message == null ? "" : message.trim(), context);
+        return reference.shop != null || reference.isAmbiguous();
     }
 
     private ToolPlanningResult runToolLoop(Long sessionId, AgentSessionContext context, String userMessage, Long explicitlyReferencedShopId) {

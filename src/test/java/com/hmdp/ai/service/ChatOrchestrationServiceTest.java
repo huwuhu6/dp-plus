@@ -71,7 +71,7 @@ class ChatOrchestrationServiceTest {
         rewrite.setUsedModel(true);
         rewrite.setReason("ELLIPSIS_RESOLVED");
         when(rewriter.rewrite(any(), any(), any())).thenReturn(rewrite);
-        when(conversationService.hasCandidateReference(36L, rewrite.getRewrittenQuery())).thenReturn(true);
+        when(conversationService.hasCandidateReference(org.mockito.Mockito.eq(rewrite.getRewrittenQuery()), any())).thenReturn(true);
         AgentConversationResponse conversation = new AgentConversationResponse();
         conversation.setAnswer("筑地日本料理（上街店）的评价如下。");
         when(conversationService.converse(org.mockito.Mockito.eq(36L), any(), any())).thenReturn(conversation);
@@ -188,7 +188,7 @@ class ChatOrchestrationServiceTest {
         completed.setSessionId(36L);
         completed.setStatus("COMPLETED");
         when(decisionService.getDecision(36L)).thenReturn(completed);
-        when(conversationService.hasCandidateReference(36L, "这个日本料理怎么样")).thenReturn(true);
+        when(conversationService.hasCandidateReference(org.mockito.Mockito.eq("这个日本料理怎么样"), any())).thenReturn(true);
         AgentConversationResponse conversation = new AgentConversationResponse();
         conversation.setAnswer("筑地日本料理（上街店）的评价如下。");
         when(conversationService.converse(any(), any(), any())).thenReturn(conversation);
@@ -446,7 +446,7 @@ class ChatOrchestrationServiceTest {
         when(decisionService.getDecision(55L)).thenReturn(previous);
         // The previous candidate pool may still resolve "那家" references, but it must not
         // override an explicit request to start a new recommendation.
-        when(conversationService.hasCandidateReference(55L, "那有适合约会的店吗")).thenReturn(true);
+        when(conversationService.hasCandidateReference(org.mockito.Mockito.eq("那有适合约会的店吗"), any())).thenReturn(true);
         DecisionResponse next = new DecisionResponse();
         next.setSessionId(58L);
         next.setStatus("COMPLETED");
