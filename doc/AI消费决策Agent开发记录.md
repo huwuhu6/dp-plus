@@ -914,6 +914,12 @@ Gateway 在每次新推荐前先提取本轮约束，再经 `ConversationCriteri
 
 应用 V34 后以真实 DashScope `deepseek-v4-flash`、`qwen-flash`、MySQL、Redis、Milvus 和工具链重跑 `conversation-v1`（运行 #15）：12 条轨迹均完成，路由 `12/12`、上下文改写 `1/1`、必要工具断言 `12/12`、本地性 `12/12`、目标商户 `12/12`、最终状态 `12/12`，平均端到端耗时 `13129ms`。三条严格条件无候选轨迹仍返回 `WAITING_RELAXATION`，这证明链路保持了“不用跨城或不符合条件的商户凑结果”的边界，同时把后续选择权明确交还给用户。
 
+## 2026-08-25：相对价格锁定与多店复合事实追问
+
+现场会话回放发现“太贵了，换个更便宜的”会先依据当前焦点商户计算出更低的人均上限，但在无结果时仍显示“提高预算”的松弛选项，最终可能推荐比原店更贵的商户。为此在 `DecisionConstraints` 增加持久化的 `lockedConstraints`，`ConversationCriteriaMerger` 将相对降价归约为预算上限时写入 `budgetPerPerson` 锁定。`ConsumptionDecisionService` 在生成和执行 `INCREASE_BUDGET` 两处都校验该锁定；锁定后只能扩大范围、放宽其他非锁定条件或结束推荐，不能反向修改“更便宜”的用户意图。
+
+同一回放中的“第一家有优惠券吗？第二家评价怎么样？”此前被单店引用解析器误判为歧义。现在 `AgentConversationService` 会从 Working Memory 候选池中确定性识别多个明确序号或店名，拆分为绑定各自 `shopId` 的只读事实任务，再分别调用优惠券和评价工具；模糊代词且没有焦点店时才会要求用户澄清。新增回归覆盖相对预算锁定、锁定预算时不展示上浮选项，以及两家商户分别绑定 `query_shop_vouchers(shopId=8)`、`search_shop_evidence(shopId=9)`。针对性测试集 `ConversationCriteriaMergerTest`、`ConsumptionDecisionServiceTest`、`AgentConversationServiceTest` 共 35 项通过。
+
 ## 2026-08-25：澄清策略决策与搜索目标位置隔离
 
 在 State Reducer 之后、业务检索之前新增 `PolicyDecisionEngine`，以确定性 Java 代码对已归约的工作记忆做策略裁决，并把 `action` 与 `reason` 写入响应、Working Memory 和 `POLICY_DECIDED` 日志。首版策略覆盖三类决策：无地理锚点时 `CLARIFY_LOCATION`、本轮明确目的地时 `RESOLVE_EXPLICIT_LOCATION`、具备地理锚点时 `EXECUTE_RECOMMENDATION`；对已推荐商户的追问则按评价证据、优惠券、对比和基础事实映射到相应的业务工具意图。模型仍可参与工具规划，但不能改变地点优先级和状态归约边界。

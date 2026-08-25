@@ -137,6 +137,46 @@ class AgentConversationServiceTest {
     }
 
     @Test
+    void bindsExplicitMultiShopFactsToDifferentCandidatesInsteadOfAskingForClarification() throws Exception {
+        AgentConversationService service = new AgentConversationService();
+        AiDecisionSessionMapper sessionMapper = mock(AiDecisionSessionMapper.class);
+        AiDecisionMessageMapper messageMapper = mock(AiDecisionMessageMapper.class);
+        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
+        AgentToolRegistry registry = mock(AgentToolRegistry.class);
+        BaseAgentTool voucherTool = mock(BaseAgentTool.class);
+        BaseAgentTool evidenceTool = mock(BaseAgentTool.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        ReflectionTestUtils.setField(service, "sessionMapper", sessionMapper);
+        ReflectionTestUtils.setField(service, "messageMapper", messageMapper);
+        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
+        ReflectionTestUtils.setField(service, "toolRegistry", registry);
+        ReflectionTestUtils.setField(service, "aiClient", mock(OpenAiCompatibleClient.class));
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "objectMapper", objectMapper);
+        ReflectionTestUtils.setField(service, "toolResultCompressor", compressor(objectMapper));
+        when(sessionMapper.selectById(100L)).thenReturn(completedSessionWithJapaneseRestaurant(objectMapper));
+        when(registry.find("query_shop_vouchers")).thenReturn(voucherTool);
+        when(registry.find("search_shop_evidence")).thenReturn(evidenceTool);
+        when(voucherTool.execute(anyMap())).thenAnswer(invocation -> {
+            assertEquals(8L, ((Number) invocation.getArgument(0, java.util.Map.class).get("shopId")).longValue());
+            return new AgentToolResult().summary("voucher").displayText("first-voucher");
+        });
+        when(evidenceTool.execute(anyMap())).thenAnswer(invocation -> {
+            assertEquals(9L, ((Number) invocation.getArgument(0, java.util.Map.class).get("shopId")).longValue());
+            return new AgentToolResult().summary("evidence").displayText("second-evidence");
+        });
+
+        AgentConversationRequest request = new AgentConversationRequest();
+        request.setMessage("\u7b2c\u4e00\u5bb6\u6709\u4f18\u60e0\u5238\u5417\uff1f\u7b2c\u4e8c\u5bb6\u8bc4\u4ef7\u600e\u4e48\u6837\uff1f");
+        AgentConversationResponse response = service.converse(100L, request, japaneseContext());
+
+        assertFalse(response.getAnswer().contains("\u54ea\u4e00\u5bb6"));
+        assertEquals(2, response.getToolTrace().size());
+        assertEquals("query_shop_vouchers", response.getToolTrace().get(0).getToolName());
+        assertEquals("search_shop_evidence", response.getToolTrace().get(1).getToolName());
+    }
+
+    @Test
     void resolvesOtherCandidateRelativeToFocusedShop() throws Exception {
         AgentConversationService service = new AgentConversationService();
 

@@ -37,7 +37,11 @@ public class ConversationCriteriaMerger {
         if (hasText(delta.getTargetArea())) replace(result, "targetArea", merged.getTargetArea(), delta.getTargetArea(), () -> merged.setTargetArea(delta.getTargetArea()));
         if (hasText(delta.getKeyword())) replace(result, "keyword", merged.getKeyword(), delta.getKeyword(), () -> merged.setKeyword(delta.getKeyword()));
         if (hasText(delta.getCuisine())) replace(result, "cuisine", merged.getCuisine(), delta.getCuisine(), () -> merged.setCuisine(delta.getCuisine()));
-        if (delta.getBudgetPerPerson() != null && delta.getBudgetPerPerson() > 0) replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(delta.getBudgetPerPerson()), () -> merged.setBudgetPerPerson(delta.getBudgetPerPerson()));
+        if (delta.getBudgetPerPerson() != null && delta.getBudgetPerPerson() > 0) {
+            replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(delta.getBudgetPerPerson()),
+                    () -> merged.setBudgetPerPerson(delta.getBudgetPerPerson()));
+            unlockBudgetWhenExplicitlyOverridden(result, merged);
+        }
         if (delta.getRadiusKm() != null && delta.getRadiusKm() > 0) replace(result, "radiusKm", String.valueOf(merged.getRadiusKm()), String.valueOf(delta.getRadiusKm()), () -> merged.setRadiusKm(delta.getRadiusKm()));
         if (hasText(delta.getArrivalTime())) replace(result, "arrivalTime", merged.getArrivalTime(), delta.getArrivalTime(), () -> merged.setArrivalTime(delta.getArrivalTime()));
         if (hasText(delta.getOccasion())) replace(result, "occasion", merged.getOccasion(), delta.getOccasion(), () -> merged.setOccasion(delta.getOccasion()));
@@ -48,7 +52,10 @@ public class ConversationCriteriaMerger {
         append(result, "softPreferences", merged.getSoftPreferences(), delta.getSoftPreferences());
 
         if (containsAny(text, "不限菜系", "什么都行", "随便吃", "不限制菜系")) clear(result, "cuisine", () -> merged.setCuisine(""));
-        if (containsAny(text, "预算不限", "不限制预算", "人均不限")) clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
+        if (containsAny(text, "预算不限", "不限制预算", "人均不限")) {
+            clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
+            unlockBudgetWhenExplicitlyOverridden(result, merged);
+        }
         if (containsAny(text, "不限距离", "不考虑距离", "全城都行")) {
             clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
             clear(result, "nearby", () -> merged.setNearby(false));
@@ -71,6 +78,10 @@ public class ConversationCriteriaMerger {
                 int budget = Math.toIntExact(anchorPrice - 1L);
                 replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(budget),
                         () -> merged.setBudgetPerPerson(budget));
+                if (merged.getLockedConstraints() == null) merged.setLockedConstraints(new java.util.HashSet<String>());
+                if (merged.getLockedConstraints().add("budgetPerPerson")) {
+                    result.getAppended().add("lockedConstraints:budgetPerPerson");
+                }
                 result.getAppended().add("relativeBudget:anchorPrice=" + anchorPrice + "->budgetPerPerson=" + budget);
             }
         }
@@ -130,6 +141,7 @@ public class ConversationCriteriaMerger {
         target.setHardConstraints(new ArrayList<String>(source.getHardConstraints() == null ? new ArrayList<String>() : source.getHardConstraints()));
         target.setSoftPreferences(new ArrayList<String>(source.getSoftPreferences() == null ? new ArrayList<String>() : source.getSoftPreferences()));
         target.setMissingInformation(new ArrayList<String>(source.getMissingInformation() == null ? new ArrayList<String>() : source.getMissingInformation()));
+        target.setLockedConstraints(new java.util.HashSet<String>(source.getLockedConstraints() == null ? new java.util.HashSet<String>() : source.getLockedConstraints()));
         return target;
     }
 
@@ -175,6 +187,12 @@ public class ConversationCriteriaMerger {
     private void addPreference(DecisionConstraints constraints, String preference) {
         if (constraints.getSoftPreferences() == null) constraints.setSoftPreferences(new ArrayList<String>());
         constraints.getSoftPreferences().add(preference);
+    }
+
+    private void unlockBudgetWhenExplicitlyOverridden(CriteriaMergeResult result, DecisionConstraints constraints) {
+        if (constraints.getLockedConstraints() != null && constraints.getLockedConstraints().remove("budgetPerPerson")) {
+            result.getCleared().add("lockedConstraints:budgetPerPerson");
+        }
     }
 
     private List<String> unique(List<String> values) { return new ArrayList<String>(new LinkedHashSet<String>(values == null ? new ArrayList<String>() : values)); }

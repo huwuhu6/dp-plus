@@ -118,6 +118,7 @@ class ConversationCriteriaMergerTest {
                 java.util.Arrays.asList(focused, lower), 2L);
 
         assertEquals(119, result.getConstraints().getBudgetPerPerson());
+        assertTrue(result.getConstraints().getLockedConstraints().contains("budgetPerPerson"));
         assertTrue(result.getAppended().stream().anyMatch(item -> item.startsWith("relativeBudget:anchorPrice=120")));
     }
 
@@ -131,5 +132,19 @@ class ConversationCriteriaMergerTest {
 
         assertEquals(2.3D, result.getConstraints().getRadiusKm());
         assertTrue(result.getAppended().stream().anyMatch(item -> item.startsWith("relativeDistance:anchorKm=2.5")));
+    }
+
+    @Test
+    void explicitBudgetOverrideUnlocksPriorRelativeBudgetLock() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setBudgetPerPerson(64);
+        previous.getLockedConstraints().add("budgetPerPerson");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setBudgetPerPerson(100);
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "\u9884\u7b97 100 \u5143");
+
+        assertEquals(100, result.getConstraints().getBudgetPerPerson());
+        assertFalse(result.getConstraints().getLockedConstraints().contains("budgetPerPerson"));
     }
 }

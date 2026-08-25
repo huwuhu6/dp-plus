@@ -313,6 +313,27 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
+    void neverOffersOrAppliesBudgetIncreaseWhenRelativeCheaperBudgetIsLocked() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setBudgetPerPerson(64);
+        constraints.setRadiusKm(3D);
+        constraints.getLockedConstraints().add("budgetPerPerson");
+        when(shopMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(profileMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("\u66f4\u4fbf\u5b9c\u70b9");
+        request.setLatitude(26.08D);
+        request.setLongitude(119.30D);
+        request.setLocationStatus("AVAILABLE");
+        DecisionResponse paused = service.decide(request, constraints);
+
+        assertEquals("WAITING_RELAXATION", paused.getStatus());
+        assertTrue(paused.getOptions().stream().anyMatch(item -> "EXPAND_RADIUS".equals(item.getId())));
+        assertFalse(paused.getOptions().stream().anyMatch(item -> "INCREASE_BUDGET".equals(item.getId())));
+    }
+
+    @Test
     void relaxationResumesWithoutExtractingConstraintsAgain() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setCuisine("不存在菜系");

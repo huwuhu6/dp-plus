@@ -3,7 +3,9 @@ package com.hmdp.ai.dto;
 import lombok.Data;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Data
 public class DecisionConstraints {
@@ -26,4 +28,6 @@ public class DecisionConstraints {
     private List<String> hardConstraints = new ArrayList<>();
     private List<String> softPreferences = new ArrayList<>();
     private List<String> missingInformation = new ArrayList<>();
+    /** Constraints explicitly tightened by the user and therefore ineligible for relaxation. */
+    private Set<String> lockedConstraints = new HashSet<>();
 }

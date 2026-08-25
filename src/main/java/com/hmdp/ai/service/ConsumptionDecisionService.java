@@ -384,13 +384,17 @@ public class ConsumptionDecisionService {
         DecisionConstraints constraints = response.getConstraints();
         response.setStatus("WAITING_RELAXATION");
         boolean autoRetried = response.getRelaxation() != null && Boolean.TRUE.equals(response.getRelaxation().getAutomatic());
-        response.setQuestion(autoRetried
+        boolean lockedBudget = isLocked(constraints, "budgetPerPerson");
+        response.setQuestion(lockedBudget
+                ? "当前搜索范围内暂无人均低于 " + constraints.getBudgetPerPerson()
+                + " 元的商户。已保留你的“更便宜”要求，不会提高预算；你可以扩大搜索范围或结束本次推荐。"
+                : autoRetried
                 ? "默认附近范围已在保留地点、菜系、预算等硬条件下自动扩大一次，仍未找到匹配商户。请明确选择一项条件放宽后继续，或结束本次推荐。"
                 : "当前条件下没有找到匹配的餐饮商户。你可以选择明确放宽一项条件继续，或结束本次推荐；系统不会自动修改你的限制。");
         if (constraints.getRadiusKm() > 0) {
             response.getOptions().add(new DecisionOption("EXPAND_RADIUS", "扩大搜索距离到 " + round(constraints.getRadiusKm() + 2D) + " km"));
         }
-        if (constraints.getBudgetPerPerson() > 0) {
+        if (constraints.getBudgetPerPerson() > 0 && !isLocked(constraints, "budgetPerPerson")) {
             response.getOptions().add(new DecisionOption("INCREASE_BUDGET", "将人均预算上限提高到 "
                     + (constraints.getBudgetPerPerson() + 50) + " 元"));
         }
@@ -430,7 +434,7 @@ public class ConsumptionDecisionService {
     }
 
     private boolean hasRelaxableConstraints(DecisionConstraints constraints) {
-        return constraints.getBudgetPerPerson() > 0 || constraints.getRadiusKm() > 0
+        return (constraints.getBudgetPerPerson() > 0 && !isLocked(constraints, "budgetPerPerson")) || constraints.getRadiusKm() > 0
                 || hasText(constraints.getCuisine()) || Boolean.TRUE.equals(constraints.getQuiet())
                 || Boolean.TRUE.equals(constraints.getAvoidQueue()) || requiresLightTasteEvidence(constraints)
                 || (constraints.getHardConstraints() != null && !constraints.getHardConstraints().isEmpty());
@@ -457,7 +461,8 @@ public class ConsumptionDecisionService {
     private void applyRelaxation(DecisionConstraints constraints, String optionId) {
         if ("EXPAND_RADIUS".equals(optionId) && constraints.getRadiusKm() > 0) {
             constraints.setRadiusKm(round(constraints.getRadiusKm() + 2D));
-        } else if ("INCREASE_BUDGET".equals(optionId) && constraints.getBudgetPerPerson() > 0) {
+        } else if ("INCREASE_BUDGET".equals(optionId) && constraints.getBudgetPerPerson() > 0
+                && !isLocked(constraints, "budgetPerPerson")) {
             log.info("[AI][decision] action=BUDGET_RELAXATION previousBudget={} nextBudget={}",
                     constraints.getBudgetPerPerson(), constraints.getBudgetPerPerson() + 50);
             constraints.setBudgetPerPerson(constraints.getBudgetPerPerson() + 50);
@@ -475,6 +480,10 @@ public class ConsumptionDecisionService {
         } else {
             throw new IllegalArgumentException("selectedOptionId 无效或不适用于当前约束");
         }
+    }
+
+    private boolean isLocked(DecisionConstraints constraints, String field) {
+        return constraints.getLockedConstraints() != null && constraints.getLockedConstraints().contains(field);
     }
 
     private boolean isEndRequest(DecisionFollowUpRequest followUp) {
