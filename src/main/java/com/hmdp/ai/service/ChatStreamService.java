@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Translates the completed, auditable chat result into a small SSE protocol.
@@ -45,9 +46,13 @@ public class ChatStreamService {
             if (user != null) UserHolder.saveUser(user);
             sendStatus(emitter, "REQUEST_ACCEPTED", "已收到消息，正在整理本轮对话上下文");
             sendStatus(emitter, "ORCHESTRATING", "正在执行餐饮决策与业务工具查询");
-            ChatMessageResponse response = chatOrchestrationService.chat(request);
+            AtomicBoolean modelTextStreamed = new AtomicBoolean(false);
+            ChatMessageResponse response = chatOrchestrationService.chat(request, chunk -> {
+                modelTextStreamed.set(true);
+                sendModelTextDelta(emitter, chunk);
+            });
             sendStatus(emitter, "RESULT_READY", "已获得可展示的业务结果");
-            sendTextDeltas(emitter, response.getAnswer());
+            if (!modelTextStreamed.get()) sendTextDeltas(emitter, response.getAnswer());
             sendRecommendationComponent(emitter, response);
             sendSuggestedChips(emitter, response);
             ChatStreamEventData complete = new ChatStreamEventData();
@@ -133,6 +138,16 @@ public class ChatStreamService {
             ChatStreamEventData delta = new ChatStreamEventData();
             delta.setDelta(text.substring(offset, Math.min(text.length(), offset + TEXT_DELTA_CHARS)));
             send(emitter, "text_delta", delta);
+        }
+    }
+
+    private void sendModelTextDelta(SseEmitter emitter, String chunk) {
+        try {
+            ChatStreamEventData delta = new ChatStreamEventData();
+            delta.setDelta(chunk);
+            send(emitter, "text_delta", delta);
+        } catch (IOException e) {
+            throw new IllegalStateException("SSE client disconnected while streaming model output", e);
         }
     }
 

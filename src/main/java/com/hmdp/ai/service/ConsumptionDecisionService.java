@@ -278,6 +278,7 @@ public class ConsumptionDecisionService {
 
     private boolean requiresLocation(DecisionRequest request) {
         if (request.getLatitude() != null && request.getLongitude() != null) return false;
+        if (hasAdministrativeScope(request)) return false;
         return !"DECLINED".equals(request.getLocationStatus());
     }
 
@@ -573,7 +574,10 @@ public class ConsumptionDecisionService {
 
         SemanticRecallResult semanticResult = SemanticRecallResult.unavailable();
         if (semanticShopRetriever != null) {
-            semanticResult = semanticShopRetriever.recall(request.getQuery(), hardMatched, profileByShopId, reviewsByShopId);
+            String semanticQuery = semanticRetrievalQuery(request, constraints);
+            log.info("[AI][session={}] state=SEMANTIC_RETRIEVING action=GEO_TOKENS_PRUNED originalQuery={} semanticQuery={}",
+                    response.getSessionId(), compact(request.getQuery()), compact(semanticQuery));
+            semanticResult = semanticShopRetriever.recall(semanticQuery, hardMatched, profileByShopId, reviewsByShopId);
             metrics.setSemanticRetrievalUsed(semanticResult.isAvailable());
             metrics.setSemanticRetrievingDurationMs(semanticResult.getDurationMs());
         }
@@ -636,6 +640,23 @@ public class ConsumptionDecisionService {
 
     private boolean hasAdministrativeScope(DecisionRequest request) {
         return hasText(request.getProvince()) || hasText(request.getCity()) || hasText(request.getDistrict());
+    }
+
+    /** Geography is consumed by SQL filters and must not become a cuisine-style semantic signal. */
+    private String semanticRetrievalQuery(DecisionRequest request, DecisionConstraints constraints) {
+        String query = request.getQuery() == null ? "" : request.getQuery();
+        query = removeToken(query, request.getProvince());
+        query = removeToken(query, request.getCity());
+        query = removeToken(query, request.getDistrict());
+        query = removeToken(query, constraints == null ? null : constraints.getTargetCity());
+        query = removeToken(query, constraints == null ? null : constraints.getTargetArea());
+        query = query.replaceAll("\\s+", " ").trim();
+        if (hasText(query)) return query;
+        return constraints != null && hasText(constraints.getKeyword()) ? constraints.getKeyword() : request.getQuery();
+    }
+
+    private String removeToken(String source, String token) {
+        return hasText(token) ? source.replace(token, " ") : source;
     }
 
     private boolean matchesCuisine(String profileCuisine, String requestedCuisine) {

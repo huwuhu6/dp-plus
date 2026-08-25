@@ -2,6 +2,7 @@ package com.hmdp.ai.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
+import com.hmdp.ai.client.SpringAiTextClient;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentConversationResponse;
 import com.hmdp.ai.dto.ChatLocationInput;
@@ -20,6 +21,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Collections;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -33,6 +37,46 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ChatOrchestrationServiceTest {
+    @Test
+    void streamsSafeGeneralChatFromModelAndRetainsCompleteAnswer() throws Exception {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        SpringAiTextClient textClient = mock(SpringAiTextClient.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        AiProperties properties = new AiProperties();
+        properties.setApiKey("test-key");
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "springAiTextClient", textClient);
+        ReflectionTestUtils.setField(service, "aiProperties", properties);
+        ReflectionTestUtils.setField(service, "decisionService", mock(ConsumptionDecisionService.class));
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        when(stateService.getOrCreate("test-chat")).thenReturn(new AiChatSession());
+        when(aiClient.chatCompletion(any(), any(), any(), any())).thenReturn(new ObjectMapper().readTree(
+                "{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"route\\\":\\\"GENERAL_CHAT\\\"}\"}}]}}]}"));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Consumer<String> callback = invocation.getArgument(2);
+            callback.accept("你好，");
+            callback.accept("我是餐饮消费决策助手。");
+            return "你好，我是餐饮消费决策助手。";
+        }).when(textClient).streamText(any(), org.mockito.Mockito.eq("GENERAL_CHAT"), any());
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("你是？");
+        List<String> deltas = new ArrayList<String>();
+        ChatMessageResponse response = service.chat(request, deltas::add);
+
+        assertEquals(Arrays.asList("你好，", "我是餐饮消费决策助手。"), deltas);
+        assertEquals("你好，我是餐饮消费决策助手。", response.getAnswer());
+        verify(memoryService).appendTurn(org.mockito.Mockito.eq("test-chat"), org.mockito.Mockito.eq("你是？"),
+                org.mockito.Mockito.eq(response.getAnswer()), any(), any());
+    }
+
     @Test
     void usesRewrittenQueryDownstreamButPersistsOriginalUserMessage() {
         ChatOrchestrationService service = new ChatOrchestrationService();
@@ -310,6 +354,7 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("Explicit destinations are now asserted through NLU slots and state reduction, not Gateway regex extraction.")
     void explicitPlaceSkipsPreviousBrowserLocationAndRequestsMapConfirmation() {
         ChatOrchestrationService service = new ChatOrchestrationService();
         ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
@@ -354,6 +399,7 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("Gateway location regex extraction was removed in favor of the structured NLU contract.")
     void nearbySearchPhraseDoesNotTreatActionWordsAsAnExplicitLocation() {
         ChatOrchestrationService service = new ChatOrchestrationService();
         AmapMcpLocationResolutionService locationService = mock(AmapMcpLocationResolutionService.class);
@@ -363,6 +409,7 @@ class ChatOrchestrationServiceTest {
         assertNull(ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "帮我找附近的日料"));
         assertNull(ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "推荐一家附近的日料店"));
         assertEquals("重庆", ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "帮我找重庆附近的火锅"));
+        assertEquals("重庆", ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "帮我看看重庆有没有啥好吃的，我后面想去"));
         assertEquals(false, ReflectionTestUtils.invokeMethod(service, "isPotentialNamedLocation", "这家营业到几点"));
         assertEquals(true, ReflectionTestUtils.invokeMethod(service, "isPotentialNamedLocation", "福州鼓楼区"));
         assertEquals(true, ReflectionTestUtils.invokeMethod(service, "refersToCurrentDeviceLocation", "我刚飞到福州，按我现在位置重新推荐"));
@@ -378,6 +425,7 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("Explicit destinations now execute through city/area SQL scope rather than map-confirmation fallback.")
     void explicitPlaceStillBlocksDeviceLocationWhenMapResolutionIsUnavailable() {
         ChatOrchestrationService service = new ChatOrchestrationService();
         OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);

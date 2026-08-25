@@ -969,3 +969,21 @@ Query Rewrite 移除了从 `agentContextJson` 兜底读取候选池的逻辑：W
 真实复跑前确认高德 MCP 已在后端启动时完成协议握手。运行 #27 在 MCP 不可用时有 1 条“明确目的地覆盖设备定位”轨迹无法解析重庆；重新启用 `AI_LOCATION_MCP_ENABLED=true` 并启动 MCP 后，运行 #28 对 `conversation-v1` 的 15 条轨迹全部完成，路由 `15/15`、上下文改写 `1/1`、工具断言 `15/15`、必要工具覆盖 `10/10`、本地性 `15/15`、最终状态 `15/15`、目标商户 `15/15`，平均端到端耗时 `12129ms`。地点候选不存在时的异常文案同时修正为“候选不存在或已失效”，避免把地图服务不可用误导为候选过期。
 
 `AiConversationEvaluationServiceTest` 新增异步提交回归：使用内联执行器固定验证运行记录先创建、后台执行完成后状态收敛、提交响应不携带整套案例结果；原同步轨迹汇总、上下文改写和诊断测试继续通过。
+
+## 2026-08-25：真实模型文本流与 SSE 无缓冲交付
+
+原 SSE 端点虽然使用了 `SseEmitter`，但会先同步完成整条编排链路，再将完整答案按固定字符长度拆成 `text_delta`；这只能称为结果切片，不能称为模型流式生成。此次将 `SpringAiTextClient` 新增 `streamText`，直接消费 Spring AI `ChatClient.stream().content()` 返回的 `Flux<String>`，每个供应商文本分片即时交给 SSE 写入，同时在服务端聚合完整答案以维持聊天记忆、审计日志和后处理接口契约。
+
+流式边界按事实安全性划分：普通能力问答、闲聊和非餐饮能力说明在通过路由后直接使用模型 token 流；找店推荐与商户工具追问仍先执行结构化检索、DTO 裁剪和事实一致性校验，再返回确定性结果，避免未校验的模型片段提前暴露价格、优惠券或商户事实。SSE 服务会检测是否已收到真实模型分片，只有未流化的受控回答才回退到结果分段；前端在整个流期间保留光标状态，直到 `complete` 帧到达。
+
+同时为流式端点写入 `X-Accel-Buffering: no` 和 `Cache-Control: no-cache`，Nginx 对 `/api/ai/chat/messages/stream` 关闭代理缓冲、缓存并延长读取超时，保证 `status` 与模型分片不会被网关攒到请求结束。新增 `ChatOrchestrationServiceTest`，模拟两个模型分片并断言回调顺序和最终记忆答案一致；全量 `mvn -q test` 与 `git diff --check` 通过。
+
+## 2026-08-25：显式目的地槽位收敛与地理检索隔离
+
+真实会话回放发现“帮我看看重庆有没有啥好吃的”虽然被模型描述为地点约束，但旧链路没有 `targetCity` 等强类型字段；Gateway 依赖地点正则决定是否阻止设备定位复用，导致表达变化时福州 GPS 仍可写入请求。同时，“重庆”会残留在语义检索 Query 中，造成福州库内名称带有“重庆”的商户被错误召回。
+
+本轮将 `targetCity`、`targetArea` 与 `keyword` 纳入 `DecisionConstraints` 的模型 Tool Schema 和归约契约。`ConversationCriteriaMerger` 对三个字段执行显式覆盖，`ConversationStateService` 在城市或区域变化时将其同步到独立的 `searchLocation`，设置 `RESOLVED_BY_NAME`、清空旧目标经纬度，并以检索域变更级联清空候选池与焦点商户。设备位置仍只保存在 `location`，两类位置不再互相覆盖。
+
+Gateway 已删除显式地点正则提取路径，主流程改为“NLU 提取 -> 状态归约 -> 位置仲裁 -> 决策执行”。仲裁规则固定为：有 `targetCity/targetArea` 时只填写行政区过滤、经纬度置空并禁止使用设备 GPS；无显式目标地点时，只有“附近”意图或本轮明确提交定位才允许复用设备坐标。策略门禁将显式城市/区域视为完整地理锚点，不再要求用户再次提交设备定位。
+
+检索层以仲裁后的 `request.city/district` 做 SQL 预过滤；语义召回前剥离已消费的省、市、区和目标地点词，防止城市名称被误解为菜系或风味标签。新增模型结构化地点槽位、城市/区域覆盖、命名地点变更清空旧坐标和候选池、以及显式目的地优先于设备定位的单元测试。运行 `mvn -q -Dtest=ConstraintExtractorTest,ConversationCriteriaMergerTest,ConversationStateServiceTest,PolicyDecisionEngineTest test` 与全量 `mvn -q test` 均通过。

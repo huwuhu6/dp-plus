@@ -13,6 +13,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletResponse;
 
 @RestController
 @RequestMapping("/ai/chat")
@@ -26,7 +27,10 @@ public class AiChatController {
     }
 
     @PostMapping(value = "/messages/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter streamMessage(@RequestBody ChatMessageRequest request) {
+    public SseEmitter streamMessage(@RequestBody ChatMessageRequest request, HttpServletResponse response) {
+        // Prevent reverse proxies from holding status frames until the request finishes.
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Cache-Control", "no-cache");
         return chatStreamService.stream(request, UserHolder.getUser());
     }
 }

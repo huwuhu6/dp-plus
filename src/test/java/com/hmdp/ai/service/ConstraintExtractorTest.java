@@ -20,12 +20,15 @@ class ConstraintExtractorTest {
         ConstraintExtractor extractor = new ConstraintExtractor();
         ReflectionTestUtils.setField(extractor, "aiClient", client);
         ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
-        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"cuisine\\\":\\\"港式茶餐厅\\\",\\\"budgetPerPerson\\\":100,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"occasion\\\":\\\"情侣约会\\\",\\\"quiet\\\":false,\\\"avoidQueue\\\":false,\\\"hardConstraints\\\":[],\\\"softPreferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"重庆\\\",\\\"targetArea\\\":\\\"解放碑\\\",\\\"keyword\\\":\\\"火锅\\\",\\\"cuisine\\\":\\\"港式茶餐厅\\\",\\\"budgetPerPerson\\\":100,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"occasion\\\":\\\"情侣约会\\\",\\\"quiet\\\":false,\\\"avoidQueue\\\":false,\\\"hardConstraints\\\":[],\\\"softPreferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
         when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
 
         DecisionConstraints constraints = extractor.extract("人均100的港式茶餐厅");
 
         assertEquals("港式", constraints.getCuisine());
+        assertEquals("重庆", constraints.getTargetCity());
+        assertEquals("解放碑", constraints.getTargetArea());
+        assertEquals("火锅", constraints.getKeyword());
         assertEquals(Integer.valueOf(100), constraints.getBudgetPerPerson());
         assertEquals("约会", constraints.getOccasion());
     }

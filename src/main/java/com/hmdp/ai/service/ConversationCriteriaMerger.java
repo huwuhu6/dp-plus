@@ -19,6 +19,9 @@ public class ConversationCriteriaMerger {
         String text = query == null ? "" : query.replaceAll("\\s+", "");
 
         inherit(result, previous);
+        if (hasText(delta.getTargetCity())) replace(result, "targetCity", merged.getTargetCity(), delta.getTargetCity(), () -> merged.setTargetCity(delta.getTargetCity()));
+        if (hasText(delta.getTargetArea())) replace(result, "targetArea", merged.getTargetArea(), delta.getTargetArea(), () -> merged.setTargetArea(delta.getTargetArea()));
+        if (hasText(delta.getKeyword())) replace(result, "keyword", merged.getKeyword(), delta.getKeyword(), () -> merged.setKeyword(delta.getKeyword()));
         if (hasText(delta.getCuisine())) replace(result, "cuisine", merged.getCuisine(), delta.getCuisine(), () -> merged.setCuisine(delta.getCuisine()));
         if (delta.getBudgetPerPerson() != null && delta.getBudgetPerPerson() > 0) replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(delta.getBudgetPerPerson()), () -> merged.setBudgetPerPerson(delta.getBudgetPerPerson()));
         if (delta.getRadiusKm() != null && delta.getRadiusKm() > 0) replace(result, "radiusKm", String.valueOf(merged.getRadiusKm()), String.valueOf(delta.getRadiusKm()), () -> merged.setRadiusKm(delta.getRadiusKm()));
@@ -48,6 +51,7 @@ public class ConversationCriteriaMerger {
     private DecisionConstraints copy(DecisionConstraints source) {
         DecisionConstraints target = new DecisionConstraints();
         if (source == null) return target;
+        target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword());
         target.setCuisine(source.getCuisine()); target.setBudgetPerPerson(source.getBudgetPerPerson());
         target.setRadiusKm(source.getRadiusKm()); target.setNearby(source.getNearby());
         target.setArrivalTime(source.getArrivalTime()); target.setOccasion(source.getOccasion());
@@ -60,6 +64,9 @@ public class ConversationCriteriaMerger {
 
     private void inherit(CriteriaMergeResult result, DecisionConstraints previous) {
         if (previous == null) return;
+        if (hasText(previous.getTargetCity())) result.getInherited().add("targetCity=" + previous.getTargetCity());
+        if (hasText(previous.getTargetArea())) result.getInherited().add("targetArea=" + previous.getTargetArea());
+        if (hasText(previous.getKeyword())) result.getInherited().add("keyword=" + previous.getKeyword());
         if (hasText(previous.getCuisine())) result.getInherited().add("cuisine=" + previous.getCuisine());
         if (previous.getBudgetPerPerson() != null && previous.getBudgetPerPerson() > 0) result.getInherited().add("budgetPerPerson=" + previous.getBudgetPerPerson());
         if (previous.getRadiusKm() != null && previous.getRadiusKm() > 0) result.getInherited().add("radiusKm=" + previous.getRadiusKm());

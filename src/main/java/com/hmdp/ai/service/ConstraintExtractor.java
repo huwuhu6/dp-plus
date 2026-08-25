@@ -39,7 +39,7 @@ public class ConstraintExtractor {
 
     private DecisionConstraints extractByModel(String query) throws Exception {
         List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(message("system", "你是消费决策需求解析器。只能根据用户原话提取约束；未知值使用空字符串、-1 或 false，不得臆测。"));
+        messages.add(message("system", "你是消费决策需求解析器。只能根据用户原话提取约束；未知值使用空字符串、-1 或 false，不得臆测。地点必须严格拆分：targetCity 仅填用户明确指定的目标城市，targetArea 仅填目标行政区、商圈或地标，绝不能将地点填入 cuisine、keyword 或 hardConstraints；用户设备当前位置不属于 targetCity。keyword 仅填商户名或核心餐饮检索词，不含城市、区域或‘附近’等地理范围词。"));
         messages.add(message("user", query));
 
         Map<String, Object> function = new LinkedHashMap<>();
@@ -95,6 +95,9 @@ public class ConstraintExtractor {
     }
 
     private DecisionConstraints normalize(DecisionConstraints constraints) {
+        constraints.setTargetCity(normalizeText(constraints.getTargetCity()));
+        constraints.setTargetArea(normalizeText(constraints.getTargetArea()));
+        constraints.setKeyword(normalizeText(constraints.getKeyword()));
         constraints.setCuisine(canonicalizeCuisine(constraints.getCuisine()));
         if (constraints.getBudgetPerPerson() == null) constraints.setBudgetPerPerson(-1);
         if (constraints.getRadiusKm() == null) constraints.setRadiusKm(-1D);
@@ -127,8 +130,15 @@ public class ConstraintExtractor {
         return normalized;
     }
 
+    private String normalizeText(String value) {
+        return value == null ? "" : value.trim();
+    }
+
     private Map<String, Object> constraintSchema() {
         Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("targetCity", property("string", "用户显式要求搜索的目标城市名称，如重庆、北京。若未提及留空。不得填设备当前位置。"));
+        properties.put("targetArea", property("string", "用户显式要求搜索的目标区域、商圈或地标，如解放碑、朝阳区。若未提及留空。"));
+        properties.put("keyword", property("string", "特定店铺名称或核心品类词；不包含城市、区域、附近等地理范围词。未知时留空。"));
         properties.put("cuisine", property("string", "Cuisine, such as 日料. Empty string if unknown."));
         properties.put("budgetPerPerson", property("integer", "Maximum per-person budget. -1 if unknown."));
         properties.put("radiusKm", property("number", "Search radius in kilometers. -1 if unknown."));

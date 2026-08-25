@@ -66,4 +66,23 @@ class ConversationCriteriaMergerTest {
         assertEquals(java.util.Arrays.asList("安静", "有包厢"), result.getConstraints().getSoftPreferences());
         assertEquals(2, result.getAppended().size());
     }
+
+    @Test
+    void overwritesExplicitDestinationAsStructuredLocationRatherThanFreeText() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setTargetCity("福州");
+        previous.setTargetArea("鼓楼区");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setTargetCity("重庆");
+        delta.setTargetArea("解放碑");
+        delta.setKeyword("火锅");
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "去重庆解放碑吃火锅");
+
+        assertEquals("重庆", result.getConstraints().getTargetCity());
+        assertEquals("解放碑", result.getConstraints().getTargetArea());
+        assertEquals("火锅", result.getConstraints().getKeyword());
+        assertTrue(result.getReplaced().stream().anyMatch(item -> item.startsWith("targetCity:")));
+        assertTrue(result.getReplaced().stream().anyMatch(item -> item.startsWith("targetArea:")));
+    }
 }
