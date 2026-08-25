@@ -78,6 +78,13 @@ ai:
   result-evaluation:
     auto-expand-default-nearby-radius: ${AI_RESULT_EVALUATION_AUTO_EXPAND_DEFAULT_NEARBY_RADIUS:true}
     auto-expanded-nearby-radius-km: ${AI_RESULT_EVALUATION_AUTO_EXPANDED_NEARBY_RADIUS_KM:5}
+  routing:
+    enabled: ${AI_ROUTING_ENABLED:true}
+    provider: ${AI_ROUTING_PROVIDER:dashscope}
+    base-url: ${AI_ROUTING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    api-key: ${AI_ROUTING_API_KEY:${DASHSCOPE_API_KEY:}}
+    model: ${AI_ROUTING_MODEL:qwen-flash}
+    timeout-ms: ${AI_ROUTING_TIMEOUT_MS:4000}
   query-rewrite:
     enabled: ${AI_QUERY_REWRITE_ENABLED:true}
     provider: ${AI_QUERY_REWRITE_PROVIDER:dashscope}

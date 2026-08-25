@@ -1,5 +1,15 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-08-25：轻量路由模型与零结果后的当前位置续接
+
+将聊天路由从主 Agent 模型中拆出为独立的 `ai.routing` 配置，默认使用 DashScope 的 `qwen-flash`，超时 4 秒；主推荐、约束抽取与工具规划仍保持 `deepseek-v4-flash`。`qwen-flash` 同时继续承担已有的 Query Rewrite 调用。路由 Client 复用 OpenAI-compatible 协议，但按独立模型、Endpoint、密钥和超时执行，配置不可用时回退原有主模型调用，再失败才使用 Java 规则路由。
+
+回放零结果会话发现“我附近呢”没有候选店铺可供指代消歧，旧代码直接以 `NO_WORKING_MEMORY_CANDIDATES` 跳过改写，再由路由模型误判为闲聊。本次将当前位置表达提升为确定性状态转换：当已有消费决策上下文时，`ConversationContextRewriter` 即使候选池为空，也会将“我附近呢 / 当前位置”等改写为“在当前设备附近搜索餐饮商户”，标记 `CURRENT_DEVICE_LOCATION_CONTINUATION`，不调用模型、不虚构店铺。Gateway 识别该标记后直接进入 `START_DECISION`；若旧会话处于挂起态，先结束旧会话，再开始新的当前位置检索。
+
+`ConstraintExtractor` 对显式“我附近/当前位置/当前定位”增加模型输出后的确定性兜底：强制 `locationIntent=CURRENT_DEVICE`、`nearby=true`，并清空 `targetCity`、`targetArea`。Reducer 随之清理旧命名搜索地点；无浏览器 GPS 时策略门禁进入 `CLARIFYING` 请求定位，有授权坐标时复用设备坐标。路由 Prompt 同步注入“零结果或挂起态下的位置切换继承餐饮推荐意图”的优先规则，避免被泛化为闲聊。
+
+新增回归覆盖零候选池的位置续接改写，以及 `ZERO_RESULT_NO_DATA -> 我附近呢 -> START_DECISION -> CLARIFYING` 的端到端状态链。全量回归测试：19 个测试套件、93 个用例、0 failure、0 error、3 skipped（`mvn -q test`）。
+
 ## 2026-08-25：命名目的地与当前设备位置的互斥状态切换
 
 回放会话 `web-1787662311235-av4p7h3q` 发现，用户先将搜索目的地指定为北京，随后说“看看我附近有什么好吃的”时，`nearby=true` 只被当作新增筛选条件，旧的 `targetCity=北京` 与 `searchLocation.city=北京` 仍然保留。Gateway 因此继续以北京作为命名目的地检索，而不是切换到用户设备位置；设备坐标为空时又错误进入可松弛检索状态。

@@ -115,7 +115,7 @@ class ChatOrchestrationServiceTest {
         rewrite.setApplied(true);
         rewrite.setUsedModel(true);
         rewrite.setReason("ELLIPSIS_RESOLVED");
-        when(rewriter.rewrite(any(), any(), any())).thenReturn(rewrite);
+        when(rewriter.rewrite(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(rewrite);
         when(conversationService.hasCandidateReference(org.mockito.Mockito.eq(rewrite.getRewrittenQuery()), any())).thenReturn(true);
         AgentConversationResponse conversation = new AgentConversationResponse();
         conversation.setAnswer("筑地日本料理（上街店）的评价如下。");
@@ -590,5 +590,52 @@ class ChatOrchestrationServiceTest {
         assertEquals(58L, response.getDecisionSessionId());
         verify(decisionService).decide(any());
         verifyNoInteractions(aiClient);
+    }
+
+    @Test
+    void currentDeviceContinuationAfterNoDataStartsNewDecisionWithoutRouterModel() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "contextRewriter", new ConversationContextRewriter());
+        DecisionConstraints extracted = new DecisionConstraints();
+        extracted.setLocationIntent("CURRENT_DEVICE"); extracted.setNearby(true);
+        ConstraintExtractor extractor = mock(ConstraintExtractor.class);
+        when(extractor.extract(anyString())).thenReturn(extracted);
+        ReflectionTestUtils.setField(service, "constraintExtractor", extractor);
+        ReflectionTestUtils.setField(service, "criteriaMerger", new ConversationCriteriaMerger());
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat"); state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        when(stateService.agentContext(state)).thenReturn(new com.hmdp.ai.dto.AgentSessionContext());
+        com.hmdp.ai.dto.ConversationWorkingMemory memory = new com.hmdp.ai.dto.ConversationWorkingMemory();
+        memory.getActiveCriteria().setTargetCity("北京"); memory.getActiveCriteria().setLocationIntent("EXPLICIT_TARGET");
+        when(stateService.workingMemory(state)).thenReturn(memory);
+        when(stateService.slots(state)).thenReturn(new ConversationSlots());
+        DecisionResponse paused = new DecisionResponse();
+        paused.setSessionId(100L); paused.setStatus("ZERO_RESULT_NO_DATA");
+        when(decisionService.getDecision(100L)).thenReturn(paused);
+        DecisionResponse started = new DecisionResponse();
+        started.setSessionId(101L); started.setStatus("CLARIFYING"); started.setAnswer("请提供当前位置");
+        when(decisionService.decide(any(), any())).thenReturn(started);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("我附近呢");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("START_DECISION", response.getRoute());
+        assertEquals("CLARIFYING", response.getDecisionStatus());
+        assertEquals("CURRENT_DEVICE_LOCATION_CONTINUATION", response.getContextRewrite().getReason());
+        verify(decisionService).continueDecision(org.mockito.Mockito.eq(100L), any());
+        verify(decisionService).decide(any(), any());
     }
 }

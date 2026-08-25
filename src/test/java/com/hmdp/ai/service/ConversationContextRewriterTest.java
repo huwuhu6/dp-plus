@@ -51,6 +51,19 @@ class ConversationContextRewriterTest {
         verifyNoInteractions(textClient);
     }
 
+    @Test
+    void rewritesCurrentDeviceContinuationWithoutCandidatePool() {
+        ConversationContextRewriter rewriter = new ConversationContextRewriter();
+        AgentSessionContext emptyContext = new AgentSessionContext();
+
+        ContextRewriteResult result = rewriter.rewrite("我附近呢", Collections.emptyList(), emptyContext, true);
+
+        assertTrue(result.getApplied());
+        assertFalse(result.getUsedModel());
+        assertEquals("CURRENT_DEVICE_LOCATION_CONTINUATION", result.getReason());
+        assertEquals("在当前设备附近搜索餐饮商户", result.getRewrittenQuery());
+    }
+
     private AgentSessionContext workingMemory() {
         DecisionRecommendation first = new DecisionRecommendation();
         first.setShopId(101L);

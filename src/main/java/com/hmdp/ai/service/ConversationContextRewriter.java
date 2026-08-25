@@ -21,7 +21,27 @@ public class ConversationContextRewriter {
     @Resource private QueryRewriteClient queryRewriteClient;
 
     public ContextRewriteResult rewrite(String query, List<Map<String, Object>> history, AgentSessionContext context) {
+        return rewrite(query, history, context, false);
+    }
+
+    /**
+     * Location scope changes are deterministic search continuations, even when a previous
+     * attempt returned no candidates and therefore cannot provide a shop reference table.
+     */
+    public ContextRewriteResult rewrite(String query, List<Map<String, Object>> history, AgentSessionContext context,
+                                        boolean allowSearchContinuation) {
         if (query == null || query.trim().isEmpty()) return ContextRewriteResult.unchanged(query, "EMPTY_QUERY");
+        if (allowSearchContinuation && refersToCurrentDeviceLocation(query)) {
+            ContextRewriteResult result = new ContextRewriteResult();
+            result.setOriginalQuery(query);
+            result.setRewrittenQuery("在当前设备附近搜索餐饮商户");
+            result.setApplied(true);
+            result.setUsedModel(false);
+            result.setReason("CURRENT_DEVICE_LOCATION_CONTINUATION");
+            log.info("[AI][chat] event=CONTEXT_REWRITE original={} rewritten={} source=LOCATION_SCOPE_GUARD",
+                    compact(query), result.getRewrittenQuery());
+            return result;
+        }
         if (context == null || context.getShownShops() == null || context.getShownShops().isEmpty()) {
             return ContextRewriteResult.unchanged(query, "NO_WORKING_MEMORY");
         }
@@ -58,6 +78,13 @@ public class ConversationContextRewriter {
         String[] signals = {"第一家", "第二家", "第三家", "这家", "那家", "上一家", "刚才那家", "换个", "便宜点", "贵点", "走过去", "多远", "多久", "有包厢", "有优惠", "有券", "团购"};
         for (String signal : signals) if (query.contains(signal)) return true;
         return false;
+    }
+
+    private boolean refersToCurrentDeviceLocation(String query) {
+        String normalized = query == null ? "" : query.replaceAll("\\s+", "");
+        return normalized.matches("^(我?附近|当前(位置|定位)|边上)(呢|有啥|有什么)?[？?]?$")
+                || normalized.contains("我附近") || normalized.contains("我这附近")
+                || normalized.contains("当前位置") || normalized.contains("当前定位");
     }
 
     private String workingMemory(AgentSessionContext context) {

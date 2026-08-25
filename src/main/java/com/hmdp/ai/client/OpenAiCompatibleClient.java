@@ -93,6 +93,61 @@ public class OpenAiCompatibleClient {
         }
     }
 
+    /** Uses the dedicated low-latency model for route classification, not the main agent model. */
+    public JsonNode chatRoutingCompletion(List<Map<String, Object>> messages, List<Map<String, Object>> tools,
+                                          Map<String, Object> toolChoice) {
+        AiProperties.RoutingProperties routing = aiProperties.getRouting();
+        if (routing == null || !routing.isConfigured()) {
+            throw new IllegalStateException("Chat routing model is not configured");
+        }
+        return chatCompletion(messages, tools, toolChoice, "CHAT_ROUTING", routing.getTimeoutMs(),
+                routing.getBaseUrl(), routing.getApiKey(), routing.getModel());
+    }
+
+    private JsonNode chatCompletion(List<Map<String, Object>> messages, List<Map<String, Object>> tools,
+                                    Map<String, Object> toolChoice, String action, Integer timeoutMs,
+                                    String baseUrl, String apiKey, String model) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("messages", messages);
+        body.put("temperature", 0.1);
+        if (tools != null && !tools.isEmpty()) body.put("tools", tools);
+        if (toolChoice != null) body.put("tool_choice", toolChoice);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(apiKey);
+        String url = trimTrailingSlash(baseUrl) + "/chat/completions";
+        long startedAt = System.currentTimeMillis();
+        log.info("[AI][model] action={} model={} tools={} timeoutMs={} query={} event=REQUEST", action,
+                model, tools == null ? 0 : tools.size(), resolvedTimeout(timeoutMs), requestSummary(action, messages));
+        try {
+            ResponseEntity<JsonNode> response = restTemplate(timeoutMs).postForEntity(
+                    url, new HttpEntity<>(body, headers), JsonNode.class);
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+                throw new IllegalStateException("模型服务未返回有效响应");
+            }
+            modelCallTracker.recordSuccess(response.getBody().path("usage").path("prompt_tokens").isNumber()
+                            ? response.getBody().path("usage").path("prompt_tokens").asInt() : null,
+                    response.getBody().path("usage").path("completion_tokens").isNumber()
+                            ? response.getBody().path("usage").path("completion_tokens").asInt() : null);
+            log.info("[AI][model] action={} model={} event=SUCCESS durationMs={} toolCalls={}", action,
+                    model, System.currentTimeMillis() - startedAt,
+                    compact(response.getBody().path("choices").path(0).path("message").path("tool_calls").toString()));
+            return response.getBody();
+        } catch (HttpStatusCodeException e) {
+            modelCallTracker.recordFailure();
+            log.warn("[AI][model] action={} model={} event=FAILURE durationMs={} status={} detail={}", action,
+                    model, System.currentTimeMillis() - startedAt, e.getRawStatusCode(), compactError(e.getResponseBodyAsString()));
+            throw e;
+        } catch (RuntimeException e) {
+            modelCallTracker.recordFailure();
+            log.warn("[AI][model] action={} model={} event=FAILURE durationMs={} errorType={} detail={}", action,
+                    model, System.currentTimeMillis() - startedAt, e.getClass().getSimpleName(), compactError(e.getMessage()));
+            throw e;
+        }
+    }
+
     public String chatText(List<Map<String, Object>> messages) {
         return chatText(messages, "NARRATIVE_GENERATION");
     }

@@ -30,11 +30,20 @@ public class ConstraintExtractor {
 
     public DecisionConstraints extract(String query) {
         try {
-            return normalize(extractByModel(query));
+            return enforceCurrentDeviceIntent(normalize(extractByModel(query)), query);
         } catch (Exception e) {
             log.warn("[AI][model] action=CONSTRAINT_EXTRACTION event=FALLBACK reason={}", e.getClass().getSimpleName());
-            return normalize(extractByRule(query));
+            return enforceCurrentDeviceIntent(normalize(extractByRule(query)), query);
         }
+    }
+
+    private DecisionConstraints enforceCurrentDeviceIntent(DecisionConstraints constraints, String query) {
+        if (!containsCurrentDeviceReference(query)) return constraints;
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        constraints.setNearby(true);
+        constraints.setTargetCity("");
+        constraints.setTargetArea("");
+        return constraints;
     }
 
     private DecisionConstraints extractByModel(String query) throws Exception {

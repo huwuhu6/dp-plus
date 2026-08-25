@@ -87,6 +87,19 @@ public class ChatOrchestrationService {
         }
         ContextRewriteResult contextRewrite = rewriteContext(message, chatHistory, state, activeSessionId);
         String effectiveMessage = contextRewrite.getRewrittenQuery();
+        if ("CURRENT_DEVICE_LOCATION_CONTINUATION".equals(contextRewrite.getReason())) {
+            if (isPausedDecision(activeDecision)) {
+                DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
+                cancel.setSelectedOptionId("END_DECISION");
+                cancel.setMessage("被当前设备位置搜索替代：" + effectiveMessage);
+                decisionService.continueDecision(activeSessionId, cancel);
+                conversationStateService.clearActiveDecision(state);
+            }
+            log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} activeSessionId={} route=START_DECISION source=CURRENT_DEVICE_CONTINUATION query={}",
+                    chatId, activeSessionId, compact(effectiveMessage));
+            return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null,
+                    aiProperties.isConfigured(), contextRewrite);
+        }
         if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null && isNewRecommendationIntent(effectiveMessage)) {
             DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
             cancel.setSelectedOptionId("END_DECISION");
@@ -230,10 +243,8 @@ public class ChatOrchestrationService {
         Long sessionId = activeSessionId == null ? state.getLastDecisionSessionId() : activeSessionId;
         if (sessionId == null) return ContextRewriteResult.unchanged(message, "NO_DECISION_CONTEXT");
         AgentSessionContext context = conversationStateService.agentContext(state);
-        if (context == null || context.getShownShops() == null || context.getShownShops().isEmpty()) {
-            return ContextRewriteResult.unchanged(message, "NO_WORKING_MEMORY_CANDIDATES");
-        }
-        return contextRewriter.rewrite(message, history, context);
+        boolean hasDecisionContext = activeSessionId != null || state.getLastDecisionSessionId() != null;
+        return contextRewriter.rewrite(message, history, context, hasDecisionContext);
     }
 
     private String route(String message, String decisionStatus, List<Map<String, Object>> chatHistory) {
@@ -242,10 +253,13 @@ public class ChatOrchestrationService {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
             messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求或需求不完整；START_DECISION=用户明确要找餐厅、吃饭、菜品、订餐或餐饮消费推荐；BUSINESS_FOLLOW_UP=围绕已推荐餐饮商户问优惠券、评价、备选或比较；EXIT_DECISION=用户明确说算了、不找了、结束或不需要了。‘附近有啥’、‘有什么推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
             messages.add(message("system", "当前决策状态=" + decisionStatus));
+            messages.add(message("system", "优先规则：若前序对话已处于餐饮推荐上下文，或状态为 ZERO_RESULT_NO_DATA、WAITING_RELAXATION，用户说“我附近”“当前位置”“当前定位”“换个地方”或“其他商圈”时，必须继承餐饮推荐意图并选择 START_DECISION；不要把它当作 GENERAL_CHAT。"));
             messages.add(message("system", "若当前状态为 WAITING_RELAXATION 或 ZERO_RESULT_NO_DATA，用户是在追问暂停原因、已确认地点、可放宽项或下一步如何处理时，选择 EXPLAIN_SUSPENDED_DECISION；该路由不发起新搜索，也不查询商户详情。"));
             messages.addAll(chatHistory);
             messages.add(message("user", message));
-            JsonNode result = aiClient.chatCompletion(messages, Arrays.asList(routeTool()), null, "CHAT_ROUTING");
+            JsonNode result = aiProperties.getRouting() != null && aiProperties.getRouting().isConfigured()
+                    ? aiClient.chatRoutingCompletion(messages, Arrays.asList(routeTool()), null)
+                    : aiClient.chatCompletion(messages, Arrays.asList(routeTool()), null, "CHAT_ROUTING");
             String arguments = result.path("choices").path(0).path("message").path("tool_calls").path(0)
                     .path("function").path("arguments").asText();
             String route = objectMapper.readTree(arguments).path("route").asText(fallbackRoute(message, decisionStatus));
