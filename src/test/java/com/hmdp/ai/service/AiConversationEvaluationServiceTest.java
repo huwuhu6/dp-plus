@@ -24,6 +24,7 @@ import com.hmdp.utils.UserHolder;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -86,6 +87,45 @@ class AiConversationEvaluationServiceTest {
         assertEquals(true, response.getCaseResults().get(0).getRouteMatched());
         assertEquals(0, response.getRun().getContextRewriteExpectedCount());
         assertEquals(true, response.getCaseResults().get(0).getChatId().matches("[A-Za-z0-9-]{1,64}"));
+    }
+
+    @Test
+    void submitsConversationEvaluationWithoutHoldingTheRequestForAllTurns() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
+        AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
+        AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
+        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
+        ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
+        ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "runMapper", runMapper);
+        ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
+        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        // Execute inline so this test can assert the state transition deterministically.
+        ReflectionTestUtils.setField(service, "evaluationExecutor", (Executor) Runnable::run);
+
+        AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
+        evaluationCase.setId(3L);
+        evaluationCase.setCaseCode("ASYNC_SUBMIT");
+        evaluationCase.setTurnsJson("[{\"message\":\"找日料\"}]");
+        evaluationCase.setExpectedRoutesJson("[\"START_DECISION\"]");
+        evaluationCase.setExpectedToolNamesJson("[]");
+        evaluationCase.setExpectedFinalStatus("COMPLETED");
+        when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
+        doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(14L); return 1; })
+                .when(runMapper).insert(any(AiConversationEvaluationRun.class));
+        when(chatService.chat(any())).thenReturn(response("START_DECISION", "COMPLETED"));
+        when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+
+        ConversationEvaluationRunResponse response = service.submitActiveCases();
+
+        assertEquals(14L, response.getRun().getId());
+        assertEquals("COMPLETED", response.getRun().getStatus());
+        assertEquals(0, response.getCaseResults().size());
+        org.mockito.Mockito.verify(runMapper, org.mockito.Mockito.atLeastOnce()).updateById(response.getRun());
     }
 
     @Test

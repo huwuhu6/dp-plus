@@ -34,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Set;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.HashSet;
 import java.util.stream.Collectors;
 
@@ -48,6 +50,7 @@ public class AiConversationEvaluationService {
     @Resource private ShopMapper shopMapper;
     @Resource private ObjectMapper objectMapper;
     @Resource private AiProperties aiProperties;
+    private Executor evaluationExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public ConversationEvaluationRunResponse runActiveCases() {
         return runCases(aiProperties.getConversationEvaluationDatasetVersion());
@@ -57,19 +60,51 @@ public class AiConversationEvaluationService {
         return runCases(aiProperties.getConversationHoldoutDatasetVersion());
     }
 
+    /**
+     * Creates a run synchronously, then evaluates it outside the HTTP request.
+     * Callers can poll {@link #getRun(Long)} without holding an upstream proxy
+     * connection for the full multi-turn trajectory duration.
+     */
+    public ConversationEvaluationRunResponse submitActiveCases() {
+        return submitCases(aiProperties.getConversationEvaluationDatasetVersion());
+    }
+
+    public ConversationEvaluationRunResponse submitHoldoutCases() {
+        return submitCases(aiProperties.getConversationHoldoutDatasetVersion());
+    }
+
     private ConversationEvaluationRunResponse runCases(String datasetVersion) {
-        List<AiConversationEvaluationCase> cases = caseMapper.selectList(new QueryWrapper<AiConversationEvaluationCase>()
-                .eq("active", true).eq("dataset_version", datasetVersion).orderByAsc("id"));
-        if (cases.isEmpty()) throw new IllegalStateException("没有启用的对话轨迹评测用例");
+        List<AiConversationEvaluationCase> cases = activeCases(datasetVersion);
+        AiConversationEvaluationRun run = createRun(datasetVersion, cases);
 
-        AiConversationEvaluationRun run = new AiConversationEvaluationRun();
-        run.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
-        run.setModel(aiProperties.getModel());
-        run.setDatasetVersion(datasetVersion);
-        run.setCaseCount(cases.size());
-        run.setStatus("RUNNING");
-        runMapper.insert(run);
+        List<AiConversationEvaluationCaseResult> results = executeRun(run, cases);
+        return response(run, results);
+    }
 
+    private ConversationEvaluationRunResponse submitCases(String datasetVersion) {
+        List<AiConversationEvaluationCase> cases = activeCases(datasetVersion);
+        AiConversationEvaluationRun run = createRun(datasetVersion, cases);
+        UserDTOSnapshot submitter = UserDTOSnapshot.capture(UserHolder.getUser());
+        evaluationExecutor.execute(() -> executeAsync(run, cases, submitter));
+        return response(run, Collections.emptyList());
+    }
+
+    private void executeAsync(AiConversationEvaluationRun run, List<AiConversationEvaluationCase> cases,
+                              UserDTOSnapshot submitter) {
+        try {
+            submitter.restore();
+            executeRun(run, cases);
+        } catch (Exception e) {
+            run.setStatus("FAILED");
+            run.setErrorSummary(compact(e.getMessage()));
+            runMapper.updateById(run);
+        } finally {
+            UserHolder.removeUser();
+        }
+    }
+
+    private List<AiConversationEvaluationCaseResult> executeRun(AiConversationEvaluationRun run,
+                                                                  List<AiConversationEvaluationCase> cases) {
         List<AiConversationEvaluationCaseResult> results = new ArrayList<>();
         for (AiConversationEvaluationCase evaluationCase : cases) {
             AiConversationEvaluationCaseResult result = evaluate(run.getId(), evaluationCase);
@@ -78,11 +113,59 @@ public class AiConversationEvaluationService {
         }
         finish(run, results);
         runMapper.updateById(run);
+        return results;
+    }
 
+    private List<AiConversationEvaluationCase> activeCases(String datasetVersion) {
+        List<AiConversationEvaluationCase> cases = caseMapper.selectList(new QueryWrapper<AiConversationEvaluationCase>()
+                .eq("active", true).eq("dataset_version", datasetVersion).orderByAsc("id"));
+        if (cases.isEmpty()) throw new IllegalStateException("没有启用的对话轨迹评测用例");
+        return cases;
+    }
+
+    private AiConversationEvaluationRun createRun(String datasetVersion, List<AiConversationEvaluationCase> cases) {
+        AiConversationEvaluationRun run = new AiConversationEvaluationRun();
+        run.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
+        run.setModel(aiProperties.getModel());
+        run.setDatasetVersion(datasetVersion);
+        run.setCaseCount(cases.size());
+        run.setStatus("RUNNING");
+        runMapper.insert(run);
+        return run;
+    }
+
+    private ConversationEvaluationRunResponse response(AiConversationEvaluationRun run,
+                                                        List<AiConversationEvaluationCaseResult> results) {
         ConversationEvaluationRunResponse response = new ConversationEvaluationRunResponse();
         response.setRun(run);
         response.setCaseResults(results);
         return response;
+    }
+
+    private static final class UserDTOSnapshot {
+        private final Long id;
+        private final String nickName;
+        private final String icon;
+
+        private UserDTOSnapshot(Long id, String nickName, String icon) {
+            this.id = id;
+            this.nickName = nickName;
+            this.icon = icon;
+        }
+
+        static UserDTOSnapshot capture(com.hmdp.dto.UserDTO user) {
+            return user == null ? new UserDTOSnapshot(null, null, null)
+                    : new UserDTOSnapshot(user.getId(), user.getNickName(), user.getIcon());
+        }
+
+        void restore() {
+            if (id == null) return;
+            com.hmdp.dto.UserDTO user = new com.hmdp.dto.UserDTO();
+            user.setId(id);
+            user.setNickName(nickName);
+            user.setIcon(icon);
+            UserHolder.saveUser(user);
+        }
     }
 
     public ConversationEvaluationRunResponse getRun(Long runId) {

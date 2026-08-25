@@ -128,7 +128,9 @@ public class ConversationStateService {
     public ResolvedLocationCandidate acceptPendingSearchLocation(AiChatSession state, int index) {
         ConversationWorkingMemory memory = workingMemory(state);
         List<ResolvedLocationCandidate> candidates = memory.getPendingLocationCandidates();
-        if (candidates == null || index < 0 || index >= candidates.size()) throw new IllegalArgumentException("Location candidate has expired");
+        if (candidates == null || index < 0 || index >= candidates.size()) {
+            throw new IllegalArgumentException("地点候选不存在或已失效，请重新解析地点后再确认");
+        }
         ResolvedLocationCandidate candidate = candidates.get(index);
         ConversationLocationSlot target = memory.getSearchLocation();
         boolean changed = materialLocationChange(target, candidate.getLatitude(), candidate.getLongitude());

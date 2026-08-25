@@ -44,12 +44,12 @@ public class AiEvaluationController {
 
     @PostMapping("/conversation-runs")
     public Result runConversationCases() {
-        return Result.ok(conversationEvaluationService.runActiveCases());
+        return Result.ok(conversationEvaluationService.submitActiveCases());
     }
 
     @PostMapping("/conversation-runs/holdout")
     public Result runConversationHoldoutCases() {
-        return Result.ok(conversationEvaluationService.runHoldoutCases());
+        return Result.ok(conversationEvaluationService.submitHoldoutCases());
     }
 
     @GetMapping("/conversation-runs/{runId}")
