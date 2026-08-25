@@ -44,6 +44,18 @@ class PolicyDecisionEngineTest {
     }
 
     @Test
+    void currentDeviceIntentCanReuseAuthorizedDeviceLocationWithoutNearbyFlag() {
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        ConversationLocationSlot device = memory.getLocation();
+        device.setStatus("AVAILABLE"); device.setLatitude(26.08D); device.setLongitude(119.19D);
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setLocationIntent("CURRENT_DEVICE");
+
+        assertEquals(PolicyDecisionEngine.EXECUTE_RECOMMENDATION,
+                engine.decideRecommendation(new DecisionRequest(), constraints, memory).getAction());
+    }
+
+    @Test
     void classifiesFollowUpActionsWithoutModel() {
         assertEquals(PolicyDecisionEngine.SHOP_VOUCHER, engine.decideFollowUp("这家有优惠券吗").getAction());
         assertEquals(PolicyDecisionEngine.SHOP_EVIDENCE, engine.decideFollowUp("评价怎么样").getAction());

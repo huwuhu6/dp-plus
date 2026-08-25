@@ -161,6 +161,30 @@ class ConversationStateServiceTest {
     }
 
     @Test
+    void currentDeviceIntentClearsStaleNamedDestinationBeforeLocationGate() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        memory.getSearchLocation().setStatus("RESOLVED_BY_NAME");
+        memory.getSearchLocation().setCity("北京");
+        memory.getSearchLocation().setDistrict("朝阳区");
+        AiChatSession state = state(memory, "current-device-location-test");
+        CriteriaMergeResult reduction = new CriteriaMergeResult();
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        constraints.setNearby(true);
+        reduction.setConstraints(constraints);
+        reduction.getCleared().add("targetCity");
+        reduction.getCleared().add("targetArea");
+
+        service.reduceCriteria(state, reduction);
+
+        ConversationLocationSlot target = service.workingMemory(state).getSearchLocation();
+        assertEquals("MISSING", target.getStatus());
+        assertNull(target.getCity());
+        assertNull(target.getDistrict());
+    }
+
+    @Test
     void appliesFollowUpCandidatePoolIntoWorkingMemory() throws Exception {
         ConversationStateService service = service();
         ConversationWorkingMemory memory = new ConversationWorkingMemory();

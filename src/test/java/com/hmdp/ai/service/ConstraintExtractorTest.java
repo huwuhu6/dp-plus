@@ -48,4 +48,21 @@ class ConstraintExtractorTest {
         assertEquals(0.1D, constraints.getRadiusKm());
         assertEquals(true, constraints.getNearby());
     }
+
+    @Test
+    void currentDeviceIntentClearsConflictingTargetSlotsFromModel() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"locationIntent\\\":\\\"CURRENT_DEVICE\\\",\\\"targetCity\\\":\\\"北京\\\",\\\"targetArea\\\":\\\"朝阳区\\\",\\\"keyword\\\":\\\"烧烤\\\",\\\"cuisine\\\":\\\"烧烤\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":true,\\\"arrivalTime\\\":\\\"\\\",\\\"occasion\\\":\\\"\\\",\\\"quiet\\\":false,\\\"avoidQueue\\\":false,\\\"hardConstraints\\\":[],\\\"softPreferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("看看我附近的烧烤");
+
+        assertEquals("CURRENT_DEVICE", constraints.getLocationIntent());
+        assertEquals("", constraints.getTargetCity());
+        assertEquals("", constraints.getTargetArea());
+    }
 }

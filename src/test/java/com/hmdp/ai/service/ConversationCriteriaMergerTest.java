@@ -85,4 +85,24 @@ class ConversationCriteriaMergerTest {
         assertTrue(result.getReplaced().stream().anyMatch(item -> item.startsWith("targetCity:")));
         assertTrue(result.getReplaced().stream().anyMatch(item -> item.startsWith("targetArea:")));
     }
+
+    @Test
+    void currentDeviceIntentClearsPriorNamedDestination() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setTargetCity("北京");
+        previous.setTargetArea("朝阳区");
+        previous.setLocationIntent("EXPLICIT_TARGET");
+
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setLocationIntent("CURRENT_DEVICE");
+        delta.setNearby(true);
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "看看我附近有什么好吃的");
+
+        assertEquals("", result.getConstraints().getTargetCity());
+        assertEquals("", result.getConstraints().getTargetArea());
+        assertEquals("CURRENT_DEVICE", result.getConstraints().getLocationIntent());
+        assertTrue(result.getCleared().contains("targetCity"));
+        assertTrue(result.getCleared().contains("targetArea"));
+    }
 }

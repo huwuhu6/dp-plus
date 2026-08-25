@@ -35,7 +35,8 @@ public class PolicyDecisionEngine {
         if (memory != null && hasCoordinates(memory.getSearchLocation())) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION, "复用已确认的搜索目标位置");
         }
-        if (Boolean.TRUE.equals(constraints == null ? null : constraints.getNearby())
+        if ((Boolean.TRUE.equals(constraints == null ? null : constraints.getNearby())
+                || "CURRENT_DEVICE".equals(constraints == null ? null : constraints.getLocationIntent()))
                 && memory != null && hasCoordinates(memory.getLocation())) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION, "复用用户授权的设备定位");
         }

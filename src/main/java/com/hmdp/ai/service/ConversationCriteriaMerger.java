@@ -19,6 +19,13 @@ public class ConversationCriteriaMerger {
         String text = query == null ? "" : query.replaceAll("\\s+", "");
 
         inherit(result, previous);
+        if ("CURRENT_DEVICE".equals(delta.getLocationIntent())) {
+            clearWhenPresent(result, "targetCity", merged.getTargetCity(), () -> merged.setTargetCity(""));
+            clearWhenPresent(result, "targetArea", merged.getTargetArea(), () -> merged.setTargetArea(""));
+            replace(result, "locationIntent", merged.getLocationIntent(), "CURRENT_DEVICE", () -> merged.setLocationIntent("CURRENT_DEVICE"));
+        } else if ("EXPLICIT_TARGET".equals(delta.getLocationIntent())) {
+            replace(result, "locationIntent", merged.getLocationIntent(), "EXPLICIT_TARGET", () -> merged.setLocationIntent("EXPLICIT_TARGET"));
+        }
         if (hasText(delta.getTargetCity())) replace(result, "targetCity", merged.getTargetCity(), delta.getTargetCity(), () -> merged.setTargetCity(delta.getTargetCity()));
         if (hasText(delta.getTargetArea())) replace(result, "targetArea", merged.getTargetArea(), delta.getTargetArea(), () -> merged.setTargetArea(delta.getTargetArea()));
         if (hasText(delta.getKeyword())) replace(result, "keyword", merged.getKeyword(), delta.getKeyword(), () -> merged.setKeyword(delta.getKeyword()));
@@ -51,7 +58,7 @@ public class ConversationCriteriaMerger {
     private DecisionConstraints copy(DecisionConstraints source) {
         DecisionConstraints target = new DecisionConstraints();
         if (source == null) return target;
-        target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword());
+        target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword()); target.setLocationIntent(source.getLocationIntent());
         target.setCuisine(source.getCuisine()); target.setBudgetPerPerson(source.getBudgetPerPerson());
         target.setRadiusKm(source.getRadiusKm()); target.setNearby(source.getNearby());
         target.setArrivalTime(source.getArrivalTime()); target.setOccasion(source.getOccasion());
@@ -66,6 +73,7 @@ public class ConversationCriteriaMerger {
         if (previous == null) return;
         if (hasText(previous.getTargetCity())) result.getInherited().add("targetCity=" + previous.getTargetCity());
         if (hasText(previous.getTargetArea())) result.getInherited().add("targetArea=" + previous.getTargetArea());
+        if (hasText(previous.getLocationIntent())) result.getInherited().add("locationIntent=" + previous.getLocationIntent());
         if (hasText(previous.getKeyword())) result.getInherited().add("keyword=" + previous.getKeyword());
         if (hasText(previous.getCuisine())) result.getInherited().add("cuisine=" + previous.getCuisine());
         if (previous.getBudgetPerPerson() != null && previous.getBudgetPerPerson() > 0) result.getInherited().add("budgetPerPerson=" + previous.getBudgetPerPerson());
@@ -81,6 +89,11 @@ public class ConversationCriteriaMerger {
     private void clear(CriteriaMergeResult result, String field, Runnable mutation) {
         mutation.run();
         if (!result.getCleared().contains(field)) result.getCleared().add(field);
+    }
+
+    private void clearWhenPresent(CriteriaMergeResult result, String field, String before, Runnable mutation) {
+        if (!hasText(before)) return;
+        clear(result, field, mutation);
     }
 
     private void append(CriteriaMergeResult result, String field, List<String> target, List<String> additions) {

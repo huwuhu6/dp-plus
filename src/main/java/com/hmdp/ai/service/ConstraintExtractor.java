@@ -40,6 +40,7 @@ public class ConstraintExtractor {
     private DecisionConstraints extractByModel(String query) throws Exception {
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(message("system", "你是消费决策需求解析器。只能根据用户原话提取约束；未知值使用空字符串、-1 或 false，不得臆测。地点必须严格拆分：targetCity 仅填用户明确指定的目标城市，targetArea 仅填目标行政区、商圈或地标，绝不能将地点填入 cuisine、keyword 或 hardConstraints；用户设备当前位置不属于 targetCity。keyword 仅填商户名或核心餐饮检索词，不含城市、区域或‘附近’等地理范围词。"));
+        messages.add(message("system", "Set locationIntent to CURRENT_DEVICE only when the user explicitly asks to search around their own current/device location. Set it to EXPLICIT_TARGET when the user names a destination city, district, business circle, or landmark. These values are mutually exclusive: CURRENT_DEVICE requires empty targetCity and targetArea."));
         messages.add(message("user", query));
 
         Map<String, Object> function = new LinkedHashMap<>();
@@ -60,6 +61,7 @@ public class ConstraintExtractor {
 
     private DecisionConstraints extractByRule(String query) {
         DecisionConstraints constraints = new DecisionConstraints();
+        if (containsCurrentDeviceReference(query)) constraints.setLocationIntent("CURRENT_DEVICE");
         if (query.contains("日料") || query.contains("寿司")) {
             constraints.setCuisine("日料");
         } else if (query.contains("火锅")) {
@@ -98,6 +100,11 @@ public class ConstraintExtractor {
         constraints.setTargetCity(normalizeText(constraints.getTargetCity()));
         constraints.setTargetArea(normalizeText(constraints.getTargetArea()));
         constraints.setKeyword(normalizeText(constraints.getKeyword()));
+        constraints.setLocationIntent(normalizeLocationIntent(constraints.getLocationIntent(), constraints));
+        if ("CURRENT_DEVICE".equals(constraints.getLocationIntent())) {
+            constraints.setTargetCity("");
+            constraints.setTargetArea("");
+        }
         constraints.setCuisine(canonicalizeCuisine(constraints.getCuisine()));
         if (constraints.getBudgetPerPerson() == null) constraints.setBudgetPerPerson(-1);
         if (constraints.getRadiusKm() == null) constraints.setRadiusKm(-1D);
@@ -134,8 +141,26 @@ public class ConstraintExtractor {
         return value == null ? "" : value.trim();
     }
 
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String normalizeLocationIntent(String locationIntent, DecisionConstraints constraints) {
+        if ("CURRENT_DEVICE".equalsIgnoreCase(locationIntent)) return "CURRENT_DEVICE";
+        if ("EXPLICIT_TARGET".equalsIgnoreCase(locationIntent)
+                || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())) return "EXPLICIT_TARGET";
+        return "UNSPECIFIED";
+    }
+
+    private boolean containsCurrentDeviceReference(String query) {
+        String text = query == null ? "" : query.replaceAll("\\s+", "");
+        return text.contains("我附近") || text.contains("我这附近") || text.contains("我身边")
+                || text.contains("当前位置") || text.contains("当前定位") || text.contains("现在位置");
+    }
+
     private Map<String, Object> constraintSchema() {
         Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("locationIntent", property("string", "Location intent: EXPLICIT_TARGET for a named destination, CURRENT_DEVICE only when the user explicitly means their current/device location, otherwise UNSPECIFIED."));
         properties.put("targetCity", property("string", "用户显式要求搜索的目标城市名称，如重庆、北京。若未提及留空。不得填设备当前位置。"));
         properties.put("targetArea", property("string", "用户显式要求搜索的目标区域、商圈或地标，如解放碑、朝阳区。若未提及留空。"));
         properties.put("keyword", property("string", "特定店铺名称或核心品类词；不包含城市、区域、附近等地理范围词。未知时留空。"));

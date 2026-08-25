@@ -13,6 +13,8 @@ public class DecisionConstraints {
     private String targetArea = "";
     /** Restaurant name or core search term after geography is separated from the request. */
     private String keyword = "";
+    /** EXPLICIT_TARGET, CURRENT_DEVICE, or UNSPECIFIED. Keeps destination and device-location semantics disjoint. */
+    private String locationIntent = "UNSPECIFIED";
     private String cuisine = "";
     private Integer budgetPerPerson = -1;
     private Double radiusKm = -1D;

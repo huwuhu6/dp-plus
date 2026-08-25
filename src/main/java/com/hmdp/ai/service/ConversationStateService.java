@@ -294,7 +294,13 @@ public class ConversationStateService {
     private void synchronizeNamedSearchLocation(AiChatSession state, ConversationWorkingMemory memory,
                                                 CriteriaMergeResult reduction) {
         DecisionConstraints criteria = reduction.getConstraints();
-        if (!hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea())) return;
+        if (!hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea())) {
+            if (containsClearedField(reduction.getCleared(), "targetCity") || containsClearedField(reduction.getCleared(), "targetArea")) {
+                clearLocation(memory.getSearchLocation(), "MISSING");
+                log.info("[AI][state] event=NAMED_SEARCH_LOCATION_CLEARED chatId={} action=USE_DEVICE_LOCATION_IF_AUTHORIZED", state.getChatId());
+            }
+            return;
+        }
         if (!containsField(reduction.getReplaced(), "targetCity")
                 && !containsField(reduction.getReplaced(), "targetArea")) return;
 
@@ -314,6 +320,9 @@ public class ConversationStateService {
             if (change != null && change.startsWith(field + ":")) return true;
         }
         return false;
+    }
+    private boolean containsClearedField(List<String> changes, String field) {
+        return changes != null && changes.contains(field);
     }
     private int invalidateCandidatePool(ConversationWorkingMemory memory) {
         int previousCandidateCount = memory.getCandidatePool().size();

@@ -11,6 +11,7 @@ import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.ConversationSlots;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
+import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
@@ -161,6 +162,86 @@ class ChatOrchestrationServiceTest {
         assertTrue(response.getAnswer().contains("消费决策助手"));
         verifyNoInteractions(decisionService, conversationService);
         verify(memoryService).appendTurn(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void explainsNoDataSuspensionWithoutStartingNewDecisionOrBusinessFollowUp() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        AgentConversationService conversationService = mock(AgentConversationService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", conversationService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetCity("重庆");
+        DecisionResponse paused = new DecisionResponse();
+        paused.setSessionId(100L);
+        paused.setStatus("ZERO_RESULT_NO_DATA");
+        paused.setConstraints(constraints);
+        when(decisionService.getDecision(100L)).thenReturn(paused);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("我刚刚不是说要重庆吗？");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("EXPLAIN_SUSPENDED_DECISION", response.getRoute());
+        assertEquals(100L, response.getDecisionSessionId());
+        assertTrue(response.getAnswer().contains("重庆"));
+        assertTrue(response.getAnswer().contains("暂无入库商户"));
+        verify(decisionService, never()).decide(any());
+        verifyNoInteractions(conversationService);
+    }
+
+    @Test
+    void modelCanRouteUnseenSuspendedQuestionToExplanation() throws Exception {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        AiProperties properties = new AiProperties();
+        properties.setApiKey("test-key");
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", properties);
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetCity("重庆");
+        DecisionResponse paused = new DecisionResponse();
+        paused.setSessionId(100L);
+        paused.setStatus("ZERO_RESULT_NO_DATA");
+        paused.setConstraints(constraints);
+        when(decisionService.getDecision(100L)).thenReturn(paused);
+        when(aiClient.chatCompletion(any(), any(), any(), any())).thenReturn(new ObjectMapper().readTree(
+                "{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"route\\\":\\\"EXPLAIN_SUSPENDED_DECISION\\\"}\"}}]}}]}"));
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("是哪里不匹配？");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("EXPLAIN_SUSPENDED_DECISION", response.getRoute());
+        assertTrue(response.getAnswer().contains("重庆"));
+        verify(decisionService, never()).decide(any());
     }
 
     @Test

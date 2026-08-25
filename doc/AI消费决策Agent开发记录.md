@@ -1,5 +1,25 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-08-25：命名目的地与当前设备位置的互斥状态切换
+
+回放会话 `web-1787662311235-av4p7h3q` 发现，用户先将搜索目的地指定为北京，随后说“看看我附近有什么好吃的”时，`nearby=true` 只被当作新增筛选条件，旧的 `targetCity=北京` 与 `searchLocation.city=北京` 仍然保留。Gateway 因此继续以北京作为命名目的地检索，而不是切换到用户设备位置；设备坐标为空时又错误进入可松弛检索状态。
+
+`DecisionConstraints` 新增并启用 `locationIntent`，将位置语义收敛为 `EXPLICIT_TARGET`、`CURRENT_DEVICE`、`UNSPECIFIED` 三种互斥状态。约束提取 Tool Schema 与模型 Prompt 明确要求：用户说“我附近/当前位置”时输出 `CURRENT_DEVICE`，且 `targetCity`、`targetArea` 必须为空；模型输出冲突字段时，归一化层也会以 `CURRENT_DEVICE` 为准清空目标地点。关键词识别仅作为模型调用失败时的降级兜底，不参与城市识别。
+
+`ConversationCriteriaMerger` 在 `CURRENT_DEVICE` Delta 到达时确定性清除历史目标城市和区域；`ConversationStateService` 同步清空持久化的 `searchLocation`，从而使旧城市坐标与候选池不再影响下一轮。`ChatOrchestrationService` 与 `PolicyDecisionEngine` 仅在 `CURRENT_DEVICE` 或 nearby 语义成立时复用授权设备坐标；若未授权或坐标缺失，则进入 `CLARIFYING` 请求定位，绝不回退使用旧的命名城市。
+
+新增回归覆盖模型冲突槽位清洗、命名目的地切换至当前设备位置时的 Criteria 归约、持久化 `searchLocation` 清理，以及在不带 nearby 标记时复用 `CURRENT_DEVICE` 的已授权坐标。全量回归测试：19 个测试套件、91 个用例、0 failure、0 error、3 skipped（`mvn -q test`）。
+
+## 2026-08-25：零结果覆盖不足与条件过严的状态分流
+
+显式目的地的地理仲裁修复后，回放“重庆有什么好吃的”确认 SQL 已按 `city=重庆` 过滤，但候选为空时仍统一进入 `WAITING_RELAXATION`。当用户只提供城市、没有菜系、预算、距离或其他可放宽约束时，界面只剩“结束推荐”选项，却仍提示“可以放宽条件”，属于错误的状态语义。
+
+`ConsumptionDecisionService` 现在按确定性规则区分两类零结果：存在菜系、预算、半径、安静/排队偏好、清淡偏好或额外硬约束时，保留 `WAITING_RELAXATION` 并只展示真实可执行的放宽项；已指定行政区且不存在任何可松弛条件时，进入 `ZERO_RESULT_NO_DATA`，明确说明该城市/区域当前暂无入库餐饮商户，并给出 `SWITCH_CITY`、`END_DECISION` 两个操作。新增 `RELAX_HARD_CONSTRAINTS` 也使硬约束在确实存在时可被显式移除，而不会隐式改写用户条件。
+
+Gateway 增加挂起态感知路由：在 `WAITING_RELAXATION` 或 `ZERO_RESULT_NO_DATA` 下，“放宽什么条件”“什么意思”“我刚刚不是说要重庆吗”等解释性追问直接走 `EXPLAIN_SUSPENDED_DECISION`，保持原 `decisionSessionId`，不触发新搜索、不进入商户详情工具。通用闲聊 Prompt 同时注入只读 Working Memory 摘要（目标城市、区域、菜系、预算与候选数），避免模型将已确认的“重庆”等事实误说成未提供条件。
+
+新增回归用例覆盖：命名城市且无可松弛条件时返回 `ZERO_RESULT_NO_DATA` 与正确选项；零结果挂起时追问已确认城市会保持会话并返回状态解释，不调用新决策或商户追问链路。全量 `mvn -q test` 通过。
+
 ## 2026-08-16：推荐默认定位与地点消歧
 
 推荐不再仅在用户使用“附近”等关键词时才索要位置。任何进入餐饮推荐链路、且没有有效会话定位的请求，都会停在 `CLARIFYING` 状态，要求用户授权当前位置；用户显式选择不提供位置时，才允许全城搜索。
