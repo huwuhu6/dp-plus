@@ -13,6 +13,7 @@ public class AgentToolResult {
     private Long durationMs;
     private Long focusedShopId;
     private String focusedShopName;
+    private ToolStateDelta stateDelta;
     private Map<String, Object> facts = new LinkedHashMap<String, Object>();
 
     public AgentToolResult summary(String value) {

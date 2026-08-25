@@ -58,6 +58,29 @@ class ConversationStateServiceTest {
     }
 
     @Test
+    void clearsCandidatePoolWhenBudgetOrSceneChanges() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        DecisionRecommendation shop = new DecisionRecommendation();
+        shop.setShopId(11L); shop.setShopName("旧候选");
+        memory.setCandidatePool(Arrays.asList(shop));
+        memory.setFocusedShopId(11L); memory.setFocusedShopName("旧候选");
+        AiChatSession state = state(memory, "criteria-cascade-test");
+
+        CriteriaMergeResult reduction = new CriteriaMergeResult();
+        reduction.setConstraints(new DecisionConstraints());
+        reduction.getReplaced().add("budgetPerPerson:100->200");
+        reduction.getReplaced().add("occasion:聚餐->约会");
+
+        service.reduceCriteria(state, reduction);
+
+        ConversationWorkingMemory updated = service.workingMemory(state);
+        assertEquals(0, updated.getCandidatePool().size());
+        assertNull(updated.getFocusedShopId());
+        assertEquals(Arrays.asList("candidatePool=1", "focusedShop"), reduction.getInvalidated());
+    }
+
+    @Test
     void clearsCandidatePoolWhenLocationChangesMaterially() throws Exception {
         ConversationStateService service = service();
         ConversationWorkingMemory memory = new ConversationWorkingMemory();

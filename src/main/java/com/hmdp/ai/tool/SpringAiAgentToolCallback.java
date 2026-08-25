@@ -2,7 +2,6 @@ package com.hmdp.ai.tool;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hmdp.ai.dto.AgentSessionContext;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
@@ -11,16 +10,14 @@ import org.springframework.ai.tool.definition.ToolDefinition;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Adapts the existing business-tool contract to Spring AI without dropping session context. */
+/** Adapts a pure business-tool contract to Spring AI. */
 public class SpringAiAgentToolCallback implements ToolCallback {
     private final BaseAgentTool tool;
-    private final AgentSessionContext sessionContext;
     private final ObjectMapper objectMapper;
     private final ToolDefinition definition;
 
-    public SpringAiAgentToolCallback(BaseAgentTool tool, AgentSessionContext sessionContext, ObjectMapper objectMapper) {
+    public SpringAiAgentToolCallback(BaseAgentTool tool, ObjectMapper objectMapper) {
         this.tool = tool;
-        this.sessionContext = sessionContext;
         this.objectMapper = objectMapper;
         try {
             this.definition = DefaultToolDefinition.builder()
@@ -52,7 +49,7 @@ public class SpringAiAgentToolCallback implements ToolCallback {
         try {
             Map<String, Object> input = objectMapper.readValue(toolInput == null || toolInput.isBlank() ? "{}" : toolInput,
                     new TypeReference<Map<String, Object>>() { });
-            AgentToolResult result = tool.execute(input, sessionContext);
+            AgentToolResult result = tool.execute(input);
             Map<String, Object> response = new LinkedHashMap<String, Object>();
             response.put("summary", result.getSummary());
             response.put("displayText", result.getDisplayText());

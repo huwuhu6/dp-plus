@@ -1,7 +1,6 @@
 package com.hmdp.ai.tool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hmdp.ai.dto.AgentSessionContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
@@ -33,10 +32,10 @@ public class AgentToolRegistry {
         return result;
     }
 
-    public List<ToolCallback> springAiCallbacks(AgentSessionContext context) {
+    public List<ToolCallback> springAiCallbacks() {
         List<ToolCallback> callbacks = new ArrayList<ToolCallback>();
         for (BaseAgentTool tool : tools) {
-            callbacks.add(new SpringAiAgentToolCallback(tool, context, objectMapper));
+            callbacks.add(new SpringAiAgentToolCallback(tool, objectMapper));
         }
         return callbacks;
     }

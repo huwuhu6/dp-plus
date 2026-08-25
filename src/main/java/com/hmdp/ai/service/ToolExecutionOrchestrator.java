@@ -73,8 +73,9 @@ public class ToolExecutionOrchestrator {
             if (request.getExplicitlyReferencedShopId() != null && isSingleShopTool(request.getToolName())) {
                 input.put("shopId", request.getExplicitlyReferencedShopId());
             }
+            enrichWithDeterministicContext(input, request.getToolName(), context);
             outcome.setEffectiveArguments(objectMapper.writeValueAsString(input));
-            outcome.setResult(resultCompressor.compress(tool.execute(input, context)));
+            outcome.setResult(resultCompressor.compress(tool.execute(input)));
         } catch (Exception e) {
             outcome.setErrorMessage(e.getMessage() == null ? "工具执行失败" : e.getMessage());
         }
@@ -103,6 +104,22 @@ public class ToolExecutionOrchestrator {
     private boolean isSingleShopTool(String toolName) {
         return "get_shop_detail".equals(toolName) || "query_shop_vouchers".equals(toolName)
                 || "search_shop_evidence".equals(toolName);
+    }
+
+    /** Materializes all state required by tools into a per-request input snapshot. */
+    private void enrichWithDeterministicContext(Map<String, Object> input, String toolName, AgentSessionContext context) {
+        if (context == null) return;
+        if (isSingleShopTool(toolName) && !input.containsKey("shopId") && context.getFocusedShopId() != null) {
+            input.put("shopId", context.getFocusedShopId());
+        }
+        if ("compare_shops".equals(toolName) && !input.containsKey("shopId") && context.getFocusedShopId() != null) {
+            input.put("shopId", context.getFocusedShopId());
+        }
+        if ("search_alternative_shops".equals(toolName)) {
+            input.put("shownShopIds", new ArrayList<Long>(context.getShownShopIds()));
+            input.put("decisionRequest", context.getDecisionRequest());
+            input.put("decisionConstraints", context.getDecisionConstraints());
+        }
     }
 
     private String blankToObject(String arguments) {

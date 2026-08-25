@@ -49,6 +49,7 @@ public class AgentConversationService {
     @Resource private SpringAiToolPlanner springAiToolPlanner;
     @Resource private ToolExecutionOrchestrator toolExecutionOrchestrator;
     @Resource private ToolResultCompressor toolResultCompressor;
+    @Resource private AgentToolStateReducer agentToolStateReducer = new AgentToolStateReducer();
     @Resource private AiProperties aiProperties;
     @Resource private ObjectMapper objectMapper;
 
@@ -101,7 +102,7 @@ public class AgentConversationService {
                 }
                 usedModel = false;
             }
-            for (AgentToolResult result : results) updateContext(context, result);
+            for (AgentToolResult result : results) agentToolStateReducer.apply(context, result);
             session.setAgentContextJson(objectMapper.writeValueAsString(context));
             sessionMapper.updateById(session);
 
@@ -164,7 +165,7 @@ public class AgentConversationService {
         messages.add(message("user", userMessage));
         try {
             List<SpringAiToolPlanner.ToolPlan> plans = springAiToolPlanner.planAll(messages,
-                    toolRegistry.springAiCallbacks(context), "AGENT_TOOL_PLANNING");
+                    toolRegistry.springAiCallbacks(), "AGENT_TOOL_PLANNING");
             if (plans.isEmpty()) {
                 log.warn("[AI][agent] event=PLAN_EMPTY sessionId={} turnNo={} query={}", sessionId,
                         context.getTurnNo(), compact(userMessage));
@@ -200,13 +201,12 @@ public class AgentConversationService {
         record.setSessionId(sessionId); record.setTurnNo(turnNo); record.setToolName(toolName);
         try {
             Map<String, Object> input = objectMapper.readValue(arguments, new TypeReference<Map<String, Object>>() { });
-            if (explicitlyReferencedShopId != null && isSingleShopTool(toolName)) input.put("shopId", explicitlyReferencedShopId);
+            materializeToolInput(input, toolName, context, explicitlyReferencedShopId);
             String effectiveArguments = objectMapper.writeValueAsString(input);
             record.setToolInputJson(effectiveArguments);
             log.info("[AI][agent] event=TOOL_START sessionId={} turnNo={} tool={} arguments={}", sessionId, turnNo,
                     toolName, compact(effectiveArguments));
-            BaseAgentTool tool = toolRegistry.find(toolName);
-            AgentToolResult result = toolResultCompressor.compress(tool.execute(input, context));
+            AgentToolResult result = toolResultCompressor.compress(toolRegistry.find(toolName).execute(input));
             result.setToolName(toolName);
             result.setDurationMs(System.currentTimeMillis() - startedAt);
             record.setStatus("SUCCESS");
@@ -359,11 +359,6 @@ public class AgentConversationService {
         return context;
     }
 
-    private void updateContext(AgentSessionContext context, AgentToolResult result) {
-        if (result.getFocusedShopId() != null) context.setFocusedShopId(result.getFocusedShopId());
-        if (result.getFocusedShopName() != null) context.setFocusedShopName(result.getFocusedShopName());
-    }
-
     private String contextSummary(AgentSessionContext context) {
         return "当前聚焦商户=" + (context.getFocusedShopId() == null ? "无" : context.getFocusedShopId() + ":" + context.getFocusedShopName())
                 + "；已展示商户=" + shownShopSummary(context);
@@ -485,6 +480,22 @@ public class AgentConversationService {
     private boolean isSingleShopTool(String toolName) {
         return "get_shop_detail".equals(toolName) || "query_shop_vouchers".equals(toolName)
                 || "search_shop_evidence".equals(toolName);
+    }
+
+    private void materializeToolInput(Map<String, Object> input, String toolName, AgentSessionContext context,
+                                      Long explicitlyReferencedShopId) {
+        if (explicitlyReferencedShopId != null && isSingleShopTool(toolName)) input.put("shopId", explicitlyReferencedShopId);
+        else if (isSingleShopTool(toolName) && !input.containsKey("shopId") && context.getFocusedShopId() != null) {
+            input.put("shopId", context.getFocusedShopId());
+        }
+        if ("compare_shops".equals(toolName) && !input.containsKey("shopId") && context.getFocusedShopId() != null) {
+            input.put("shopId", context.getFocusedShopId());
+        }
+        if ("search_alternative_shops".equals(toolName)) {
+            input.put("shownShopIds", new ArrayList<Long>(context.getShownShopIds()));
+            input.put("decisionRequest", context.getDecisionRequest());
+            input.put("decisionConstraints", context.getDecisionConstraints());
+        }
     }
 
     private AgentConversationResponse ambiguousReferenceResponse(Long sessionId, AgentSessionContext context, List<String> names) {

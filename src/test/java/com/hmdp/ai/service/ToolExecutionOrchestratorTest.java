@@ -18,6 +18,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -62,10 +63,29 @@ class ToolExecutionOrchestratorTest {
             @Override public String name() { return name; }
             @Override public String description() { return name; }
             @Override public Map<String, Object> parameterSchema() { return Map.of(); }
-            @Override public AgentToolResult execute(Map<String, Object> input, AgentSessionContext context) {
+            @Override public AgentToolResult execute(Map<String, Object> input) {
                 try { Thread.sleep(delayMs); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                 return new AgentToolResult().summary(name).displayText(name);
             }
         };
+    }
+
+    @Test
+    void materializesFocusedShopIntoToolInputWithoutMutatingContext() {
+        AgentToolRegistry registry = mock(AgentToolRegistry.class);
+        BaseAgentTool detail = mock(BaseAgentTool.class);
+        when(registry.find("get_shop_detail")).thenReturn(detail);
+        when(detail.executionMode()).thenReturn(com.hmdp.ai.tool.ToolExecutionMode.PARALLEL_SAFE);
+        when(detail.execute(anyMap())).thenReturn(new AgentToolResult().summary("detail").displayText("detail"));
+        AgentSessionContext context = new AgentSessionContext();
+        context.setFocusedShopId(18L); context.setFocusedShopName("当前店");
+
+        ToolExecutionResult result = orchestrator(registry).executeOne(
+                new ToolExecutionRequest(0, "get_shop_detail", "{}", null), context);
+
+        assertEquals(true, result.isSuccess());
+        assertEquals("{\"shopId\":18}", result.getEffectiveArguments());
+        assertEquals(18L, context.getFocusedShopId());
+        assertEquals("当前店", context.getFocusedShopName());
     }
 }

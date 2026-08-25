@@ -231,8 +231,28 @@ public class ConversationStateService {
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
     private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getSearchLocation() == null) memory.setSearchLocation(new ConversationLocationSlot()); if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (memory.getActiveCriteria() == null) memory.setActiveCriteria(new DecisionConstraints()); if (memory.getCandidatePool() == null) memory.setCandidatePool(new ArrayList<DecisionRecommendation>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
     private boolean changesCandidateUniverse(CriteriaMergeResult reduction) {
-        return reduction.getReplaced().stream().anyMatch(item -> item.startsWith("cuisine:"))
-                || reduction.getCleared().contains("cuisine");
+        // A candidate pool is only valid for the exact retrieval domain that produced it.
+        // Be deliberately conservative: preserving a stale reference is worse than asking
+        // the next turn to search again.
+        return hasSearchDomainMutation(reduction.getReplaced())
+                || hasSearchDomainMutation(reduction.getAppended())
+                || reduction.getCleared().stream().anyMatch(this::isSearchDomainField);
+    }
+
+    private boolean hasSearchDomainMutation(List<String> changes) {
+        if (changes == null) return false;
+        for (String item : changes) {
+            String field = item == null ? "" : item.split(":", 2)[0];
+            if (isSearchDomainField(field)) return true;
+        }
+        return false;
+    }
+
+    private boolean isSearchDomainField(String field) {
+        return "cuisine".equals(field) || "budgetPerPerson".equals(field) || "radiusKm".equals(field)
+                || "nearby".equals(field) || "arrivalTime".equals(field) || "occasion".equals(field)
+                || "quiet".equals(field) || "avoidQueue".equals(field) || "hardConstraints".equals(field)
+                || "softPreferences".equals(field);
     }
     private int invalidateCandidatePool(ConversationWorkingMemory memory) {
         int previousCandidateCount = memory.getCandidatePool().size();

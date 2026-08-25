@@ -1,6 +1,5 @@
 package com.hmdp.ai.tool;
 
-import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import org.springframework.stereotype.Component;
@@ -21,8 +20,8 @@ public class CompareShopsTool extends BaseAgentTool {
         properties.put("otherShopId", property("integer", "第二家商户 ID，必须提供。"));
         return objectSchema(properties, "otherShopId");
     }
-    @Override public AgentToolResult execute(Map<String, Object> input, AgentSessionContext context) {
-        Long firstId = shopId(input, context);
+    @Override public AgentToolResult execute(Map<String, Object> input) {
+        Long firstId = shopId(input);
         Object otherValue = input.get("otherShopId");
         if (firstId == null || otherValue == null) throw new IllegalArgumentException("比较商户需要两家商户 ID");
         Long secondId = otherValue instanceof Number ? ((Number) otherValue).longValue() : Long.valueOf(String.valueOf(otherValue));

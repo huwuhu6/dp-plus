@@ -2,7 +2,6 @@ package com.hmdp.ai.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hmdp.ai.dto.AgentSessionContext;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -22,12 +21,12 @@ class SpringAiAgentToolCallbackTest {
                 properties.put("shopId", property("integer", "shop id"));
                 return objectSchema(properties, "shopId");
             }
-            @Override public AgentToolResult execute(Map<String, Object> input, AgentSessionContext context) {
+            @Override public AgentToolResult execute(Map<String, Object> input) {
                 return new AgentToolResult().summary("found").displayText("shop detail");
             }
         };
 
-        SpringAiAgentToolCallback callback = new SpringAiAgentToolCallback(tool, new AgentSessionContext(), objectMapper);
+        SpringAiAgentToolCallback callback = new SpringAiAgentToolCallback(tool, objectMapper);
 
         assertEquals("test_tool", callback.getToolDefinition().name());
         JsonNode response = objectMapper.readTree(callback.call("{\"shopId\":8}"));

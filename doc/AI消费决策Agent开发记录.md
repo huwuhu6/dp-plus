@@ -933,3 +933,13 @@ Working Memory 的地点拆分为两份事实：`location` 保存设备/浏览�
 调试台已由 Axios 同步请求切换为 `fetch` 消费 POST SSE，能够展示实时状态、增量文本、卡片和 Chip；旧的地点授权与约束选项仍使用同一结构化请求协议。当前主模型客户端是同步调用，故 `status` 帧会即时下发，而 `text_delta` 在获得经事实守卫校验的最终回答后再分段发送。这保证了当前事实一致性与审计边界；后续若追求模型首字延迟，可在不改变事件协议的前提下将 `SpringAiTextClient` 改为供应商 token streaming。
 
 `ChatStreamServiceTest` 覆盖推荐结果的确定性 Chip 与非推荐回答不虚构引导项；全量 `mvn -q test` 通过。以真实登录态调用 SSE 冒烟：普通对话依次收到 `status -> text_delta -> complete`；福州坐标下“附近的火锅”依次收到 `status -> text_delta -> ui_component -> suggested_chips -> complete`，卡片返回 shopId `77`、人均 `110`、距离 `4.25km`、营业时间和真实匹配理由，验证结构化展示与已有安全自动松弛链路能共同工作。
+
+## 2026-08-25：状态收敛第一阶段与工具纯函数化
+
+围绕多轮追问的状态一致性，对 Agent 工具层进行了第一阶段收敛。此前 `BaseAgentTool` 接收可变 `AgentSessionContext`，`get_shop_detail` 会直接修改焦点商户，`search_alternative_shops` 会直接修改已展示商户集合；这会让工具执行顺序成为隐式状态机，也不利于并发编排和回归测试。
+
+工具接口改为只接收确定性 `Map<String, Object>` 入参，编排层在调用前将焦点商户、已展示商户 ID、首轮请求和约束快照物化到独立输入中。工具只能返回 `AgentToolResult` 与 `ToolStateDelta`：查询详情返回焦点变更，搜索备选返回候选池增量；`AgentToolStateReducer` 在工具全部完成后统一、幂等地应用 Delta。Spring AI Tool Callback 同步改为纯工具适配器，不再捕获可变会话上下文。
+
+同时收紧候选池级联失效：除地点和菜系外，预算、距离、到店时间、用餐场景、安静/排队偏好以及硬/软约束变化均视为检索域变化，清空旧候选池和焦点商户。该策略宁可触发一次重新搜索，也不允许过期候选参与“这家/另一家”的后续指代。
+
+新增 `AgentToolStateReducerTest` 验证同一 Delta 重复应用不会重复加入候选；扩展 `ConversationStateServiceTest` 覆盖预算和场景变化的级联失效；`ToolExecutionOrchestratorTest` 验证编排器会把焦点商户写入工具参数且不会修改输入上下文。针对状态、工具、追问与压缩链路运行 `mvn -q -Dtest=ConversationStateServiceTest,AgentConversationServiceTest,ToolExecutionOrchestratorTest,SpringAiAgentToolCallbackTest,ToolResultCompressorTest test` 通过。

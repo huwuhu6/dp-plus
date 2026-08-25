@@ -1,6 +1,5 @@
 package com.hmdp.ai.tool;
 
-import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.entity.Voucher;
 import com.hmdp.mapper.VoucherMapper;
 import org.springframework.stereotype.Component;
@@ -21,8 +20,8 @@ public class QueryShopVouchersTool extends BaseAgentTool {
         properties.put("shopId", property("integer", "商户 ID；用户说这家时可以省略，系统会使用当前聚焦商户。"));
         return objectSchema(properties);
     }
-    @Override public AgentToolResult execute(Map<String, Object> input, AgentSessionContext context) {
-        Long shopId = shopId(input, context);
+    @Override public AgentToolResult execute(Map<String, Object> input) {
+        Long shopId = shopId(input);
         if (shopId == null) throw new IllegalArgumentException("当前没有可查询优惠券的商户");
         List<Voucher> vouchers = voucherMapper.queryVoucherOfShop(shopId);
         StringBuilder text = new StringBuilder(vouchers.isEmpty() ? "当前没有查询到上架优惠券。" : "当前可用优惠券：");

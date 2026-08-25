@@ -53,7 +53,7 @@ class AgentConversationServiceTest {
         when(sessionMapper.selectById(100L)).thenReturn(session);
         when(registry.find("query_shop_vouchers")).thenReturn(voucherTool);
         AgentToolResult toolResult = new AgentToolResult().summary("查询到 1 张上架优惠券").displayText("当前可用优惠券：50 元代金券");
-        when(voucherTool.execute(anyMap(), any())).thenReturn(toolResult);
+        when(voucherTool.execute(anyMap())).thenReturn(toolResult);
 
         AgentConversationRequest request = new AgentConversationRequest();
         request.setMessage("这一家有什么优惠券？");
@@ -89,7 +89,7 @@ class AgentConversationServiceTest {
         AiDecisionSession session = completedSessionWithJapaneseRestaurant(objectMapper);
         when(sessionMapper.selectById(100L)).thenReturn(session);
         when(registry.find("search_shop_evidence")).thenReturn(evidenceTool);
-        when(evidenceTool.execute(anyMap(), any())).thenAnswer(invocation -> {
+        when(evidenceTool.execute(anyMap())).thenAnswer(invocation -> {
             assertEquals(9L, ((Number) invocation.getArgument(0, java.util.Map.class).get("shopId")).longValue());
             return new AgentToolResult().summary("检索到评价").displayText("筑地日本料理的本地评价证据");
         });
@@ -124,8 +124,8 @@ class AgentConversationServiceTest {
         when(sessionMapper.selectById(100L)).thenReturn(completedSession(objectMapper));
         when(registry.find("query_shop_vouchers")).thenReturn(voucherTool);
         when(registry.find("search_shop_evidence")).thenReturn(evidenceTool);
-        when(voucherTool.execute(anyMap(), any())).thenReturn(new AgentToolResult().summary("券").displayText("优惠券"));
-        when(evidenceTool.execute(anyMap(), any())).thenReturn(new AgentToolResult().summary("评价").displayText("评价证据"));
+        when(voucherTool.execute(anyMap())).thenReturn(new AgentToolResult().summary("券").displayText("优惠券"));
+        when(evidenceTool.execute(anyMap())).thenReturn(new AgentToolResult().summary("评价").displayText("评价证据"));
         AgentConversationRequest request = new AgentConversationRequest();
         request.setMessage("这家评价如何，还有优惠券吗？");
 

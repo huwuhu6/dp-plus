@@ -1,7 +1,5 @@
 package com.hmdp.ai.tool;
 
-import com.hmdp.ai.dto.AgentSessionContext;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -14,7 +12,8 @@ public abstract class BaseAgentTool {
 
     public abstract Map<String, Object> parameterSchema();
 
-    public abstract AgentToolResult execute(Map<String, Object> input, AgentSessionContext context);
+    /** Pure business lookup: all required state must be materialized into input by the orchestrator. */
+    public abstract AgentToolResult execute(Map<String, Object> input);
 
     public final Map<String, Object> definition() {
         Map<String, Object> function = new LinkedHashMap<String, Object>();
@@ -43,10 +42,10 @@ public abstract class BaseAgentTool {
         return property;
     }
 
-    protected Long shopId(Map<String, Object> input, AgentSessionContext context) {
+    protected Long shopId(Map<String, Object> input) {
         Object value = input.get("shopId");
         if (value instanceof Number) return ((Number) value).longValue();
         if (value instanceof String && !((String) value).trim().isEmpty()) return Long.valueOf((String) value);
-        return context.getFocusedShopId();
+        return null;
     }
 }

@@ -1,7 +1,6 @@
 package com.hmdp.ai.tool;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.entity.AiShopProfile;
 import com.hmdp.ai.mapper.AiShopProfileMapper;
 import com.hmdp.ai.service.ConsumptionDecisionService;
@@ -23,7 +22,7 @@ public class SearchAlternativeShopsTool extends BaseAgentTool {
     @Resource private ConsumptionDecisionService decisionService;
 
     @Override public String name() { return "search_alternative_shops"; }
-    @Override public ToolExecutionMode executionMode() { return ToolExecutionMode.SEQUENTIAL_STATEFUL; }
+    @Override public ToolExecutionMode executionMode() { return ToolExecutionMode.PARALLEL_SAFE; }
     @Override public String description() { return "查询尚未展示的餐饮备选商户。用户问还有别的吗、换一家或想看其他选择时使用。"; }
 
     @Override public Map<String, Object> parameterSchema() {
@@ -32,17 +31,20 @@ public class SearchAlternativeShopsTool extends BaseAgentTool {
         return objectSchema(properties);
     }
 
-    @Override public AgentToolResult execute(Map<String, Object> input, AgentSessionContext context) {
+    @Override public AgentToolResult execute(Map<String, Object> input) {
         String cuisine = input.get("cuisine") == null ? "" : String.valueOf(input.get("cuisine"));
+        List<Long> shownShopIds = toLongList(input.get("shownShopIds"));
+        com.hmdp.ai.dto.DecisionRequest decisionRequest = convert(input.get("decisionRequest"), com.hmdp.ai.dto.DecisionRequest.class);
+        com.hmdp.ai.dto.DecisionConstraints decisionConstraints = convert(input.get("decisionConstraints"), com.hmdp.ai.dto.DecisionConstraints.class);
         List<AiShopProfile> profiles = profileMapper.selectList(null);
         Map<Long, AiShopProfile> profileByShop = new LinkedHashMap<Long, AiShopProfile>();
         for (AiShopProfile profile : profiles) profileByShop.put(profile.getShopId(), profile);
         List<Shop> candidates = new ArrayList<Shop>();
         for (Shop shop : shopMapper.selectList(null)) {
-            if (context.getShownShopIds().contains(shop.getId())) continue;
+            if (shownShopIds.contains(shop.getId())) continue;
             AiShopProfile profile = profileByShop.get(shop.getId());
             if (!cuisine.trim().isEmpty() && (profile == null || profile.getCuisine() == null || !profile.getCuisine().contains(cuisine))) continue;
-            if (!decisionService.matchesFollowUpConstraints(shop, profile, context.getDecisionRequest(), context.getDecisionConstraints())) continue;
+            if (!decisionService.matchesFollowUpConstraints(shop, profile, decisionRequest, decisionConstraints)) continue;
             candidates.add(shop);
         }
         candidates.sort(Comparator.comparing(Shop::getScore, Comparator.nullsLast(Comparator.reverseOrder())));
@@ -51,12 +53,16 @@ public class SearchAlternativeShopsTool extends BaseAgentTool {
                 ? "当前检索范围内没有更多符合条件的餐饮商户。已保留首轮的距离、预算、菜系和营业时间约束；如需继续，可以明确调整条件。"
                 : "可继续考虑：");
         List<Map<String, Object>> facts = new ArrayList<Map<String, Object>>();
+        ToolStateDelta delta = new ToolStateDelta();
         for (Shop shop : candidates) {
-            context.getShownShopIds().add(shop.getId());
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("shopId", shop.getId()); item.put("shopName", shop.getName());
             item.put("avgPrice", shop.getAvgPrice()); item.put("score", shop.getScore());
             facts.add(item);
+            com.hmdp.ai.dto.DecisionRecommendation recommendation = new com.hmdp.ai.dto.DecisionRecommendation();
+            recommendation.setShopId(shop.getId()); recommendation.setShopName(shop.getName());
+            recommendation.setAvgPrice(shop.getAvgPrice());
+            delta.getCandidatePoolAppend().add(recommendation);
             text.append("\n- ").append(shop.getName()).append("，人均 ").append(shop.getAvgPrice())
                     .append(" 元，评分 ").append(shop.getScore() == null ? "暂无" : shop.getScore() / 10.0D);
         }
@@ -65,6 +71,23 @@ public class SearchAlternativeShopsTool extends BaseAgentTool {
                 .displayText(text.toString());
         result.getFacts().put("shops", facts);
         result.getFacts().put("scopeInherited", true);
+        result.setStateDelta(delta);
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Long> toLongList(Object value) {
+        List<Long> result = new ArrayList<Long>();
+        if (!(value instanceof List)) return result;
+        for (Object item : (List<Object>) value) {
+            if (item instanceof Number) result.add(((Number) item).longValue());
+            else if (item != null) result.add(Long.valueOf(String.valueOf(item)));
+        }
+        return result;
+    }
+
+    private <T> T convert(Object value, Class<T> type) {
+        if (value == null) return null;
+        return new com.fasterxml.jackson.databind.ObjectMapper().convertValue(value, type);
     }
 }

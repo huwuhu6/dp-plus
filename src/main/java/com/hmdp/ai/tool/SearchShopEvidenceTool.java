@@ -1,7 +1,6 @@
 package com.hmdp.ai.tool;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.entity.AiReviewDocument;
 import com.hmdp.ai.mapper.AiReviewDocumentMapper;
 import com.hmdp.entity.Blog;
@@ -30,8 +29,8 @@ public class SearchShopEvidenceTool extends BaseAgentTool {
         properties.put("topic", property("string", "用户关心的主题，例如环境、排队、服务、约会；未知时传空字符串。"));
         return objectSchema(properties);
     }
-    @Override public AgentToolResult execute(Map<String, Object> input, AgentSessionContext context) {
-        Long shopId = shopId(input, context);
+    @Override public AgentToolResult execute(Map<String, Object> input) {
+        Long shopId = shopId(input);
         if (shopId == null) throw new IllegalArgumentException("当前没有可查询评价的商户");
         String topic = input.get("topic") == null ? "" : String.valueOf(input.get("topic"));
         List<String> evidence = new ArrayList<String>();
