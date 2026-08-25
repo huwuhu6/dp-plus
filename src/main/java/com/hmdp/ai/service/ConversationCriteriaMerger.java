@@ -1,6 +1,7 @@
 package com.hmdp.ai.service;
 
 import com.hmdp.ai.dto.CriteriaMergeResult;
+import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionConstraints;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +14,12 @@ import java.util.List;
 public class ConversationCriteriaMerger {
 
     public CriteriaMergeResult merge(DecisionConstraints previous, DecisionConstraints delta, String query) {
+        return merge(previous, delta, query, new ArrayList<DecisionRecommendation>(), null);
+    }
+
+    /** Reduces an explicit delta using the previous recommendation only for relative constraints. */
+    public CriteriaMergeResult merge(DecisionConstraints previous, DecisionConstraints delta, String query,
+                                     List<DecisionRecommendation> candidatePool, Long focusedShopId) {
         DecisionConstraints merged = copy(previous);
         CriteriaMergeResult result = new CriteriaMergeResult();
         result.setConstraints(merged);
@@ -49,10 +56,67 @@ public class ConversationCriteriaMerger {
         if (containsAny(text, "不要安静", "不用安静")) clear(result, "quiet", () -> merged.setQuiet(false));
         if (containsAny(text, "排队也行", "不用避开排队")) clear(result, "avoidQueue", () -> merged.setAvoidQueue(false));
         if (containsAny(text, "不要辣", "不吃辣", "清淡", "少油")) addPreference(merged, "清淡/不辣");
+        applyRelativeConstraints(result, merged, text, candidatePool, focusedShopId);
 
         merged.setHardConstraints(unique(merged.getHardConstraints()));
         merged.setSoftPreferences(unique(merged.getSoftPreferences()));
         return result;
+    }
+
+    private void applyRelativeConstraints(CriteriaMergeResult result, DecisionConstraints merged, String text,
+                                          List<DecisionRecommendation> candidatePool, Long focusedShopId) {
+        if (containsAny(text, "太贵", "便宜点", "更便宜")) {
+            Long anchorPrice = relativePriceAnchor(candidatePool, focusedShopId);
+            if (anchorPrice != null && anchorPrice > 1L) {
+                int budget = Math.toIntExact(anchorPrice - 1L);
+                replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(budget),
+                        () -> merged.setBudgetPerPerson(budget));
+                result.getAppended().add("relativeBudget:anchorPrice=" + anchorPrice + "->budgetPerPerson=" + budget);
+            }
+        }
+        if (containsAny(text, "更近", "近一点", "近点", "附近一点")) {
+            Double anchorDistance = relativeDistanceAnchor(candidatePool, focusedShopId);
+            if (anchorDistance != null && anchorDistance > 0.5D) {
+                double radius = Math.max(0.5D, Math.round(anchorDistance * 0.9D * 10D) / 10D);
+                replace(result, "radiusKm", String.valueOf(merged.getRadiusKm()), String.valueOf(radius),
+                        () -> merged.setRadiusKm(radius));
+                result.getAppended().add("relativeDistance:anchorKm=" + anchorDistance + "->radiusKm=" + radius);
+            }
+        }
+    }
+
+    private Long relativePriceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId) {
+        if (candidates == null || candidates.isEmpty()) return null;
+        if (focusedShopId != null) {
+            for (DecisionRecommendation candidate : candidates) {
+                if (focusedShopId.equals(candidate.getShopId()) && candidate.getAvgPrice() != null) {
+                    return candidate.getAvgPrice();
+                }
+            }
+        }
+        Long minimum = null;
+        for (DecisionRecommendation candidate : candidates) {
+            if (candidate.getAvgPrice() == null || candidate.getAvgPrice() <= 0L) continue;
+            if (minimum == null || candidate.getAvgPrice() < minimum) minimum = candidate.getAvgPrice();
+        }
+        return minimum;
+    }
+
+    private Double relativeDistanceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId) {
+        if (candidates == null || candidates.isEmpty()) return null;
+        if (focusedShopId != null) {
+            for (DecisionRecommendation candidate : candidates) {
+                if (focusedShopId.equals(candidate.getShopId()) && candidate.getDistanceKm() != null) {
+                    return candidate.getDistanceKm();
+                }
+            }
+        }
+        Double minimum = null;
+        for (DecisionRecommendation candidate : candidates) {
+            if (candidate.getDistanceKm() == null || candidate.getDistanceKm() <= 0D) continue;
+            if (minimum == null || candidate.getDistanceKm() < minimum) minimum = candidate.getDistanceKm();
+        }
+        return minimum;
     }
 
     private DecisionConstraints copy(DecisionConstraints source) {

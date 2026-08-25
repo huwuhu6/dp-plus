@@ -9,6 +9,7 @@ public class ContextRewriteResult {
     private Boolean applied;
     private Boolean usedModel;
     private String reason;
+    private RewriteIntentType intentType = RewriteIntentType.GENERAL_CHAT;
 
     public static ContextRewriteResult unchanged(String query, String reason) {
         ContextRewriteResult result = new ContextRewriteResult();
@@ -17,6 +18,7 @@ public class ContextRewriteResult {
         result.setApplied(false);
         result.setUsedModel(false);
         result.setReason(reason);
+        result.setIntentType(RewriteIntentType.GENERAL_CHAT);
         return result;
     }
 }

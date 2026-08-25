@@ -578,6 +578,9 @@ public class ConsumptionDecisionService {
         if (hasText(request.getProvince())) shopQuery.eq("province", request.getProvince());
         if (hasText(request.getCity())) shopQuery.eq("city", request.getCity());
         if (hasText(request.getDistrict())) shopQuery.eq("district", request.getDistrict());
+        if (request.getExcludeShopIds() != null && !request.getExcludeShopIds().isEmpty()) {
+            shopQuery.notIn("id", request.getExcludeShopIds());
+        }
         List<Shop> shops = shopMapper.selectList(shopQuery);
         if (hasAdministrativeScope(request)) {
             log.info("[AI][session={}] state=RETRIEVING action=ADMIN_SCOPE_FILTER province={} city={} district={} candidates={}",

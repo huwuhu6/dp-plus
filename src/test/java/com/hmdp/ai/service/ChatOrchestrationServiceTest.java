@@ -8,6 +8,7 @@ import com.hmdp.ai.dto.AgentConversationResponse;
 import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
+import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.ConversationSlots;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
@@ -15,6 +16,7 @@ import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
+import com.hmdp.ai.dto.RewriteIntentType;
 import com.hmdp.ai.entity.AiChatSession;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -133,6 +135,62 @@ class ChatOrchestrationServiceTest {
                 org.mockito.Mockito.eq("第二家怎么样？"), any(), any(), any());
         verify(decisionService, org.mockito.Mockito.never()).decide(any());
         assertTrue(response.getContextRewrite().getApplied());
+    }
+
+    @Test
+    void routesSearchRefinementBackToDecisionAndExcludesPriorCandidates() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ConversationContextRewriter rewriter = mock(ConversationContextRewriter.class);
+        ConstraintExtractor extractor = mock(ConstraintExtractor.class);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "contextRewriter", rewriter);
+        ReflectionTestUtils.setField(service, "constraintExtractor", extractor);
+        ReflectionTestUtils.setField(service, "criteriaMerger", new ConversationCriteriaMerger());
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat"); state.setActiveDecisionSessionId(36L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        when(stateService.agentContext(state)).thenReturn(new com.hmdp.ai.dto.AgentSessionContext());
+        when(stateService.slots(state)).thenReturn(new ConversationSlots());
+        com.hmdp.ai.dto.ConversationWorkingMemory memory = new com.hmdp.ai.dto.ConversationWorkingMemory();
+        com.hmdp.ai.dto.DecisionRecommendation first = new com.hmdp.ai.dto.DecisionRecommendation();
+        first.setShopId(9L); first.setAvgPrice(120L);
+        com.hmdp.ai.dto.DecisionRecommendation second = new com.hmdp.ai.dto.DecisionRecommendation();
+        second.setShopId(10L); second.setAvgPrice(80L);
+        memory.setCandidatePool(Arrays.asList(first, second)); memory.setFocusedShopId(9L);
+        when(stateService.workingMemory(state)).thenReturn(memory);
+        DecisionResponse previous = new DecisionResponse();
+        previous.setSessionId(36L); previous.setStatus("COMPLETED");
+        when(decisionService.getDecision(36L)).thenReturn(previous);
+        ContextRewriteResult rewrite = new ContextRewriteResult();
+        rewrite.setOriginalQuery("太贵了，换个便宜点的");
+        rewrite.setRewrittenQuery("在当前候选范围中寻找人均更低的备选商户");
+        rewrite.setApplied(true); rewrite.setIntentType(RewriteIntentType.SEARCH_REFINEMENT);
+        when(rewriter.rewrite(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(rewrite);
+        when(extractor.extract(anyString())).thenReturn(new DecisionConstraints());
+        DecisionResponse next = new DecisionResponse();
+        next.setSessionId(37L); next.setStatus("COMPLETED"); next.setAnswer("新的推荐");
+        when(decisionService.decide(any(DecisionRequest.class), any(DecisionConstraints.class))).thenReturn(next);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("太贵了，换个便宜点的");
+        ChatMessageResponse response = service.chat(request);
+
+        ArgumentCaptor<DecisionRequest> decisionRequest = ArgumentCaptor.forClass(DecisionRequest.class);
+        ArgumentCaptor<DecisionConstraints> mergedConstraints = ArgumentCaptor.forClass(DecisionConstraints.class);
+        verify(decisionService).decide(decisionRequest.capture(), mergedConstraints.capture());
+        assertEquals("START_DECISION", response.getRoute());
+        assertEquals(Arrays.asList(9L, 10L), decisionRequest.getValue().getExcludeShopIds());
+        assertEquals(119, mergedConstraints.getValue().getBudgetPerPerson());
     }
 
     @Test

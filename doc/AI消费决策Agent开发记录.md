@@ -1017,3 +1017,12 @@ Query Rewrite 移除了从 `agentContextJson` 兜底读取候选池的逻辑：W
 Gateway 已删除显式地点正则提取路径，主流程改为“NLU 提取 -> 状态归约 -> 位置仲裁 -> 决策执行”。仲裁规则固定为：有 `targetCity/targetArea` 时只填写行政区过滤、经纬度置空并禁止使用设备 GPS；无显式目标地点时，只有“附近”意图或本轮明确提交定位才允许复用设备坐标。策略门禁将显式城市/区域视为完整地理锚点，不再要求用户再次提交设备定位。
 
 检索层以仲裁后的 `request.city/district` 做 SQL 预过滤；语义召回前剥离已消费的省、市、区和目标地点词，防止城市名称被误解为菜系或风味标签。新增模型结构化地点槽位、城市/区域覆盖、命名地点变更清空旧坐标和候选池、以及显式目的地优先于设备定位的单元测试。运行 `mvn -q -Dtest=ConstraintExtractorTest,ConversationCriteriaMergerTest,ConversationStateServiceTest,PolicyDecisionEngineTest test` 与全量 `mvn -q test` 均通过。
+## 2026-08-25：搜索微调与单店追问分流闭环
+
+针对真实会话中“太贵了，有没有便宜点的”被误路由为单店详情查询的问题，Query Rewrite 的输出从仅含改写文本扩展为带 `RewriteIntentType` 的结构化契约：`SHOP_INQUIRY` 仅允许进入商户事实工具链，`SEARCH_REFINEMENT` 必须回流至新的推荐决策链路，`GENERAL_CHAT` 保持原有通用对话路由。上下文改写模型仍负责省略句实体还原，Gateway 仅依据强类型意图做确定性分流，不再用“是否发生改写”推断业务路径。
+
+State Reducer 新增相对约束归约：当用户表达“太贵/更便宜”时，以焦点店人均价为优先锚点（无焦点时取候选池最低有效人均价），生成严格的 `budgetPerPerson = anchorPrice - 1`；“更近/附近一点”则以焦点店距离为锚点，生成收窄后的 `radiusKm`。进入 `SEARCH_REFINEMENT` 前，Gateway 先从 Working Memory 捕获本轮候选店 ID 并写入 `DecisionRequest.excludeShopIds`；Reducer 随后可以安全地级联清空旧候选池，检索 SQL 使用 `notIn(id, excludeShopIds)` 防止原候选重复出现在刷新结果中。
+
+同时修复 Tool Orchestrator 的参数覆盖缺陷：`explicitlyReferencedShopId` 仅在单店工具未携带有效 `shopId` 时作为兜底写入，不再覆盖模型已经规划的 `shopId`，从而保证并行多店查询中 89、74、85 等参数各自独立。
+
+新增回归覆盖：改写意图分类（优惠券追问与更便宜微调）、相对预算和相对距离归约、微调请求携带旧候选排除列表、以及规划器 `shopId` 不被焦点店覆写。全量 `mvn -q test`：`98` 项测试，`0` 失败、`0` 错误；`git diff --check` 通过。

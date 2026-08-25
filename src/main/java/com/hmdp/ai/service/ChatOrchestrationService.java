@@ -17,6 +17,7 @@ import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.PolicyDecision;
+import com.hmdp.ai.dto.RewriteIntentType;
 import com.hmdp.ai.entity.AiChatSession;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
@@ -96,6 +97,12 @@ public class ChatOrchestrationService {
                 conversationStateService.clearActiveDecision(state);
             }
             log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} activeSessionId={} route=START_DECISION source=CURRENT_DEVICE_CONTINUATION query={}",
+                    chatId, activeSessionId, compact(effectiveMessage));
+            return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null,
+                    aiProperties.isConfigured(), contextRewrite);
+        }
+        if (contextRewrite.getIntentType() == RewriteIntentType.SEARCH_REFINEMENT) {
+            log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} activeSessionId={} route=START_DECISION source=SEARCH_REFINEMENT query={}",
                     chatId, activeSessionId, compact(effectiveMessage));
             return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null,
                     aiProperties.isConfigured(), contextRewrite);
@@ -199,12 +206,14 @@ public class ChatOrchestrationService {
             conversationStateService.activateDecision(state, decision.getSessionId());
             return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, decision, null);
         }
+        List<Long> excludedCandidates = refinementExclusions(contextRewrite, memory);
         com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(memory.getActiveCriteria(),
-                constraintExtractor.extract(effectiveMessage), originalMessage);
+                constraintExtractor.extract(effectiveMessage), originalMessage, memory.getCandidatePool(), memory.getFocusedShopId());
         conversationStateService.reduceCriteria(state, mergeResult);
         // The reducer owns the durable location state. Re-read after it has synchronized a named destination.
         memory = conversationStateService.workingMemory(state);
         decisionRequest.setQuery(cleanRetrievalQuery(effectiveMessage, mergeResult.getConstraints()));
+        decisionRequest.setExcludeShopIds(excludedCandidates);
         applyLocationSlot(decisionRequest, state, mergeResult.getConstraints(), submittedDeviceLocation);
         log.info("[AI][chat] event=CRITERIA_MERGED chatId={} inherited={} replaced={} appended={} cleared={} invalidated={} query={}", chatId,
                 mergeResult.getInherited(), mergeResult.getReplaced(), mergeResult.getAppended(), mergeResult.getCleared(),
@@ -216,6 +225,17 @@ public class ChatOrchestrationService {
         conversationStateService.activateDecision(state, decision.getSessionId());
         conversationStateService.snapshotDecision(state, decision);
         return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, decision, policy);
+    }
+
+    private List<Long> refinementExclusions(ContextRewriteResult contextRewrite,
+                                            com.hmdp.ai.dto.ConversationWorkingMemory memory) {
+        List<Long> excluded = new ArrayList<Long>();
+        if (contextRewrite == null || contextRewrite.getIntentType() != RewriteIntentType.SEARCH_REFINEMENT
+                || memory == null || memory.getCandidatePool() == null) return excluded;
+        for (com.hmdp.ai.dto.DecisionRecommendation candidate : memory.getCandidatePool()) {
+            if (candidate.getShopId() != null) excluded.add(candidate.getShopId());
+        }
+        return excluded;
     }
 
     private ChatMessageResponse buildDecisionResponse(String chatId, String originalMessage, AiChatSession state, boolean usedModel,
@@ -335,7 +355,7 @@ public class ChatOrchestrationService {
         DecisionResponse decision = activeDecision;
         if (decision == null || !sessionId.equals(activeSessionId)) decision = decisionService.getDecision(sessionId);
         if (decision == null || !"COMPLETED".equals(decision.getStatus())) return null;
-        if (Boolean.TRUE.equals(contextRewrite.getApplied())) {
+        if (contextRewrite.getIntentType() == RewriteIntentType.SHOP_INQUIRY) {
             log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} sessionId={} route=BUSINESS_FOLLOW_UP source=CONTEXT_REWRITE query={}",
                     chatId, sessionId, compact(message));
             return "BUSINESS_FOLLOW_UP";

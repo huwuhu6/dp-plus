@@ -2,6 +2,7 @@ package com.hmdp.ai.service;
 
 import com.hmdp.ai.dto.CriteriaMergeResult;
 import com.hmdp.ai.dto.DecisionConstraints;
+import com.hmdp.ai.dto.DecisionRecommendation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -104,5 +105,31 @@ class ConversationCriteriaMergerTest {
         assertEquals("CURRENT_DEVICE", result.getConstraints().getLocationIntent());
         assertTrue(result.getCleared().contains("targetCity"));
         assertTrue(result.getCleared().contains("targetArea"));
+    }
+
+    @Test
+    void derivesStrictBudgetFromFocusedCandidateForCheaperRefinement() {
+        DecisionRecommendation focused = new DecisionRecommendation();
+        focused.setShopId(2L); focused.setAvgPrice(120L);
+        DecisionRecommendation lower = new DecisionRecommendation();
+        lower.setShopId(3L); lower.setAvgPrice(80L);
+
+        CriteriaMergeResult result = merger.merge(new DecisionConstraints(), new DecisionConstraints(), "太贵了，换个便宜点的",
+                java.util.Arrays.asList(focused, lower), 2L);
+
+        assertEquals(119, result.getConstraints().getBudgetPerPerson());
+        assertTrue(result.getAppended().stream().anyMatch(item -> item.startsWith("relativeBudget:anchorPrice=120")));
+    }
+
+    @Test
+    void derivesNarrowerRadiusFromFocusedCandidateForCloserRefinement() {
+        DecisionRecommendation focused = new DecisionRecommendation();
+        focused.setShopId(2L); focused.setDistanceKm(2.5D);
+
+        CriteriaMergeResult result = merger.merge(new DecisionConstraints(), new DecisionConstraints(), "换个更近一点的",
+                java.util.Collections.singletonList(focused), 2L);
+
+        assertEquals(2.3D, result.getConstraints().getRadiusKm());
+        assertTrue(result.getAppended().stream().anyMatch(item -> item.startsWith("relativeDistance:anchorKm=2.5")));
     }
 }

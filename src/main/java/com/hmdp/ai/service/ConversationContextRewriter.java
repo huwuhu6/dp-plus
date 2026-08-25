@@ -4,6 +4,7 @@ import com.hmdp.ai.client.QueryRewriteClient;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
+import com.hmdp.ai.dto.RewriteIntentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -38,6 +39,7 @@ public class ConversationContextRewriter {
             result.setApplied(true);
             result.setUsedModel(false);
             result.setReason("CURRENT_DEVICE_LOCATION_CONTINUATION");
+            result.setIntentType(RewriteIntentType.SEARCH_REFINEMENT);
             log.info("[AI][chat] event=CONTEXT_REWRITE original={} rewritten={} source=LOCATION_SCOPE_GUARD",
                     compact(query), result.getRewrittenQuery());
             return result;
@@ -65,6 +67,7 @@ public class ConversationContextRewriter {
             result.setApplied(!query.equals(rewritten));
             result.setUsedModel(true);
             result.setReason("ELLIPSIS_RESOLVED");
+            result.setIntentType(classifyIntent(query, rewritten, context));
             log.info("[AI][chat] event=CONTEXT_REWRITE original={} rewritten={} focusedShopId={} candidateCount={}",
                     compact(query), compact(rewritten), context.getFocusedShopId(), context.getShownShops().size());
             return result;
@@ -72,6 +75,26 @@ public class ConversationContextRewriter {
             log.warn("[AI][chat] event=CONTEXT_REWRITE_FALLBACK query={} errorType={}", compact(query), e.getClass().getSimpleName());
             return ContextRewriteResult.unchanged(query, "MODEL_FAILURE");
         }
+    }
+
+    /**
+     * The rewrite model resolves entities, while this guard makes the downstream state transition
+     * deterministic. It deliberately classifies only unambiguous operation families.
+     */
+    private RewriteIntentType classifyIntent(String original, String rewritten, AgentSessionContext context) {
+        String text = ((original == null ? "" : original) + " " + (rewritten == null ? "" : rewritten)).replaceAll("\\s+", "");
+        if (containsAny(text, "太贵", "便宜点", "更便宜", "换一家", "换一批", "换个口味", "换商圈", "更近", "附近一点", "重新筛选", "重新推荐")) {
+            return RewriteIntentType.SEARCH_REFINEMENT;
+        }
+        if (containsAny(text, "评价", "评论", "口碑", "优惠", "券", "团购", "营业时间", "排队", "地址", "订座", "第一家", "第二家", "第三家", "这家", "那家")) {
+            return RewriteIntentType.SHOP_INQUIRY;
+        }
+        return RewriteIntentType.GENERAL_CHAT;
+    }
+
+    private boolean containsAny(String text, String... values) {
+        for (String value : values) if (text.contains(value)) return true;
+        return false;
     }
 
     private boolean needsRewrite(String query) {
