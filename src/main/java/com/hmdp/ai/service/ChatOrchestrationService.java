@@ -128,9 +128,9 @@ public class ChatOrchestrationService {
             PolicyDecision policy = policyDecisionEngine == null ? null : policyDecisionEngine.decideFollowUp(effectiveMessage);
             recordPolicy(state, chatId, followUpSessionId, policy);
             applyPolicy(response, policy);
-            response.setConversation(conversationService.converse(followUpSessionId, followUp));
-            conversationStateService.snapshotFollowUp(state, followUpSessionId,
-                    response.getConversation().getFocusedShopId(), response.getConversation().getFocusedShopName());
+            AgentSessionContext followUpContext = conversationStateService.agentContext(state);
+            response.setConversation(conversationService.converse(followUpSessionId, followUp, followUpContext));
+            conversationStateService.applyAgentContext(state, followUpSessionId, followUpContext);
             response.setDecisionSessionId(followUpSessionId);
             response.setDecisionStatus(followUpDecision.getStatus());
             response.setAnswer(response.getConversation().getAnswer());
@@ -229,7 +229,7 @@ public class ChatOrchestrationService {
         if (sessionId == null) return ContextRewriteResult.unchanged(message, "NO_DECISION_CONTEXT");
         AgentSessionContext context = conversationStateService.agentContext(state);
         if (context == null || context.getShownShops() == null || context.getShownShops().isEmpty()) {
-            context = conversationService.loadWorkingMemory(sessionId);
+            return ContextRewriteResult.unchanged(message, "NO_WORKING_MEMORY_CANDIDATES");
         }
         return contextRewriter.rewrite(message, history, context);
     }

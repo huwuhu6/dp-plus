@@ -59,7 +59,11 @@ class ChatOrchestrationServiceTest {
         completed.setStatus("COMPLETED");
         when(decisionService.getDecision(36L)).thenReturn(completed);
         com.hmdp.ai.dto.AgentSessionContext context = new com.hmdp.ai.dto.AgentSessionContext();
-        when(conversationService.loadWorkingMemory(36L)).thenReturn(context);
+        com.hmdp.ai.dto.DecisionRecommendation candidate = new com.hmdp.ai.dto.DecisionRecommendation();
+        candidate.setShopId(9L); candidate.setShopName("筑地日本料理（上街店）");
+        context.getShownShops().add(candidate);
+        context.getShownShopIds().add(9L);
+        when(stateService.agentContext(state)).thenReturn(context);
         com.hmdp.ai.dto.ContextRewriteResult rewrite = new com.hmdp.ai.dto.ContextRewriteResult();
         rewrite.setOriginalQuery("第二家怎么样？");
         rewrite.setRewrittenQuery("筑地日本料理（上街店）怎么样？");
@@ -70,7 +74,7 @@ class ChatOrchestrationServiceTest {
         when(conversationService.hasCandidateReference(36L, rewrite.getRewrittenQuery())).thenReturn(true);
         AgentConversationResponse conversation = new AgentConversationResponse();
         conversation.setAnswer("筑地日本料理（上街店）的评价如下。");
-        when(conversationService.converse(org.mockito.Mockito.eq(36L), any())).thenReturn(conversation);
+        when(conversationService.converse(org.mockito.Mockito.eq(36L), any(), any())).thenReturn(conversation);
 
         ChatMessageRequest request = new ChatMessageRequest();
         request.setMessage("第二家怎么样？");
@@ -78,7 +82,7 @@ class ChatOrchestrationServiceTest {
 
         ArgumentCaptor<com.hmdp.ai.dto.AgentConversationRequest> followUp =
                 ArgumentCaptor.forClass(com.hmdp.ai.dto.AgentConversationRequest.class);
-        verify(conversationService).converse(org.mockito.Mockito.eq(36L), followUp.capture());
+        verify(conversationService).converse(org.mockito.Mockito.eq(36L), followUp.capture(), any());
         assertEquals(rewrite.getRewrittenQuery(), followUp.getValue().getMessage());
         verify(memoryService).appendTurn(org.mockito.Mockito.eq("test-chat"),
                 org.mockito.Mockito.eq("第二家怎么样？"), any(), any(), any());
@@ -146,7 +150,7 @@ class ChatOrchestrationServiceTest {
         when(decisionService.getDecision(36L)).thenReturn(decision);
         AgentConversationResponse conversation = new AgentConversationResponse();
         conversation.setAnswer("已查询到本地评价证据。");
-        when(conversationService.converse(any(), any())).thenReturn(conversation);
+        when(conversationService.converse(any(), any(), any())).thenReturn(conversation);
         ChatMessageRequest request = new ChatMessageRequest();
         request.setMessage("那一家评价如何");
 
@@ -155,7 +159,7 @@ class ChatOrchestrationServiceTest {
         assertEquals("BUSINESS_FOLLOW_UP", response.getRoute());
         assertEquals(36L, response.getDecisionSessionId());
         assertEquals("COMPLETED", response.getDecisionStatus());
-        verify(conversationService).converse(any(), any());
+        verify(conversationService).converse(any(), any(), any());
         verify(sessionStateService, org.mockito.Mockito.never()).rememberLastDecision(state, 36L);
     }
 
@@ -187,7 +191,7 @@ class ChatOrchestrationServiceTest {
         when(conversationService.hasCandidateReference(36L, "这个日本料理怎么样")).thenReturn(true);
         AgentConversationResponse conversation = new AgentConversationResponse();
         conversation.setAnswer("筑地日本料理（上街店）的评价如下。");
-        when(conversationService.converse(any(), any())).thenReturn(conversation);
+        when(conversationService.converse(any(), any(), any())).thenReturn(conversation);
 
         ChatMessageRequest request = new ChatMessageRequest();
         request.setMessage("这个日本料理怎么样");
@@ -195,7 +199,7 @@ class ChatOrchestrationServiceTest {
 
         assertEquals("BUSINESS_FOLLOW_UP", response.getRoute());
         assertEquals("筑地日本料理（上街店）的评价如下。", response.getAnswer());
-        verify(conversationService).converse(any(), any());
+        verify(conversationService).converse(any(), any(), any());
         verifyNoInteractions(aiClient);
     }
 

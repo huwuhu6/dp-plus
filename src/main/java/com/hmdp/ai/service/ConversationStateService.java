@@ -212,6 +212,21 @@ public class ConversationStateService {
         log.info("[AI][state] event=WORKING_MEMORY_FOCUS_UPDATED chatId={} sessionId={} focusedShopId={}", state.getChatId(), sessionId, memory.getFocusedShopId());
     }
 
+    /** Commits the chat-path tool reducer output back into the single conversation memory. */
+    public void applyAgentContext(AiChatSession state, Long sessionId, AgentSessionContext context) {
+        if (context == null) return;
+        ConversationWorkingMemory memory = workingMemory(state);
+        memory.setSourceDecisionSessionId(sessionId);
+        memory.setCandidatePool(new ArrayList<DecisionRecommendation>(context.getShownShops() == null
+                ? new ArrayList<DecisionRecommendation>() : context.getShownShops()));
+        memory.setFocusedShopId(context.getFocusedShopId());
+        memory.setFocusedShopName(context.getFocusedShopName());
+        memory.setDialogPhase("RECOMMENDING");
+        updateWorkingMemory(state, memory);
+        log.info("[AI][state] event=AGENT_CONTEXT_REDUCED chatId={} sessionId={} candidates={} focusedShopId={}",
+                state.getChatId(), sessionId, memory.getCandidatePool().size(), memory.getFocusedShopId());
+    }
+
     public AgentSessionContext agentContext(AiChatSession state) {
         ConversationWorkingMemory memory = workingMemory(state);
         AgentSessionContext context = new AgentSessionContext();

@@ -54,6 +54,20 @@ public class AgentConversationService {
     @Resource private ObjectMapper objectMapper;
 
     public AgentConversationResponse converse(Long sessionId, AgentConversationRequest request) {
+        return converseInternal(sessionId, request, null, true);
+    }
+
+    /**
+     * Chat gateway path: the context is a projection of ConversationWorkingMemory and is
+     * deliberately not persisted on AiDecisionSession.
+     */
+    public AgentConversationResponse converse(Long sessionId, AgentConversationRequest request, AgentSessionContext workingMemoryContext) {
+        if (workingMemoryContext == null) throw new IllegalArgumentException("workingMemoryContext 不能为空");
+        return converseInternal(sessionId, request, workingMemoryContext, false);
+    }
+
+    private AgentConversationResponse converseInternal(Long sessionId, AgentConversationRequest request,
+                                                        AgentSessionContext suppliedContext, boolean persistLegacyContext) {
         if (request == null || request.getMessage() == null || request.getMessage().trim().isEmpty()) {
             throw new IllegalArgumentException("message 不能为空");
         }
@@ -64,15 +78,14 @@ public class AgentConversationService {
             throw new IllegalArgumentException("仅已完成推荐的会话支持商户追问");
         }
         try {
-            AgentSessionContext context = loadContext(session);
+            AgentSessionContext context = suppliedContext == null ? loadContext(session) : suppliedContext;
             context.setTurnNo(context.getTurnNo() + 1);
             ReferenceResolution reference = resolveShopReference(request.getMessage().trim(), context);
             if (reference.isAmbiguous()) {
                 log.info("[AI][agent] event=REFERENCE_AMBIGUOUS sessionId={} query={} candidates={}", sessionId,
                         compact(request.getMessage().trim()), reference.candidateNames);
                 saveMessage(sessionId, "USER", "AGENT_FOLLOW_UP", request.getMessage().trim());
-                session.setAgentContextJson(objectMapper.writeValueAsString(context));
-                sessionMapper.updateById(session);
+                persistLegacyContext(session, context, persistLegacyContext);
                 AgentConversationResponse response = ambiguousReferenceResponse(sessionId, context, reference.candidateNames);
                 saveMessage(sessionId, "ASSISTANT", "AGENT_REFERENCE_CLARIFY", response.getAnswer());
                 return response;
@@ -103,8 +116,7 @@ public class AgentConversationService {
                 usedModel = false;
             }
             for (AgentToolResult result : results) agentToolStateReducer.apply(context, result);
-            session.setAgentContextJson(objectMapper.writeValueAsString(context));
-            sessionMapper.updateById(session);
+            persistLegacyContext(session, context, persistLegacyContext);
 
             AgentConversationResponse response = response(sessionId, context, results, usedModel);
             response.setAnswer(polishAnswer(request.getMessage().trim(), response.getAnswer(), usedModel));
@@ -115,6 +127,12 @@ public class AgentConversationService {
         } catch (Exception e) {
             throw new IllegalStateException("商户追问无法处理", e);
         }
+    }
+
+    private void persistLegacyContext(AiDecisionSession session, AgentSessionContext context, boolean enabled) throws Exception {
+        if (!enabled) return;
+        session.setAgentContextJson(objectMapper.writeValueAsString(context));
+        sessionMapper.updateById(session);
     }
 
     public List<AiAgentToolCall> getToolCalls(Long sessionId) {

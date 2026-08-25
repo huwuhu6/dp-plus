@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.dto.ConversationWorkingMemory;
 import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.CriteriaMergeResult;
+import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionRecommendation;
@@ -124,6 +125,28 @@ class ConversationStateServiceTest {
         assertEquals(29.563D, updated.getSearchLocation().getLatitude());
         assertEquals("重庆市", updated.getSearchLocation().getCity());
         assertEquals(29.563D, service.usableSearchLocation(state).getLatitude());
+    }
+
+    @Test
+    void appliesFollowUpCandidatePoolIntoWorkingMemory() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        AiChatSession state = state(memory, "follow-up-state-test");
+        AgentSessionContext context = new AgentSessionContext();
+        DecisionRecommendation initial = new DecisionRecommendation();
+        initial.setShopId(7L); initial.setShopName("首选店");
+        DecisionRecommendation alternative = new DecisionRecommendation();
+        alternative.setShopId(8L); alternative.setShopName("备选店");
+        context.getShownShops().add(initial); context.getShownShops().add(alternative);
+        context.setFocusedShopId(8L); context.setFocusedShopName("备选店");
+
+        service.applyAgentContext(state, 88L, context);
+
+        ConversationWorkingMemory updated = service.workingMemory(state);
+        assertEquals(88L, updated.getSourceDecisionSessionId());
+        assertEquals(2, updated.getCandidatePool().size());
+        assertEquals(8L, updated.getFocusedShopId());
+        assertEquals("RECOMMENDING", updated.getDialogPhase());
     }
 
     private ConversationStateService service() {

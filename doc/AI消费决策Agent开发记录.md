@@ -943,3 +943,9 @@ Working Memory 的地点拆分为两份事实：`location` 保存设备/浏览�
 同时收紧候选池级联失效：除地点和菜系外，预算、距离、到店时间、用餐场景、安静/排队偏好以及硬/软约束变化均视为检索域变化，清空旧候选池和焦点商户。该策略宁可触发一次重新搜索，也不允许过期候选参与“这家/另一家”的后续指代。
 
 新增 `AgentToolStateReducerTest` 验证同一 Delta 重复应用不会重复加入候选；扩展 `ConversationStateServiceTest` 覆盖预算和场景变化的级联失效；`ToolExecutionOrchestratorTest` 验证编排器会把焦点商户写入工具参数且不会修改输入上下文。针对状态、工具、追问与压缩链路运行 `mvn -q -Dtest=ConversationStateServiceTest,AgentConversationServiceTest,ToolExecutionOrchestratorTest,SpringAiAgentToolCallbackTest,ToolResultCompressorTest test` 通过。
+
+## 2026-08-25：主聊天链路回归 Working Memory 单一状态源
+
+进一步将主聊天与 SSE 链路的商户追问上下文切换为 `ConversationWorkingMemory`。Gateway 在进入 `AgentConversationService` 前从 Working Memory 构造临时 `AgentSessionContext` 投影；工具归约完成后，通过 `ConversationStateService.applyAgentContext` 将候选池、焦点商户、对话阶段和来源决策会话回写到同一份 Working Memory。`AiDecisionSession.agentContextJson` 暂时只服务旧的独立 `/ai/decisions/{sessionId}/conversations` 兼容接口，不再参与 `/ai/chat/messages` 或 SSE 的上下文改写和追问处理。
+
+Query Rewrite 移除了从 `agentContextJson` 兜底读取候选池的逻辑：Working Memory 没有候选时直接标记 `NO_WORKING_MEMORY_CANDIDATES`，不以另一份可能过期的状态猜测“第一家/这家”。新增测试验证工具追问产生的候选池与焦点商户会回写到聊天状态，后续改写只读取该状态。
