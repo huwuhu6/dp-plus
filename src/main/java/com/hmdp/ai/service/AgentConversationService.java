@@ -23,6 +23,9 @@ import com.hmdp.ai.mapper.AiDecisionSessionMapper;
 import com.hmdp.ai.tool.AgentToolRegistry;
 import com.hmdp.ai.tool.AgentToolResult;
 import com.hmdp.ai.tool.BaseAgentTool;
+import com.hmdp.ai.tool.ToolExecutionRequest;
+import com.hmdp.ai.tool.ToolExecutionResult;
+import com.hmdp.ai.tool.ToolResultCompressor;
 import com.hmdp.utils.UserHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +47,8 @@ public class AgentConversationService {
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private SpringAiTextClient springAiTextClient;
     @Resource private SpringAiToolPlanner springAiToolPlanner;
+    @Resource private ToolExecutionOrchestrator toolExecutionOrchestrator;
+    @Resource private ToolResultCompressor toolResultCompressor;
     @Resource private AiProperties aiProperties;
     @Resource private ObjectMapper objectMapper;
 
@@ -85,8 +90,15 @@ public class AgentConversationService {
             List<AgentToolResult> results = planning.results;
             boolean usedModel = planning.usedModel;
             if (results.isEmpty()) {
-                results.add(runFallbackTool(sessionId, context.getTurnNo(), request.getMessage().trim(), context,
-                        reference.shop == null ? null : reference.shop.getShopId()));
+                try {
+                    results.addAll(runFallbackTools(sessionId, context.getTurnNo(), request.getMessage().trim(), context,
+                            reference.shop == null ? null : reference.shop.getShopId()));
+                    if (results.isEmpty()) results.add(new AgentToolResult().summary("业务数据暂不可用")
+                            .displayText("抱歉，这次查询没有完成。你可以稍后重试，或换一种问法。"));
+                } catch (IllegalArgumentException e) {
+                    results.add(new AgentToolResult().summary("业务数据暂不可用")
+                            .displayText("抱歉，这次查询没有完成。你可以稍后重试，或换一种问法。"));
+                }
                 usedModel = false;
             }
             for (AgentToolResult result : results) updateContext(context, result);
@@ -147,22 +159,32 @@ public class AgentConversationService {
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         if (!aiProperties.isConfigured()) return new ToolPlanningResult(results, false);
         List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
-        messages.add(message("system", "你是点评消费决策 Agent 的工具规划器。必须只使用提供的只读工具取得商户事实；不得编造商户、券、评价或价格。每次最多调用一个工具。用户问商户事实时优先调用工具，不要直接回答。"));
+        messages.add(message("system", "你是点评消费决策 Agent 的工具规划器。必须只使用提供的只读工具取得商户事实；不得编造商户、券、评价或价格。用户同时询问评价和优惠等独立事实时可调用多个工具，最多 3 个；候选扩展工具会修改会话候选池，不能与其他工具组合。"));
         messages.add(message("system", "会话上下文：" + contextSummary(context)));
         messages.add(message("user", userMessage));
         try {
-            SpringAiToolPlanner.ToolPlan plan = springAiToolPlanner.plan(messages,
+            List<SpringAiToolPlanner.ToolPlan> plans = springAiToolPlanner.planAll(messages,
                     toolRegistry.springAiCallbacks(context), "AGENT_TOOL_PLANNING");
-            if (plan.isEmpty()) {
+            if (plans.isEmpty()) {
                 log.warn("[AI][agent] event=PLAN_EMPTY sessionId={} turnNo={} query={}", sessionId,
                         context.getTurnNo(), compact(userMessage));
                 return new ToolPlanningResult(results, false);
             }
-            String toolName = plan.getName();
-            String arguments = plan.getArguments();
-            log.info("[AI][agent] event=TOOL_PLAN sessionId={} turnNo={} tool={} arguments={}", sessionId,
-                    context.getTurnNo(), toolName, compact(arguments));
-            results.add(executeTool(sessionId, context.getTurnNo(), toolName, arguments, context, explicitlyReferencedShopId));
+            List<ToolExecutionRequest> requests = new ArrayList<ToolExecutionRequest>();
+            for (int index = 0; index < plans.size(); index++) {
+                SpringAiToolPlanner.ToolPlan plan = plans.get(index);
+                log.info("[AI][agent] event=TOOL_PLAN sessionId={} turnNo={} order={} tool={} arguments={}", sessionId,
+                        context.getTurnNo(), index, plan.getName(), compact(plan.getArguments()));
+                requests.add(new ToolExecutionRequest(index, plan.getName(), plan.getArguments(), explicitlyReferencedShopId));
+            }
+            addMissingCompoundFactTools(requests, userMessage, explicitlyReferencedShopId);
+            log.info("[AI][agent] event=TOOL_EXECUTION_BATCH sessionId={} turnNo={} plannedTools={} parallelEligible={}", sessionId,
+                    context.getTurnNo(), requests.stream().map(ToolExecutionRequest::getToolName).toList(),
+                    requests.stream().filter(item -> !"search_alternative_shops".equals(item.getToolName())).count());
+            for (ToolExecutionResult execution : toolExecutionOrchestrator.execute(requests, context)) {
+                persistToolExecution(sessionId, context.getTurnNo(), execution);
+                if (execution.isSuccess()) results.add(execution.getResult());
+            }
             return new ToolPlanningResult(results, true);
         } catch (RuntimeException e) {
             log.warn("[AI][agent] event=PLAN_FALLBACK sessionId={} turnNo={} query={} errorType={} detail={}", sessionId,
@@ -184,7 +206,7 @@ public class AgentConversationService {
             log.info("[AI][agent] event=TOOL_START sessionId={} turnNo={} tool={} arguments={}", sessionId, turnNo,
                     toolName, compact(effectiveArguments));
             BaseAgentTool tool = toolRegistry.find(toolName);
-            AgentToolResult result = tool.execute(input, context);
+            AgentToolResult result = toolResultCompressor.compress(tool.execute(input, context));
             result.setToolName(toolName);
             result.setDurationMs(System.currentTimeMillis() - startedAt);
             record.setStatus("SUCCESS");
@@ -205,14 +227,67 @@ public class AgentConversationService {
         }
     }
 
-    private AgentToolResult runFallbackTool(Long sessionId, Integer turnNo, String message, AgentSessionContext context,
-                                            Long explicitlyReferencedShopId) {
-        String toolName;
-        if (message.contains("优惠") || message.contains("券")) toolName = "query_shop_vouchers";
-        else if (message.contains("评价") || message.contains("评论") || message.contains("笔记") || message.contains("排队") || message.contains("环境")) toolName = "search_shop_evidence";
-        else if (message.contains("还有") || message.contains("其他") || message.contains("换一家")) toolName = "search_alternative_shops";
-        else toolName = "get_shop_detail";
-        return executeTool(sessionId, turnNo, toolName, "{}", context, explicitlyReferencedShopId);
+    private void persistToolExecution(Long sessionId, Integer turnNo, ToolExecutionResult execution) {
+        AiAgentToolCall record = new AiAgentToolCall();
+        record.setSessionId(sessionId); record.setTurnNo(turnNo); record.setToolName(execution.getToolName());
+        record.setToolInputJson(execution.getEffectiveArguments());
+        record.setDurationMs(execution.getDurationMs());
+        if (execution.isSuccess()) {
+            try {
+                record.setStatus("SUCCESS");
+                record.setToolOutputJson(objectMapper.writeValueAsString(execution.getResult().getFacts()));
+                toolCallMapper.insert(record);
+                log.info("[AI][agent] event=TOOL_SUCCESS sessionId={} turnNo={} tool={} durationMs={} result={}", sessionId,
+                        turnNo, execution.getToolName(), execution.getDurationMs(), compact(record.getToolOutputJson()));
+            } catch (Exception e) {
+                log.warn("[AI][agent] event=TOOL_AUDIT_FAILURE sessionId={} turnNo={} tool={} errorType={}", sessionId,
+                        turnNo, execution.getToolName(), e.getClass().getSimpleName());
+            }
+        } else {
+            record.setStatus("FAILED");
+            record.setToolOutputJson("{\"error\":\"工具执行失败\"}");
+            toolCallMapper.insert(record);
+            log.warn("[AI][agent] event=TOOL_FAILURE sessionId={} turnNo={} tool={} durationMs={} detail={}", sessionId,
+                    turnNo, execution.getToolName(), execution.getDurationMs(), compact(execution.getErrorMessage()));
+        }
+    }
+
+    private List<AgentToolResult> runFallbackTools(Long sessionId, Integer turnNo, String message, AgentSessionContext context,
+                                                   Long explicitlyReferencedShopId) {
+        List<String> toolNames = fallbackToolNames(message);
+        List<AgentToolResult> results = new ArrayList<AgentToolResult>();
+        for (String toolName : toolNames) {
+            try {
+                results.add(executeTool(sessionId, turnNo, toolName, "{}", context, explicitlyReferencedShopId));
+            } catch (IllegalArgumentException e) {
+                log.warn("[AI][agent] event=FALLBACK_TOOL_FAILURE sessionId={} turnNo={} tool={} errorType={}", sessionId,
+                        turnNo, toolName, e.getClass().getSimpleName());
+            }
+        }
+        return results;
+    }
+
+    private List<String> fallbackToolNames(String message) {
+        boolean voucher = message.contains("优惠") || message.contains("券");
+        boolean evidence = message.contains("评价") || message.contains("评论") || message.contains("笔记")
+                || message.contains("排队") || message.contains("环境");
+        List<String> result = new ArrayList<String>();
+        if (voucher) result.add("query_shop_vouchers");
+        if (evidence) result.add("search_shop_evidence");
+        if (!result.isEmpty()) return result;
+        if (message.contains("还有") || message.contains("其他") || message.contains("换一家")) result.add("search_alternative_shops");
+        else result.add("get_shop_detail");
+        return result;
+    }
+
+    private void addMissingCompoundFactTools(List<ToolExecutionRequest> requests, String message, Long explicitlyReferencedShopId) {
+        List<String> expected = fallbackToolNames(message);
+        if (expected.size() != 2 || !expected.contains("query_shop_vouchers") || !expected.contains("search_shop_evidence")) return;
+        int nextOrder = requests.stream().map(ToolExecutionRequest::getOrder).max(Integer::compareTo).orElse(-1) + 1;
+        for (String toolName : expected) {
+            boolean exists = requests.stream().anyMatch(item -> toolName.equals(item.getToolName()));
+            if (!exists) requests.add(new ToolExecutionRequest(nextOrder++, toolName, "{}", explicitlyReferencedShopId));
+        }
     }
 
     private AgentConversationResponse response(Long sessionId, AgentSessionContext context, List<AgentToolResult> results,

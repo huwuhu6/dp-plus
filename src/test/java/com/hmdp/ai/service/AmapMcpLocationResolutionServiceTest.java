@@ -10,6 +10,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -37,5 +38,25 @@ class AmapMcpLocationResolutionServiceTest {
         assertEquals(26.0871D, result.get(0).getLatitude());
         assertEquals(119.2998D, result.get(0).getLongitude());
         assertEquals("AMAP_MCP", result.get(0).getSource());
+    }
+
+    @Test
+    void returnsEmptyCandidatesWhenMcpExceedsToolTimeout() {
+        McpSyncClient client = mock(McpSyncClient.class);
+        when(client.callTool(any())).thenAnswer(invocation -> {
+            Thread.sleep(200L);
+            return new McpSchema.CallToolResult(List.of(), false);
+        });
+        AmapMcpLocationResolutionService service = new AmapMcpLocationResolutionService();
+        ReflectionTestUtils.setField(service, "enabled", true);
+        ReflectionTestUtils.setField(service, "toolTimeoutMs", 30L);
+        ReflectionTestUtils.setField(service, "mcpClients", List.of(client));
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        long startedAt = System.currentTimeMillis();
+
+        List<ResolvedLocationCandidate> result = service.resolve("福州鼓楼");
+
+        assertTrue(result.isEmpty());
+        assertTrue(System.currentTimeMillis() - startedAt < 180L);
     }
 }

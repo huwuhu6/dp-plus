@@ -23,6 +23,7 @@ public class SearchAlternativeShopsTool extends BaseAgentTool {
     @Resource private ConsumptionDecisionService decisionService;
 
     @Override public String name() { return "search_alternative_shops"; }
+    @Override public ToolExecutionMode executionMode() { return ToolExecutionMode.SEQUENTIAL_STATEFUL; }
     @Override public String description() { return "查询尚未展示的餐饮备选商户。用户问还有别的吗、换一家或想看其他选择时使用。"; }
 
     @Override public Map<String, Object> parameterSchema() {

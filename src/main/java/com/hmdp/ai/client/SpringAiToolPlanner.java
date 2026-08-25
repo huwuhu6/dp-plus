@@ -30,7 +30,7 @@ public class SpringAiToolPlanner {
     @Resource private AiProperties aiProperties;
     @Resource private AiModelCallTracker modelCallTracker;
 
-    public ToolPlan plan(List<Map<String, Object>> rawMessages, List<ToolCallback> callbacks, String action) {
+    public List<ToolPlan> planAll(List<Map<String, Object>> rawMessages, List<ToolCallback> callbacks, String action) {
         long startedAt = System.currentTimeMillis();
         log.info("[AI][spring-ai] action={} model={} tools={} event=REQUEST", action, aiProperties.getModel(), callbacks.size());
         try {
@@ -48,21 +48,31 @@ public class SpringAiToolPlanner {
                 modelCallTracker.recordSuccess(promptTokens(response), completionTokens(response));
                 log.info("[AI][spring-ai] action={} event=NO_TOOL_CALL durationMs={}", action,
                         System.currentTimeMillis() - startedAt);
-                return ToolPlan.empty();
+                return Collections.emptyList();
             }
             List<AssistantMessage.ToolCall> calls = response.getResult().getOutput().getToolCalls();
-            if (calls == null || calls.isEmpty()) return ToolPlan.empty();
-            AssistantMessage.ToolCall call = calls.get(0);
+            if (calls == null || calls.isEmpty()) return Collections.emptyList();
             modelCallTracker.recordSuccess(promptTokens(response), completionTokens(response));
-            log.info("[AI][spring-ai] action={} event=TOOL_PLAN durationMs={} tool={}", action,
-                    System.currentTimeMillis() - startedAt, call.name());
-            return new ToolPlan(call.name(), call.arguments());
+            List<ToolPlan> plans = new ArrayList<ToolPlan>();
+            for (AssistantMessage.ToolCall call : calls) {
+                if (plans.size() >= 3) break;
+                plans.add(new ToolPlan(call.name(), call.arguments()));
+            }
+            log.info("[AI][spring-ai] action={} event=TOOL_PLAN durationMs={} tools={}", action,
+                    System.currentTimeMillis() - startedAt, plans.stream().map(ToolPlan::getName).toList());
+            return plans;
         } catch (RuntimeException e) {
             modelCallTracker.recordFailure();
             log.warn("[AI][spring-ai] action={} event=FAILURE durationMs={} errorType={}", action,
                     System.currentTimeMillis() - startedAt, e.getClass().getSimpleName());
             throw e;
         }
+    }
+
+    /** Compatibility helper for callers that intentionally need a single planned tool. */
+    public ToolPlan plan(List<Map<String, Object>> rawMessages, List<ToolCallback> callbacks, String action) {
+        List<ToolPlan> plans = planAll(rawMessages, callbacks, action);
+        return plans.isEmpty() ? ToolPlan.empty() : plans.get(0);
     }
 
     private List<Message> toMessages(List<Map<String, Object>> rawMessages) {

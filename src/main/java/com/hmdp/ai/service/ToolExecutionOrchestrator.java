@@ -1,0 +1,111 @@
+package com.hmdp.ai.service;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hmdp.ai.config.AiProperties;
+import com.hmdp.ai.dto.AgentSessionContext;
+import com.hmdp.ai.tool.AgentToolRegistry;
+import com.hmdp.ai.tool.BaseAgentTool;
+import com.hmdp.ai.tool.ToolExecutionMode;
+import com.hmdp.ai.tool.ToolExecutionRequest;
+import com.hmdp.ai.tool.ToolExecutionResult;
+import com.hmdp.ai.tool.ToolResultCompressor;
+import org.springframework.stereotype.Service;
+
+import jakarta.annotation.Resource;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+/** Executes independent read-only tools concurrently while serializing stateful tools. */
+@Service
+public class ToolExecutionOrchestrator {
+    @Resource private AgentToolRegistry toolRegistry;
+    @Resource private ObjectMapper objectMapper;
+    @Resource private ToolResultCompressor resultCompressor;
+    @Resource private AiProperties aiProperties;
+
+    public List<ToolExecutionResult> execute(List<ToolExecutionRequest> requests, AgentSessionContext context) {
+        List<ToolExecutionResult> results = new ArrayList<ToolExecutionResult>();
+        List<ToolExecutionRequest> parallel = new ArrayList<ToolExecutionRequest>();
+        List<ToolExecutionRequest> sequential = new ArrayList<ToolExecutionRequest>();
+        for (ToolExecutionRequest request : requests) {
+            try {
+                if (toolRegistry.find(request.getToolName()).executionMode() == ToolExecutionMode.PARALLEL_SAFE) parallel.add(request);
+                else sequential.add(request);
+            } catch (RuntimeException e) {
+                results.add(failed(request, "不支持的工具"));
+            }
+        }
+
+        if (!parallel.isEmpty()) {
+            ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+            try {
+                List<CompletableFuture<ToolExecutionResult>> futures = new ArrayList<CompletableFuture<ToolExecutionResult>>();
+                for (ToolExecutionRequest request : parallel) {
+                    futures.add(CompletableFuture.supplyAsync(() -> executeOne(request, snapshot(context)), executor)
+                            .completeOnTimeout(failed(request, "工具执行超时"), timeoutMs(), TimeUnit.MILLISECONDS));
+                }
+                for (CompletableFuture<ToolExecutionResult> future : futures) results.add(future.join());
+            } finally {
+                // A timed-out external call must not keep this request waiting for executor close.
+                executor.shutdownNow();
+            }
+        }
+        for (ToolExecutionRequest request : sequential) results.add(executeOne(request, context));
+        results.sort(Comparator.comparing(ToolExecutionResult::getOrder));
+        return results;
+    }
+
+    public ToolExecutionResult executeOne(ToolExecutionRequest request, AgentSessionContext context) {
+        long startedAt = System.currentTimeMillis();
+        ToolExecutionResult outcome = new ToolExecutionResult();
+        outcome.setOrder(request.getOrder());
+        outcome.setToolName(request.getToolName());
+        try {
+            BaseAgentTool tool = toolRegistry.find(request.getToolName());
+            Map<String, Object> input = objectMapper.readValue(blankToObject(request.getArguments()), new TypeReference<Map<String, Object>>() { });
+            if (request.getExplicitlyReferencedShopId() != null && isSingleShopTool(request.getToolName())) {
+                input.put("shopId", request.getExplicitlyReferencedShopId());
+            }
+            outcome.setEffectiveArguments(objectMapper.writeValueAsString(input));
+            outcome.setResult(resultCompressor.compress(tool.execute(input, context)));
+        } catch (Exception e) {
+            outcome.setErrorMessage(e.getMessage() == null ? "工具执行失败" : e.getMessage());
+        }
+        outcome.setDurationMs(System.currentTimeMillis() - startedAt);
+        return outcome;
+    }
+
+    private AgentSessionContext snapshot(AgentSessionContext context) {
+        return objectMapper.convertValue(context, AgentSessionContext.class);
+    }
+
+    private ToolExecutionResult failed(ToolExecutionRequest request, String message) {
+        ToolExecutionResult result = new ToolExecutionResult();
+        result.setOrder(request.getOrder());
+        result.setToolName(request.getToolName());
+        result.setEffectiveArguments(blankToObject(request.getArguments()));
+        result.setErrorMessage(message);
+        result.setDurationMs(0L);
+        return result;
+    }
+
+    private int timeoutMs() {
+        return aiProperties.getToolExecutionTimeoutMs() == null ? 2500 : aiProperties.getToolExecutionTimeoutMs();
+    }
+
+    private boolean isSingleShopTool(String toolName) {
+        return "get_shop_detail".equals(toolName) || "query_shop_vouchers".equals(toolName)
+                || "search_shop_evidence".equals(toolName);
+    }
+
+    private String blankToObject(String arguments) {
+        return arguments == null || arguments.trim().isEmpty() ? "{}" : arguments;
+    }
+}

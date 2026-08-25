@@ -13,6 +13,7 @@ public class AiProperties {
     private Integer timeoutMs = 20000;
     private Boolean narrativeEnabled = true;
     private Integer toolPlanningTimeoutMs = 8000;
+    private Integer toolExecutionTimeoutMs = 2500;
     private Integer answerPolishTimeoutMs = 8000;
     private QueryRewriteProperties queryRewrite = new QueryRewriteProperties();
     private String retrievalStrategyVersion = "structured-profile-evidence-v2";

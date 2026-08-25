@@ -6,6 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public abstract class BaseAgentTool {
+    public ToolExecutionMode executionMode() { return ToolExecutionMode.PARALLEL_SAFE; }
+
     public abstract String name();
 
     public abstract String description();

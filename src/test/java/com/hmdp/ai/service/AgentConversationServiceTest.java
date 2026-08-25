@@ -15,6 +15,7 @@ import com.hmdp.ai.mapper.AiDecisionSessionMapper;
 import com.hmdp.ai.tool.AgentToolRegistry;
 import com.hmdp.ai.tool.AgentToolResult;
 import com.hmdp.ai.tool.BaseAgentTool;
+import com.hmdp.ai.tool.ToolResultCompressor;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -46,6 +47,7 @@ class AgentConversationServiceTest {
         ReflectionTestUtils.setField(service, "aiClient", mock(OpenAiCompatibleClient.class));
         ReflectionTestUtils.setField(service, "aiProperties", properties);
         ReflectionTestUtils.setField(service, "objectMapper", objectMapper);
+        ReflectionTestUtils.setField(service, "toolResultCompressor", compressor(objectMapper));
 
         AiDecisionSession session = completedSession(objectMapper);
         when(sessionMapper.selectById(100L)).thenReturn(session);
@@ -83,6 +85,7 @@ class AgentConversationServiceTest {
         ReflectionTestUtils.setField(service, "aiClient", mock(OpenAiCompatibleClient.class));
         ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
         ReflectionTestUtils.setField(service, "objectMapper", objectMapper);
+        ReflectionTestUtils.setField(service, "toolResultCompressor", compressor(objectMapper));
         AiDecisionSession session = completedSessionWithJapaneseRestaurant(objectMapper);
         when(sessionMapper.selectById(100L)).thenReturn(session);
         when(registry.find("search_shop_evidence")).thenReturn(evidenceTool);
@@ -98,6 +101,39 @@ class AgentConversationServiceTest {
         assertEquals(Long.valueOf(9L), response.getFocusedShopId());
         assertEquals("筑地日本料理（上街店）", response.getFocusedShopName());
         assertEquals("search_shop_evidence", response.getToolTrace().get(0).getToolName());
+    }
+
+    @Test
+    void fallsBackToBothIndependentFactToolsForCompoundQuestion() throws Exception {
+        AgentConversationService service = new AgentConversationService();
+        AiDecisionSessionMapper sessionMapper = mock(AiDecisionSessionMapper.class);
+        AiDecisionMessageMapper messageMapper = mock(AiDecisionMessageMapper.class);
+        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
+        AgentToolRegistry registry = mock(AgentToolRegistry.class);
+        BaseAgentTool voucherTool = mock(BaseAgentTool.class);
+        BaseAgentTool evidenceTool = mock(BaseAgentTool.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        ReflectionTestUtils.setField(service, "sessionMapper", sessionMapper);
+        ReflectionTestUtils.setField(service, "messageMapper", messageMapper);
+        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
+        ReflectionTestUtils.setField(service, "toolRegistry", registry);
+        ReflectionTestUtils.setField(service, "aiClient", mock(OpenAiCompatibleClient.class));
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "objectMapper", objectMapper);
+        ReflectionTestUtils.setField(service, "toolResultCompressor", compressor(objectMapper));
+        when(sessionMapper.selectById(100L)).thenReturn(completedSession(objectMapper));
+        when(registry.find("query_shop_vouchers")).thenReturn(voucherTool);
+        when(registry.find("search_shop_evidence")).thenReturn(evidenceTool);
+        when(voucherTool.execute(anyMap(), any())).thenReturn(new AgentToolResult().summary("券").displayText("优惠券"));
+        when(evidenceTool.execute(anyMap(), any())).thenReturn(new AgentToolResult().summary("评价").displayText("评价证据"));
+        AgentConversationRequest request = new AgentConversationRequest();
+        request.setMessage("这家评价如何，还有优惠券吗？");
+
+        AgentConversationResponse response = service.converse(100L, request);
+
+        assertEquals(2, response.getToolTrace().size());
+        assertEquals("query_shop_vouchers", response.getToolTrace().get(0).getToolName());
+        assertEquals("search_shop_evidence", response.getToolTrace().get(1).getToolName());
     }
 
     @Test
@@ -125,6 +161,12 @@ class AgentConversationServiceTest {
         ReflectionTestUtils.setField(service, "sessionMapper", mock(AiDecisionSessionMapper.class));
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         return service;
+    }
+
+    private ToolResultCompressor compressor(ObjectMapper objectMapper) {
+        ToolResultCompressor compressor = new ToolResultCompressor();
+        ReflectionTestUtils.setField(compressor, "objectMapper", objectMapper);
+        return compressor;
     }
 
 

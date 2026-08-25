@@ -897,3 +897,15 @@ Working Memory 的地点拆分为两份事实：`location` 保存设备/浏览�
 `V37__conversation_evaluation_safe_terminal_statuses.sql` 为“取消聚餐、切换单人简餐”声明 `COMPLETED|WAITING_RELAXATION` 两个安全终态：当前数据可召回合规商户时应完成推荐，无候选时应等待用户明确放宽条件；两者均不能回退到旧聚餐候选。评测器仅对该字段支持以 `|` 声明允许集合，其他断言仍维持严格匹配，避免把状态机错误掩盖为通过。
 
 最终使用真实 DashScope `deepseek-v4-flash`、`qwen-flash`、MySQL、Redis、Milvus 和高德地图 MCP 重跑 `conversation-v1`（运行 #21）：13 条轨迹均完整执行，路由命中 `13/13`、上下文改写 `1/1`、必要工具覆盖 `8/8`、本地性 `13/13`、最终状态 `13/13`、目标商户归因 `13/13`，平均端到端耗时 `12085ms`。其中“设备在福州、明确查询重庆火锅”的轨迹先解析并确认重庆，再因重庆样本不足进入 `WAITING_RELAXATION`，验证没有跨用设备位置或虚构候选；“按我当前定位重新推荐”的轨迹则直接复用本轮设备坐标，验证城市名称不会错误触发目的地确认。
+
+## 2026-08-25：第四站多工具并行编排、结果压缩与外部依赖降级
+
+已完成推荐后的商户追问由 `ToolExecutionOrchestrator` 统一执行。Spring AI 工具规划器不再只读取第一个 Tool Call，而是最多接收 3 个只读调用；Java 层再根据工具执行模式划分边界：`get_shop_detail`、`query_shop_vouchers`、`search_shop_evidence` 与 `compare_shops` 使用 Java 21 虚拟线程并行执行，并各自基于 Working Memory 快照读取，避免并发修改焦点商户；`search_alternative_shops` 会写入已展示候选池，因此始终串行，保证 Working Memory 仍是单一事实来源。工具结果按模型规划顺序聚合，工具审计独立记录每个输入、压缩结果、耗时与失败状态。
+
+对“评价如何，还有优惠券吗”这类明确的双事实请求，模型可规划多个工具；若模型只规划其中一项，Java 的复合事实规则补齐另一项，避免模型偶发规划不足导致用户只得到半个答案。该补齐仅覆盖已定义、彼此独立的事实组合，不扩展到候选池、地点或决策状态，避免把业务状态机交给模型猜测。
+
+新增 `ToolResultCompressor` 作为工具层与模型上下文之间的固定边界：摘要上限 240 字符、展示文本上限 1600 字符、事实列表至多 6 项、单条文本至多 240 字符。评价工具也在读取时裁剪原始文本，避免实体 JSON、长评论或页面字段进入审计和后续润色 Prompt。`AmapMcpLocationResolutionService` 对现有的 `maps_geo` 调用设置 800ms 工具超时；超时或工具错误返回空候选，由已有澄清策略安全处理，而不会中断找店主链路。路线规划与 POI 探测尚未存在真实业务入口，因此没有提前虚构工具。
+
+为支持 Docker 容器临时不可用的开发场景，`AI_VECTOR_STORE_TYPE=none` 可以覆盖开发环境默认的 Milvus 配置；`MilvusSemanticShopRetriever` 的 `VectorStore` 改为可选依赖，向量库不存在时降级为结构化筛选而不是应用启动失败。单元测试覆盖两条 350ms 只读工具在 600ms 内并发完成、结果按规划顺序合并、压缩预算、MCP 超时以及 Milvus 无 Bean 时的可用性。
+
+新增 V38 轨迹 `COMPOUND_FACTS_VOUCHER_AND_EVIDENCE`，首轮推荐杭州约会日料，第二轮同时询问评价和优惠券，要求同一追问覆盖两项工具。使用真实 DashScope `deepseek-v4-flash`、`qwen-flash`、MySQL、Redis、Milvus 和高德 MCP 重跑 `conversation-v1`（运行 #22）共 14 条轨迹：全部完成，路由 `14/14`、上下文改写 `1/1`、工具断言 `14/14`、必要工具覆盖 `10/10`、本地性 `14/14`、最终状态 `14/14`、目标商户 `14/14`，平均端到端耗时 `11707ms`。V38 的工具审计为 `search_shop_evidence(shopId=25)` 与 `query_shop_vouchers(shopId=25)`，两项均成功；端到端答案同时保留评价证据与可用券规则，未以模型常识补充未检索事实。

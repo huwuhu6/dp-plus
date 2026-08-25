@@ -9,12 +9,12 @@ import com.hmdp.ai.mapper.AiShopProfileMapper;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import jakarta.annotation.Resource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -26,13 +26,12 @@ import java.util.Map;
 import java.util.Set;
 
 @Service
-@ConditionalOnProperty(prefix = "ai.retrieval", name = "vector-enabled", havingValue = "true")
 public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
     private static final Logger log = LoggerFactory.getLogger(MilvusSemanticShopRetriever.class);
     // DashScope text-embedding-v4 accepts at most ten input texts per request.
     private static final int EMBEDDING_BATCH_SIZE = 10;
 
-    @Resource private VectorStore vectorStore;
+    @Autowired(required = false) private VectorStore vectorStore;
     @Resource private ShopMapper shopMapper;
     @Resource private AiShopProfileMapper profileMapper;
     @Resource private AiReviewDocumentMapper reviewMapper;
@@ -44,7 +43,7 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
                                        Map<Long, AiShopProfile> profiles,
                                        Map<Long, List<AiReviewDocument>> reviewsByShopId) {
         SemanticRecallResult result = SemanticRecallResult.unavailable();
-        if (query == null || query.trim().isEmpty() || hardMatchedShops == null || hardMatchedShops.isEmpty()) {
+        if (vectorStore == null || query == null || query.trim().isEmpty() || hardMatchedShops == null || hardMatchedShops.isEmpty()) {
             return result;
         }
         long startedAt = System.currentTimeMillis();

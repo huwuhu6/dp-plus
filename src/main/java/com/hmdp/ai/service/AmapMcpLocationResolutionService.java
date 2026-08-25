@@ -17,6 +17,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class AmapMcpLocationResolutionService {
@@ -24,6 +28,8 @@ public class AmapMcpLocationResolutionService {
 
     @Value("${ai.location.mcp.enabled:false}")
     private boolean enabled;
+    @Value("${ai.location.mcp.tool-timeout-ms:800}")
+    private long toolTimeoutMs = 800L;
     @Autowired(required = false)
     private List<McpSyncClient> mcpClients = Collections.emptyList();
     @Resource private ObjectMapper objectMapper;
@@ -39,8 +45,7 @@ public class AmapMcpLocationResolutionService {
         try {
             Map<String, Object> arguments = new LinkedHashMap<>();
             arguments.put("address", query);
-            McpSchema.CallToolResult result = mcpClients.get(0)
-                    .callTool(new McpSchema.CallToolRequest("maps_geo", arguments));
+            McpSchema.CallToolResult result = callMapsGeo(arguments);
             if (Boolean.TRUE.equals(result.isError())) {
                 log.warn("[AI][location] event=MCP_GEO_FAILURE query={} durationMs={} reason=tool_error",
                         compact(query), System.currentTimeMillis() - startedAt);
@@ -50,10 +55,25 @@ public class AmapMcpLocationResolutionService {
             log.info("[AI][location] event=MCP_GEO_SUCCESS query={} candidates={} durationMs={}",
                     compact(query), candidates.size(), System.currentTimeMillis() - startedAt);
             return candidates;
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("[AI][location] event=MCP_GEO_TIMEOUT query={} durationMs={} timeoutMs={}", compact(query),
+                    System.currentTimeMillis() - startedAt, toolTimeoutMs);
+            return Collections.emptyList();
         } catch (Exception e) {
             log.warn("[AI][location] event=MCP_GEO_FAILURE query={} durationMs={} errorType={}",
                     compact(query), System.currentTimeMillis() - startedAt, e.getClass().getSimpleName());
             return Collections.emptyList();
+        }
+    }
+
+    private McpSchema.CallToolResult callMapsGeo(Map<String, Object> arguments) throws Exception {
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
+            return CompletableFuture.supplyAsync(() -> mcpClients.get(0)
+                    .callTool(new McpSchema.CallToolRequest("maps_geo", arguments)), executor)
+                    .get(toolTimeoutMs, TimeUnit.MILLISECONDS);
+        } finally {
+            executor.shutdownNow();
         }
     }
 
