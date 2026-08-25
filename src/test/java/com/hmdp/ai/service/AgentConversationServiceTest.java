@@ -5,6 +5,7 @@ import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentConversationRequest;
 import com.hmdp.ai.dto.AgentConversationResponse;
+import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.entity.AiAgentToolCall;
@@ -57,7 +58,7 @@ class AgentConversationServiceTest {
 
         AgentConversationRequest request = new AgentConversationRequest();
         request.setMessage("这一家有什么优惠券？");
-        AgentConversationResponse response = service.converse(100L, request);
+        AgentConversationResponse response = service.converse(100L, request, singleShopContext());
 
         assertFalse(response.getUsedModel());
         assertEquals("当前可用优惠券：50 元代金券", response.getAnswer());
@@ -66,7 +67,6 @@ class AgentConversationServiceTest {
         ArgumentCaptor<AiAgentToolCall> callCaptor = ArgumentCaptor.forClass(AiAgentToolCall.class);
         verify(toolCallMapper).insert(callCaptor.capture());
         assertEquals("SUCCESS", callCaptor.getValue().getStatus());
-        verify(sessionMapper).updateById(session);
     }
 
     @Test
@@ -96,7 +96,7 @@ class AgentConversationServiceTest {
         AgentConversationRequest request = new AgentConversationRequest();
         request.setMessage("筑地日本料理（上街店）评价如何");
 
-        AgentConversationResponse response = service.converse(100L, request);
+        AgentConversationResponse response = service.converse(100L, request, japaneseContext());
 
         assertEquals(Long.valueOf(9L), response.getFocusedShopId());
         assertEquals("筑地日本料理（上街店）", response.getFocusedShopName());
@@ -129,7 +129,7 @@ class AgentConversationServiceTest {
         AgentConversationRequest request = new AgentConversationRequest();
         request.setMessage("这家评价如何，还有优惠券吗？");
 
-        AgentConversationResponse response = service.converse(100L, request);
+        AgentConversationResponse response = service.converse(100L, request, singleShopContext());
 
         assertEquals(2, response.getToolTrace().size());
         assertEquals("query_shop_vouchers", response.getToolTrace().get(0).getToolName());
@@ -138,22 +138,16 @@ class AgentConversationServiceTest {
 
     @Test
     void resolvesOtherCandidateRelativeToFocusedShop() throws Exception {
-        AgentConversationService service = serviceWithCompletedJapaneseSession();
-        AiDecisionSessionMapper sessionMapper = (AiDecisionSessionMapper) ReflectionTestUtils.getField(service, "sessionMapper");
-        AiDecisionSession session = completedSessionWithJapaneseRestaurant(new ObjectMapper());
-        when(sessionMapper.selectById(100L)).thenReturn(session);
+        AgentConversationService service = new AgentConversationService();
 
-        assertTrue(service.hasCandidateReference(100L, "另一家有优惠券吗"));
+        assertTrue(service.hasCandidateReference("另一家有优惠券吗", japaneseContext()));
     }
 
     @Test
     void treatsImplicitFactQuestionAsFocusedShopFollowUp() throws Exception {
-        AgentConversationService service = serviceWithCompletedJapaneseSession();
-        AiDecisionSessionMapper sessionMapper = (AiDecisionSessionMapper) ReflectionTestUtils.getField(service, "sessionMapper");
-        AiDecisionSession session = completedSessionWithJapaneseRestaurant(new ObjectMapper());
-        when(sessionMapper.selectById(100L)).thenReturn(session);
+        AgentConversationService service = new AgentConversationService();
 
-        assertTrue(service.hasCandidateReference(100L, "大家评价刺身新鲜吗"));
+        assertTrue(service.hasCandidateReference("大家评价刺身新鲜吗", japaneseContext()));
     }
 
     @Test
@@ -167,13 +161,6 @@ class AgentConversationServiceTest {
 
         assertTrue(service.hasCandidateReference("这家日本料理评价如何", context));
         assertFalse(service.hasCandidateReference("这家日本料理评价如何", new com.hmdp.ai.dto.AgentSessionContext()));
-    }
-
-    private AgentConversationService serviceWithCompletedJapaneseSession() {
-        AgentConversationService service = new AgentConversationService();
-        ReflectionTestUtils.setField(service, "sessionMapper", mock(AiDecisionSessionMapper.class));
-        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
-        return service;
     }
 
     private ToolResultCompressor compressor(ObjectMapper objectMapper) {
@@ -217,5 +204,32 @@ class AgentConversationServiceTest {
         session.setStatus("COMPLETED");
         session.setResultJson(objectMapper.writeValueAsString(response));
         return session;
+    }
+
+    private AgentSessionContext singleShopContext() {
+        AgentSessionContext context = new AgentSessionContext();
+        DecisionRecommendation recommendation = new DecisionRecommendation();
+        recommendation.setShopId(8L);
+        recommendation.setShopName("测试寿司店");
+        context.getShownShops().add(recommendation);
+        context.getShownShopIds().add(8L);
+        context.setFocusedShopId(8L);
+        context.setFocusedShopName("测试寿司店");
+        return context;
+    }
+
+    private AgentSessionContext japaneseContext() {
+        AgentSessionContext context = new AgentSessionContext();
+        String[] names = {"闽师东北菜（上街大学城店）", "筑地日本料理（上街店）", "三上日本料理（湖滨店）"};
+        for (int index = 0; index < names.length; index++) {
+            DecisionRecommendation recommendation = new DecisionRecommendation();
+            recommendation.setShopId(8L + index);
+            recommendation.setShopName(names[index]);
+            context.getShownShops().add(recommendation);
+            context.getShownShopIds().add(8L + index);
+        }
+        context.setFocusedShopId(8L);
+        context.setFocusedShopName(names[0]);
+        return context;
     }
 }

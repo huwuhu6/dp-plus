@@ -8,6 +8,7 @@ import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionRecommendation;
+import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.mapper.AiChatSessionMapper;
@@ -147,6 +148,29 @@ class ConversationStateServiceTest {
         assertEquals(2, updated.getCandidatePool().size());
         assertEquals(8L, updated.getFocusedShopId());
         assertEquals("RECOMMENDING", updated.getDialogPhase());
+    }
+
+    @Test
+    void rebindsFollowUpContextWhenDecisionSessionChanges() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        memory.setSourceDecisionSessionId(10L);
+        DecisionRecommendation stale = new DecisionRecommendation();
+        stale.setShopId(1L); stale.setShopName("旧会话店铺");
+        memory.getCandidatePool().add(stale);
+        AiChatSession state = state(memory, "decision-rebind-test");
+        DecisionResponse decision = new DecisionResponse();
+        decision.setSessionId(20L);
+        DecisionRecommendation current = new DecisionRecommendation();
+        current.setShopId(2L); current.setShopName("当前会话店铺");
+        decision.getRecommendations().add(current);
+
+        AgentSessionContext context = service.contextForDecision(state, decision);
+
+        assertEquals(Long.valueOf(20L), service.workingMemory(state).getSourceDecisionSessionId());
+        assertEquals(Long.valueOf(2L), context.getFocusedShopId());
+        assertEquals(1, context.getShownShops().size());
+        assertEquals("当前会话店铺", context.getShownShops().get(0).getShopName());
     }
 
     private ConversationStateService service() {

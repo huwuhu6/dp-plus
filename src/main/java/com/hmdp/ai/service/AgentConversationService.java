@@ -53,21 +53,8 @@ public class AgentConversationService {
     @Resource private AiProperties aiProperties;
     @Resource private ObjectMapper objectMapper;
 
-    public AgentConversationResponse converse(Long sessionId, AgentConversationRequest request) {
-        return converseInternal(sessionId, request, null, true);
-    }
-
-    /**
-     * Chat gateway path: the context is a projection of ConversationWorkingMemory and is
-     * deliberately not persisted on AiDecisionSession.
-     */
     public AgentConversationResponse converse(Long sessionId, AgentConversationRequest request, AgentSessionContext workingMemoryContext) {
         if (workingMemoryContext == null) throw new IllegalArgumentException("workingMemoryContext 不能为空");
-        return converseInternal(sessionId, request, workingMemoryContext, false);
-    }
-
-    private AgentConversationResponse converseInternal(Long sessionId, AgentConversationRequest request,
-                                                        AgentSessionContext suppliedContext, boolean persistLegacyContext) {
         if (request == null || request.getMessage() == null || request.getMessage().trim().isEmpty()) {
             throw new IllegalArgumentException("message 不能为空");
         }
@@ -78,14 +65,13 @@ public class AgentConversationService {
             throw new IllegalArgumentException("仅已完成推荐的会话支持商户追问");
         }
         try {
-            AgentSessionContext context = suppliedContext == null ? loadContext(session) : suppliedContext;
+            AgentSessionContext context = workingMemoryContext;
             context.setTurnNo(context.getTurnNo() + 1);
             ReferenceResolution reference = resolveShopReference(request.getMessage().trim(), context);
             if (reference.isAmbiguous()) {
                 log.info("[AI][agent] event=REFERENCE_AMBIGUOUS sessionId={} query={} candidates={}", sessionId,
                         compact(request.getMessage().trim()), reference.candidateNames);
                 saveMessage(sessionId, "USER", "AGENT_FOLLOW_UP", request.getMessage().trim());
-                persistLegacyContext(session, context, persistLegacyContext);
                 AgentConversationResponse response = ambiguousReferenceResponse(sessionId, context, reference.candidateNames);
                 saveMessage(sessionId, "ASSISTANT", "AGENT_REFERENCE_CLARIFY", response.getAnswer());
                 return response;
@@ -116,7 +102,6 @@ public class AgentConversationService {
                 usedModel = false;
             }
             for (AgentToolResult result : results) agentToolStateReducer.apply(context, result);
-            persistLegacyContext(session, context, persistLegacyContext);
 
             AgentConversationResponse response = response(sessionId, context, results, usedModel);
             response.setAnswer(polishAnswer(request.getMessage().trim(), response.getAnswer(), usedModel));
@@ -129,34 +114,12 @@ public class AgentConversationService {
         }
     }
 
-    private void persistLegacyContext(AiDecisionSession session, AgentSessionContext context, boolean enabled) throws Exception {
-        if (!enabled) return;
-        session.setAgentContextJson(objectMapper.writeValueAsString(context));
-        sessionMapper.updateById(session);
-    }
-
     public List<AiAgentToolCall> getToolCalls(Long sessionId) {
         AiDecisionSession session = sessionMapper.selectById(sessionId);
         if (session == null) throw new IllegalArgumentException("决策记录不存在");
         ensureOwner(session);
         return toolCallMapper.selectList(new QueryWrapper<AiAgentToolCall>()
                 .eq("session_id", sessionId).orderByAsc("turn_no").orderByAsc("id"));
-    }
-
-    /**
-     * Checks only durable candidate context. Routing must not let a model discard an explicit reference.
-     */
-    public boolean hasCandidateReference(Long sessionId, String message) {
-        AiDecisionSession session = sessionMapper.selectById(sessionId);
-        if (session == null || !"COMPLETED".equals(session.getStatus())) return false;
-        ensureOwner(session);
-        try {
-            return hasCandidateReference(message, loadContext(session));
-        } catch (Exception e) {
-            log.warn("[AI][agent] event=REFERENCE_GUARD_FALLBACK sessionId={} errorType={}", sessionId,
-                    e.getClass().getSimpleName());
-            return false;
-        }
     }
 
     /**
@@ -336,40 +299,6 @@ public class AgentConversationService {
                     e.getClass().getSimpleName(), compact(e.getMessage()));
         }
         return factualAnswer;
-    }
-
-    private AgentSessionContext loadContext(AiDecisionSession session) throws Exception {
-        AgentSessionContext context;
-        if (session.getAgentContextJson() != null && !session.getAgentContextJson().trim().isEmpty()) {
-            context = objectMapper.readValue(session.getAgentContextJson(), AgentSessionContext.class);
-        } else {
-            context = new AgentSessionContext();
-            DecisionResponse decision = objectMapper.readValue(session.getResultJson(), DecisionResponse.class);
-            for (DecisionRecommendation item : decision.getRecommendations()) context.getShownShopIds().add(item.getShopId());
-            if (!decision.getRecommendations().isEmpty()) {
-                DecisionRecommendation first = decision.getRecommendations().get(0);
-                context.setFocusedShopId(first.getShopId()); context.setFocusedShopName(first.getShopName());
-            }
-        }
-        DecisionResponse decision = objectMapper.readValue(session.getResultJson(), DecisionResponse.class);
-        if (context.getShownShops() == null) context.setShownShops(new ArrayList<DecisionRecommendation>());
-        if (context.getShownShops().isEmpty()) context.getShownShops().addAll(decision.getRecommendations());
-        if (context.getShownShopIds() == null) context.setShownShopIds(new ArrayList<Long>());
-        if (context.getShownShopIds().isEmpty()) {
-            for (DecisionRecommendation item : decision.getRecommendations()) context.getShownShopIds().add(item.getShopId());
-        }
-        if (context.getFocusedShopId() == null && !context.getShownShops().isEmpty()) {
-            DecisionRecommendation first = context.getShownShops().get(0);
-            context.setFocusedShopId(first.getShopId());
-            context.setFocusedShopName(first.getShopName());
-        }
-        if (context.getDecisionRequest() == null && session.getRequestContextJson() != null) {
-            context.setDecisionRequest(objectMapper.readValue(session.getRequestContextJson(), com.hmdp.ai.dto.DecisionRequest.class));
-        }
-        if (context.getDecisionConstraints() == null && session.getConstraintsJson() != null) {
-            context.setDecisionConstraints(objectMapper.readValue(session.getConstraintsJson(), com.hmdp.ai.dto.DecisionConstraints.class));
-        }
-        return context;
     }
 
     private String contextSummary(AgentSessionContext context) {

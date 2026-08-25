@@ -20,7 +20,6 @@ public class AiDecisionSession {
     private String requestContextJson;
     private String pendingType;
     private String pendingOptionsJson;
-    private String agentContextJson;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

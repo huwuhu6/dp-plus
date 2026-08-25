@@ -5,7 +5,9 @@ import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.AgentConversationRequest;
 import com.hmdp.ai.service.AgentConversationService;
+import com.hmdp.ai.service.ConversationStateService;
 import com.hmdp.ai.service.ConsumptionDecisionService;
+import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.dto.Result;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +25,8 @@ public class AiDecisionController {
     private ConsumptionDecisionService consumptionDecisionService;
     @Resource
     private AgentConversationService agentConversationService;
+    @Resource
+    private ConversationStateService conversationStateService;
 
     @PostMapping
     public Result decide(@RequestBody DecisionRequest request) {
@@ -42,7 +46,15 @@ public class AiDecisionController {
 
     @PostMapping("/{sessionId}/conversations")
     public Result conversation(@PathVariable Long sessionId, @RequestBody AgentConversationRequest request) {
-        return Result.ok(agentConversationService.converse(sessionId, request));
+        if (request == null || request.getChatId() == null || request.getChatId().trim().isEmpty()) {
+            throw new IllegalArgumentException("chatId 不能为空；商户追问必须绑定聊天工作记忆");
+        }
+        AiChatSession state = conversationStateService.getOrCreate(request.getChatId().trim());
+        DecisionResponse decision = consumptionDecisionService.getDecision(sessionId);
+        com.hmdp.ai.dto.AgentSessionContext context = conversationStateService.contextForDecision(state, decision);
+        com.hmdp.ai.dto.AgentConversationResponse response = agentConversationService.converse(sessionId, request, context);
+        conversationStateService.applyAgentContext(state, sessionId, context);
+        return Result.ok(response);
     }
 
     @GetMapping("/{sessionId}/tool-calls")

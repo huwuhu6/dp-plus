@@ -237,6 +237,22 @@ public class ConversationStateService {
         return context;
     }
 
+    /**
+     * Returns the only mutable follow-up context for a decision. A different decision id
+     * starts from that decision's immutable recommendation result before any tool delta is applied.
+     */
+    public AgentSessionContext contextForDecision(AiChatSession state, DecisionResponse decision) {
+        if (decision == null || decision.getSessionId() == null) throw new IllegalArgumentException("决策会话不能为空");
+        ConversationWorkingMemory memory = workingMemory(state);
+        if (!decision.getSessionId().equals(memory.getSourceDecisionSessionId())) {
+            snapshotDecision(state, decision);
+            memory = workingMemory(state);
+            log.info("[AI][state] event=FOLLOW_UP_CONTEXT_REBOUND chatId={} sessionId={} candidates={}",
+                    state.getChatId(), decision.getSessionId(), memory.getCandidatePool().size());
+        }
+        return agentContext(state);
+    }
+
     public void clearActiveDecision(AiChatSession state) { if (state.getActiveDecisionSessionId() != null) { state.setActiveDecisionSessionId(null); update(state); } }
     public void rememberLastDecision(AiChatSession state, Long decisionSessionId) { if (decisionSessionId != null && !decisionSessionId.equals(state.getLastDecisionSessionId())) { state.setLastDecisionSessionId(decisionSessionId); update(state); } }
 
