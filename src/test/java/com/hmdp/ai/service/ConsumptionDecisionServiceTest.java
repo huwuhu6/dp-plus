@@ -71,6 +71,9 @@ class ConsumptionDecisionServiceTest {
         ReflectionTestUtils.setField(service, "constraintExtractor", constraintExtractor);
         ReflectionTestUtils.setField(service, "modelCallTracker", new AiModelCallTracker());
         ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ResultEvaluationService resultEvaluationService = new ResultEvaluationService();
+        ReflectionTestUtils.setField(resultEvaluationService, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "resultEvaluationService", resultEvaluationService);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         ReflectionTestUtils.setField(service, "shopMapper", shopMapper);
         ReflectionTestUtils.setField(service, "profileMapper", profileMapper);
@@ -284,7 +287,8 @@ class ConsumptionDecisionServiceTest {
 
         assertEquals("WAITING_RELAXATION", response.getStatus());
         assertTrue(response.getConstraints().getNearby());
-        assertEquals(3D, response.getConstraints().getRadiusKm());
+        assertEquals(5D, response.getConstraints().getRadiusKm());
+        assertTrue(response.getRelaxation().getAutomatic());
         assertTrue(response.getConstraints().getSoftPreferences().contains("已按会话位置在附近检索"));
     }
 
@@ -356,14 +360,53 @@ class ConsumptionDecisionServiceTest {
 
         assertEquals("WAITING_RELAXATION", paused.getStatus());
         assertEquals("EXPAND_RADIUS", paused.getOptions().get(0).getId());
-        assertEquals(3D, paused.getConstraints().getRadiusKm());
+        assertEquals(5D, paused.getConstraints().getRadiusKm());
+        assertTrue(paused.getRelaxation().getAutomatic());
 
         DecisionFollowUpRequest expandRadius = new DecisionFollowUpRequest();
         expandRadius.setSelectedOptionId("EXPAND_RADIUS");
         DecisionResponse retried = service.continueDecision(100L, expandRadius);
 
         assertEquals("WAITING_RELAXATION", retried.getStatus());
-        assertEquals(5D, retried.getConstraints().getRadiusKm());
+        assertEquals(7D, retried.getConstraints().getRadiusKm());
+    }
+
+    @Test
+    void automaticallyExpandsOnlyDefaultNearbyRadiusBeforeAskingForUserRelaxation() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("火锅");
+        constraints.setNearby(true);
+        when(constraintExtractor.extract("附近的火锅")).thenReturn(constraints);
+
+        Shop shop = new Shop();
+        shop.setId(77L);
+        shop.setName("四公里火锅店");
+        shop.setScore(45);
+        shop.setAvgPrice(100L);
+        shop.setOpenHours("10:00-22:00");
+        shop.setX(119.1934D);
+        shop.setY(26.0778D);
+        AiShopProfile profile = new AiShopProfile();
+        profile.setShopId(77L);
+        profile.setCuisine("火锅");
+        when(shopMapper.selectList(any())).thenReturn(Collections.singletonList(shop));
+        when(profileMapper.selectList(any())).thenReturn(Collections.singletonList(profile));
+        when(reviewMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("附近的火锅");
+        request.setLatitude(26.0400D);
+        request.setLongitude(119.2000D);
+        request.setLocationStatus("AVAILABLE");
+        request.setUseLocationScope(true);
+        DecisionResponse response = service.decide(request);
+
+        assertEquals("COMPLETED", response.getStatus());
+        assertEquals(0, response.getRelaxation().getStrictCandidateCount());
+        assertEquals(1, response.getRelaxation().getRelaxedCandidateCount());
+        assertTrue(response.getRelaxation().getAutomatic());
+        assertEquals(5D, response.getConstraints().getRadiusKm());
+        assertTrue(response.getAnswer().contains("不改变地点、菜系、预算和到店时间等硬条件"));
     }
 
     @Test

@@ -25,7 +25,10 @@ public class AiDecisionMetric {
     private Integer initialCandidateCount;
     private Integer hardMatchedCandidateCount;
     private Integer finalCandidateCount;
+    private Integer strictCandidateCount;
     private Integer relaxationCount;
+    private Boolean automaticRelaxationApplied;
+    private String resultEvaluationOutcome;
     private Integer evidenceCoveredCandidateCount;
     private Double evidenceCoverageRate;
     private Boolean factualConsistent;

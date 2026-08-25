@@ -317,13 +317,16 @@ public class ChatOrchestrationService {
                 || message.contains("安静") || message.contains("清淡") || message.contains("性价比");
         boolean hasDiningCategory = message.contains("烤肉") || message.contains("烧烤") || message.contains("火锅")
                 || message.contains("日料") || message.contains("料理") || message.contains("小吃") || message.contains("咖啡")
-                || message.contains("奶茶") || message.contains("川菜") || message.contains("粤菜");
+                || message.contains("奶茶") || message.contains("川菜") || message.contains("粤菜")
+                || message.contains("简餐") || message.contains("快餐");
         boolean refinement = message.contains("换成") || message.contains("改成") || message.contains("便宜点")
                 || message.contains("贵点") || message.contains("不要辣") || message.contains("不吃辣");
         boolean explicitSearchVerb = message.contains("帮我找") || message.contains("帮我搜") || message.contains("找一下")
                 || message.contains("推荐一下") || message.contains("给我推荐");
+        boolean mealPlanChanged = message.contains("取消") || message.contains("改吃") || message.contains("我自己")
+                || message.contains("一个人吃") || message.contains("单人");
         return (asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory))
-                || (hasDiningCategory && explicitSearchVerb) || (refinement && hasDiningCategory);
+                || (hasDiningCategory && (explicitSearchVerb || mealPlanChanged)) || (refinement && hasDiningCategory);
     }
 
     private boolean isFocusedShopQuestion(String message) {
@@ -365,7 +368,27 @@ public class ChatOrchestrationService {
     private ChatMessageResponse buildLocationResolutionResponse(String chatId, String message, AiChatSession state,
                                                                 Long activeSessionId, DecisionResponse activeDecision,
                                                                 String locationQuery) {
-        if (!locationServiceAvailable()) return null;
+        if (!locationServiceAvailable()) {
+            activeDecision.setQuestion("已识别到你指定的地点“" + locationQuery
+                    + "”，但当前地图解析服务不可用，无法安全将它替换为坐标。请提供该地点附近的经纬度后继续搜索。"
+            );
+            activeDecision.setAnswer(null);
+            activeDecision.getOptions().clear();
+            activeDecision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("PROVIDE_LOCATION", "提交当前位置坐标后继续"));
+            activeDecision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("END_DECISION", "结束本次推荐"));
+            ChatMessageResponse response = new ChatMessageResponse();
+            response.setChatId(chatId);
+            response.setRoute("LOCATION_RESOLUTION");
+            response.setUsedModel(false);
+            response.setDecision(activeDecision);
+            response.setDecisionSessionId(activeSessionId);
+            response.setDecisionStatus(activeDecision.getStatus());
+            response.setAnswer(activeDecision.getQuestion());
+            log.warn("[AI][chat] event=LOCATION_RESOLUTION_UNAVAILABLE chatId={} sessionId={} query={}",
+                    chatId, activeSessionId, compact(locationQuery));
+            recordTurn(chatId, message, response);
+            return response;
+        }
         String normalizedLocationQuery = normalizeLocationQuery(locationQuery);
         List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(normalizedLocationQuery);
         if (candidates.isEmpty()) {
@@ -404,7 +427,6 @@ public class ChatOrchestrationService {
     }
 
     private String extractExplicitLocationScope(String message) {
-        if (!locationServiceAvailable()) return null;
         String normalized = message.replaceAll("\\s+", "").trim();
         if (normalized.length() > 80) return null;
         // Keep the search verb out of the geographical entity before generic relative matching.

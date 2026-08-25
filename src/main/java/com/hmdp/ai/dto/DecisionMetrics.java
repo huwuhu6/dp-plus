@@ -18,7 +18,10 @@ public class DecisionMetrics {
     private Integer initialCandidateCount = 0;
     private Integer hardMatchedCandidateCount = 0;
     private Integer finalCandidateCount = 0;
+    private Integer strictCandidateCount = 0;
     private Integer relaxationCount = 0;
+    private Boolean automaticRelaxationApplied = false;
+    private String resultEvaluationOutcome = "UNKNOWN";
     private Integer evidenceCoveredCandidateCount = 0;
     private Double evidenceCoverageRate = 0D;
     private Boolean factualConsistent = true;

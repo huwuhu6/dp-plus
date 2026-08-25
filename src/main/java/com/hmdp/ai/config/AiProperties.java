@@ -15,6 +15,7 @@ public class AiProperties {
     private Integer toolPlanningTimeoutMs = 8000;
     private Integer toolExecutionTimeoutMs = 2500;
     private Integer answerPolishTimeoutMs = 8000;
+    private ResultEvaluationProperties resultEvaluation = new ResultEvaluationProperties();
     private QueryRewriteProperties queryRewrite = new QueryRewriteProperties();
     private String retrievalStrategyVersion = "structured-profile-evidence-v2";
     private String evaluationDatasetVersion = "seed-v2";
@@ -38,5 +39,11 @@ public class AiProperties {
         public boolean isConfigured() {
             return Boolean.TRUE.equals(enabled) && apiKey != null && !apiKey.trim().isEmpty();
         }
+    }
+
+    @Data
+    public static class ResultEvaluationProperties {
+        private Boolean autoExpandDefaultNearbyRadius = true;
+        private Double autoExpandedNearbyRadiusKm = 5D;
     }
 }

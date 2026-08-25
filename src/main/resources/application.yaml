@@ -75,6 +75,9 @@ ai:
   tool-planning-timeout-ms: ${AI_TOOL_PLANNING_TIMEOUT_MS:8000}
   tool-execution-timeout-ms: ${AI_TOOL_EXECUTION_TIMEOUT_MS:2500}
   answer-polish-timeout-ms: ${AI_ANSWER_POLISH_TIMEOUT_MS:8000}
+  result-evaluation:
+    auto-expand-default-nearby-radius: ${AI_RESULT_EVALUATION_AUTO_EXPAND_DEFAULT_NEARBY_RADIUS:true}
+    auto-expanded-nearby-radius-km: ${AI_RESULT_EVALUATION_AUTO_EXPANDED_NEARBY_RADIUS_KM:5}
   query-rewrite:
     enabled: ${AI_QUERY_REWRITE_ENABLED:true}
     provider: ${AI_QUERY_REWRITE_PROVIDER:dashscope}

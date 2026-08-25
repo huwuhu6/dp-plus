@@ -14,6 +14,7 @@ public class DecisionResponse {
     private List<DecisionOption> options = new ArrayList<>();
     private DecisionConstraints constraints;
     private List<DecisionRecommendation> recommendations = new ArrayList<>();
+    private RelaxationInfo relaxation;
     private List<DecisionTraceItem> trace = new ArrayList<>();
     private DecisionMetrics metrics;
     private Boolean usedModel;

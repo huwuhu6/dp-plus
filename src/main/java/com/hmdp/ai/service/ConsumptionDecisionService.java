@@ -14,6 +14,7 @@ import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionTraceItem;
+import com.hmdp.ai.dto.RelaxationInfo;
 import com.hmdp.ai.dto.SemanticRecallResult;
 import com.hmdp.ai.entity.AiDecisionSession;
 import com.hmdp.ai.entity.AiDecisionStep;
@@ -65,6 +66,7 @@ public class ConsumptionDecisionService {
     @Resource private AiDecisionStepMapper stepMapper;
     @Resource private AiDecisionMetricMapper metricMapper;
     @Resource private AiDecisionMessageMapper messageMapper;
+    @Resource private ResultEvaluationService resultEvaluationService;
     @Autowired(required = false) private SemanticShopRetriever semanticShopRetriever;
     @Value("${ai.retrieval.semantic-weight:18}") private double semanticWeight;
 
@@ -212,6 +214,32 @@ public class ConsumptionDecisionService {
             sessionMapper.updateById(session);
 
             List<DecisionRecommendation> candidates = retrieveAndRank(request, constraints, response, metrics);
+            RelaxationInfo relaxation = resultEvaluationService.evaluateStrictResult(request, constraints, candidates.size());
+            response.setRelaxation(relaxation);
+            metrics.setStrictCandidateCount(candidates.size());
+            metrics.setResultEvaluationOutcome(relaxation.getOutcome());
+            if (resultEvaluationService.applySafeAutomaticRelaxation(request, constraints, relaxation)) {
+                long strictRetrievingMs = durationOrZero(metrics.getRetrievingDurationMs());
+                long strictRerankingMs = durationOrZero(metrics.getRerankingDurationMs());
+                long strictSemanticRetrievingMs = durationOrZero(metrics.getSemanticRetrievingDurationMs());
+                long retryStartedAt = System.currentTimeMillis();
+                log.info("[AI][session={}] state=RESULT_EVALUATING action=AUTO_RELAXATION_APPLIED changes={} preservedHardConstraints={}",
+                        session.getId(), relaxation.getAppliedChanges(), relaxation.getPreservedHardConstraints());
+                candidates = retrieveAndRank(request, constraints, response, metrics);
+                metrics.setRetrievingDurationMs(strictRetrievingMs + durationOrZero(metrics.getRetrievingDurationMs()));
+                metrics.setRerankingDurationMs(strictRerankingMs + durationOrZero(metrics.getRerankingDurationMs()));
+                metrics.setSemanticRetrievingDurationMs(strictSemanticRetrievingMs + durationOrZero(metrics.getSemanticRetrievingDurationMs()));
+                resultEvaluationService.recordRelaxedResult(relaxation, candidates.size());
+                metrics.setRelaxationCount(metrics.getRelaxationCount() + 1);
+                metrics.setAutomaticRelaxationApplied(true);
+                metrics.setResultEvaluationOutcome(relaxation.getOutcome());
+                response.setConstraints(constraints);
+                session.setConstraintsJson(objectMapper.writeValueAsString(constraints));
+                sessionMapper.updateById(session);
+                recordStep(response, session.getId(), "RESULT_EVALUATING",
+                        "默认附近范围未命中，已在保留硬约束下扩大至 " + round(constraints.getRadiusKm()) + " km 重搜",
+                        retryStartedAt);
+            }
             response.setRecommendations(candidates);
             if (Boolean.TRUE.equals(metrics.getSemanticRetrievalUsed())) {
                 recordCompletedStep(response, session.getId(), "SEMANTIC_RETRIEVING", "在硬约束候选范围内完成语义证据召回", metrics.getSemanticRetrievingDurationMs());
@@ -223,7 +251,7 @@ public class ConsumptionDecisionService {
             }
 
             long answerStart = System.currentTimeMillis();
-            response.setAnswer(generateAnswer(session.getId(), request.getQuery(), constraints, candidates, metrics));
+            response.setAnswer(generateAnswer(session.getId(), request.getQuery(), constraints, candidates, metrics, relaxation));
             recordStep(response, session.getId(), "ANSWERING", "已生成带证据的消费建议", answerStart);
             populateDurationMetrics(metrics, response.getTrace(), start);
             populateModelUsage(response, metrics);
@@ -348,7 +376,10 @@ public class ConsumptionDecisionService {
                                                 DecisionMetrics metrics, long startedAt) throws Exception {
         DecisionConstraints constraints = response.getConstraints();
         response.setStatus("WAITING_RELAXATION");
-        response.setQuestion("当前条件下没有找到匹配的餐饮商户。你可以选择明确放宽一项条件继续，或结束本次推荐；系统不会自动修改你的限制。");
+        boolean autoRetried = response.getRelaxation() != null && Boolean.TRUE.equals(response.getRelaxation().getAutomatic());
+        response.setQuestion(autoRetried
+                ? "默认附近范围已在保留地点、菜系、预算等硬条件下自动扩大一次，仍未找到匹配商户。请明确选择一项条件放宽后继续，或结束本次推荐。"
+                : "当前条件下没有找到匹配的餐饮商户。你可以选择明确放宽一项条件继续，或结束本次推荐；系统不会自动修改你的限制。");
         if (constraints.getRadiusKm() > 0) {
             response.getOptions().add(new DecisionOption("EXPAND_RADIUS", "扩大搜索距离到 " + round(constraints.getRadiusKm() + 2D) + " km"));
         }
@@ -447,6 +478,10 @@ public class ConsumptionDecisionService {
 
     private boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private long durationOrZero(Long duration) {
+        return duration == null ? 0L : duration;
     }
 
     private void logDecisionOutput(Long sessionId, DecisionResponse response) {
@@ -666,13 +701,13 @@ public class ConsumptionDecisionService {
     }
 
     private String generateAnswer(Long sessionId, String query, DecisionConstraints constraints, List<DecisionRecommendation> items,
-                                  DecisionMetrics metrics) {
+                                  DecisionMetrics metrics, RelaxationInfo relaxation) {
         if (items.isEmpty()) {
             return "当前数据中没有找到满足硬约束的商户。可以适当放宽预算、距离或菜系后再试。";
         }
         String narrative = "该选择在当前硬约束下的综合匹配度最高。";
         if (!aiProperties.isConfigured() || !Boolean.TRUE.equals(aiProperties.getNarrativeEnabled())) {
-            return buildFactAnswer(constraints, items, narrative);
+            return buildFactAnswer(constraints, items, narrative, relaxation);
         }
         try {
             List<Map<String, Object>> messages = new ArrayList<>();
@@ -690,12 +725,20 @@ public class ConsumptionDecisionService {
             // 模型调用失败时继续使用安全的后端事实答案。
             log.warn("[AI][session={}] state=ANSWERING action=MODEL_NARRATIVE_FALLBACK", sessionId);
         }
-        return buildFactAnswer(constraints, items, narrative);
+        return buildFactAnswer(constraints, items, narrative, relaxation);
     }
 
-    private String buildFactAnswer(DecisionConstraints constraints, List<DecisionRecommendation> items, String narrative) {
+    private String buildFactAnswer(DecisionConstraints constraints, List<DecisionRecommendation> items, String narrative,
+                                   RelaxationInfo relaxation) {
         DecisionRecommendation first = items.get(0);
-        StringBuilder answer = new StringBuilder("首选 ").append(first.getShopName()).append("。\n\n匹配依据：");
+        StringBuilder answer = new StringBuilder();
+        if (relaxation != null && Boolean.TRUE.equals(relaxation.getAutomatic())) {
+            answer.append("默认附近范围内未找到结果，已在不改变地点、菜系、预算和到店时间等硬条件的前提下扩大搜索范围。\n\n");
+        }
+        if (relaxation != null && "SPARSE".equals(relaxation.getOutcome())) {
+            answer.append("当前严格条件下仅找到 1 家商户，未自动放宽任何用户条件。\n\n");
+        }
+        answer.append("首选 ").append(first.getShopName()).append("。\n\n匹配依据：");
         for (String reason : first.getMatchedReasons()) answer.append("\n- ").append(reason);
         if (items.size() > 1) answer.append("\n\n备选：").append(items.get(1).getShopName());
         if (!first.getEvidence().isEmpty()) {
@@ -753,7 +796,10 @@ public class ConsumptionDecisionService {
         metric.setInitialCandidateCount(metrics.getInitialCandidateCount());
         metric.setHardMatchedCandidateCount(metrics.getHardMatchedCandidateCount());
         metric.setFinalCandidateCount(metrics.getFinalCandidateCount());
+        metric.setStrictCandidateCount(metrics.getStrictCandidateCount());
         metric.setRelaxationCount(metrics.getRelaxationCount());
+        metric.setAutomaticRelaxationApplied(metrics.getAutomaticRelaxationApplied());
+        metric.setResultEvaluationOutcome(metrics.getResultEvaluationOutcome());
         metric.setEvidenceCoveredCandidateCount(metrics.getEvidenceCoveredCandidateCount());
         metric.setEvidenceCoverageRate(metrics.getEvidenceCoverageRate());
         metric.setFactualConsistent(metrics.getFactualConsistent());
