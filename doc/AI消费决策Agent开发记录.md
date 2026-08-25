@@ -923,3 +923,13 @@ Working Memory 的地点拆分为两份事实：`location` 保存设备/浏览�
 真实 `conversation-v1` 运行 #23 首次执行 15 条轨迹：上下文改写 `1/1`、必要工具覆盖 `10/10`、本地性 `15/15`、目标商户 `15/15`，新自动扩展轨迹完成并返回预期福州商户。该轮还暴露出两个边界问题：地图 MCP 未启用时，显式目的地可能被错误解释为菜系上下文；“取消聚餐，改成一人简餐”未被识别为新任务。前者通过 Gateway 地点保护修复，后者补充简餐/快餐和用餐计划切换的确定性意图规则。
 
 使用启用高德 MCP 的开发配置重跑 `conversation-v1`（运行 #25）后，15 条轨迹均完整通过：路由 `15/15`、上下文改写 `1/1`、工具断言 `15/15`、必要工具覆盖 `10/10`、本地性 `15/15`、最终状态 `15/15`、目标商户 `15/15`，平均端到端耗时 `11636ms`。其中重庆显式目的地完成“解析 -> 确认 -> 重庆行政区过滤 -> 无候选等待用户放宽”，默认附近火锅完成 `3km -> 5km` 的单次安全扩展，聚餐取消后的简餐请求发起新的推荐链路；三条均未跨用旧地点、旧候选或用户明确约束。
+
+## 2026-08-25：第六站 SSE 协议与前端多轮交互闭环
+
+新增 `POST /ai/chat/messages/stream`，保留原 `POST /ai/chat/messages` 作为同步兼容接口。流式端点使用 `SseEmitter` 和 Java 21 虚拟线程执行已有 `ChatOrchestrationService`，在异步线程中显式恢复 `UserHolder`，因此 SSE 与同步入口共用同一份聊天持久化、Working Memory、决策状态机和权限归属，不会形成第二套会话逻辑。
+
+协议固定为五类帧：`status` 反馈请求接收、编排和结果就绪；`text_delta` 分段输出最终回答；`ui_component` 仅传输结构化 `SHOP_RECOMMENDATION_LIST`；`suggested_chips` 下发确定性追问；`complete` 携带最终 `ChatMessageResponse` 供前端写回会话状态。店铺卡片直接取 `DecisionRecommendation` 的商户 ID、价格、距离、评分、地址、营业时间与匹配理由，未经过模型二次生成；快捷 Chip 和卡片“查看评价/查优惠券”均以普通查询文本回流 Gateway，由候选池和焦点商户完成下一轮指代解析。
+
+调试台已由 Axios 同步请求切换为 `fetch` 消费 POST SSE，能够展示实时状态、增量文本、卡片和 Chip；旧的地点授权与约束选项仍使用同一结构化请求协议。当前主模型客户端是同步调用，故 `status` 帧会即时下发，而 `text_delta` 在获得经事实守卫校验的最终回答后再分段发送。这保证了当前事实一致性与审计边界；后续若追求模型首字延迟，可在不改变事件协议的前提下将 `SpringAiTextClient` 改为供应商 token streaming。
+
+`ChatStreamServiceTest` 覆盖推荐结果的确定性 Chip 与非推荐回答不虚构引导项；全量 `mvn -q test` 通过。以真实登录态调用 SSE 冒烟：普通对话依次收到 `status -> text_delta -> complete`；福州坐标下“附近的火锅”依次收到 `status -> text_delta -> ui_component -> suggested_chips -> complete`，卡片返回 shopId `77`、人均 `110`、距离 `4.25km`、营业时间和真实匹配理由，验证结构化展示与已有安全自动松弛链路能共同工作。
