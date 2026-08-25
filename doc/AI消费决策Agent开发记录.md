@@ -953,3 +953,9 @@ Query Rewrite 移除了从 `agentContextJson` 兜底读取候选池的逻辑：W
 补充修复主聊天路由的一处残留依赖：`BUSINESS_FOLLOW_UP` 的候选引用判定改为 `hasCandidateReference(message, context)` 纯函数，入参仅为当前消息和由 Working Memory 投影出的候选池，不再按 `decisionSessionId` 读取 `agentContextJson`。删除已无主链路调用的 `loadWorkingMemory` 方法，并新增回归测试，确保没有候选池时不会误判为商户追问。
 
 独立追问接口 `POST /ai/decisions/{sessionId}/conversations` 同步改为要求 `chatId`。接口会绑定 `AiChatSession.workingMemoryJson`，在传入的 `sessionId` 与当前候选池来源不一致时，先以该决策的不可变推荐结果重新绑定候选池，再执行工具并归约回写；因此不会让不同决策会话共享候选对象。运行时代码和实体模型已不再读写 `agentContextJson`，数据库中的旧列暂保留以兼容已执行的迁移版本。
+
+## 2026-08-25：收尾验收口径固化
+
+将同步聊天、SSE 流和独立商户追问的接口契约补充到 README：SSE 使用 `POST /ai/chat/messages/stream`，独立追问必须提交 `chatId`，确保任何入口都绑定同一份 Working Memory。README 同时固化了多轮评测的已登录态执行方式与人工验收矩阵：定位找店、命名目的地消歧、条件细化、无结果松弛、候选指代、评价与优惠券并行事实查询、退出后重新进入，以及 SSE 的事件顺序。
+
+代码级回归继续以 `mvn -q test` 为准；真实模型质量以数据库中保存的多轮运行记录、模型/检索策略版本和 JMeter HTML 报告共同判定。已有 `conversation-v1` 运行 #25 对 15 条轨迹达到路由、改写、本地性、工具、最终状态和目标商户全量命中；受控 JMeter 并发基线为 8 次真实请求、错误率 0%、平均 4.34s、P95 5.02s。两组指标分别衡量语义/状态正确性与端到端稳定性，不互相替代。

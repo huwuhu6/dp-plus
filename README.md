@@ -159,8 +159,10 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8081/ai/retrieval/indexes/r
 | 用途 | 接口 |
 | --- | --- |
 | Chatbot 对话 | `POST /ai/chat/messages` |
+| Chatbot SSE 对话 | `POST /ai/chat/messages/stream` |
 | 创建一次决策 | `POST /ai/decisions` |
 | 决策中的选项/补充 | `POST /ai/decisions/{sessionId}/messages` |
+| 已完成推荐的商户追问 | `POST /ai/decisions/{sessionId}/conversations`，请求体必须包含 `chatId` 与 `message` |
 | 重建向量索引 | `POST /ai/retrieval/indexes/rebuild` |
 | 运行主评测集 | `POST /ai/evaluations/runs` |
 | 运行保留集 | `POST /ai/evaluations/runs/holdout` |
@@ -190,3 +192,16 @@ mvn -q test
 AI 决策链路的本地 JMeter 基线计划和执行方式见 [jmeter/README.md](jmeter/README.md)。默认只运行 4 次真实模型请求；提高并发前需要先确认供应商配额与成本边界。
 
 架构与关键决策的演进记录见 [AI消费决策Agent开发记录.md](doc/AI消费决策Agent开发记录.md)。
+
+## 收尾验收
+
+每次修改 Agent 主链路后，先执行 `mvn -q test`，再以已登录的前端会话运行多轮轨迹评测。评测接口受业务登录保护，避免匿名请求污染运行记录：在浏览器已登录状态下执行：
+
+```javascript
+fetch('/api/ai/evaluations/conversation-runs', {
+  method: 'POST',
+  credentials: 'include'
+}).then(async response => console.log(response.status, await response.json()));
+```
+
+人工验收至少覆盖：设备定位找店、命名目的地确认、条件细化重搜、无结果松弛、候选序号/店名追问、评价与优惠券并行查询、退出后重新发起推荐，以及 SSE 的 `status -> text_delta -> ui_component -> suggested_chips -> complete` 事件顺序。每次真实评测记录运行 ID、模型版本、检索策略版本和 JMeter 报告路径，才可用于跨版本对比。
