@@ -25,6 +25,15 @@ public class AiConversationEvaluationRun {
     private Integer shopMatchedCount;
     private Integer completedCount;
     private Long avgDurationMs;
+    private Long p50DurationMs;
+    private Long p95DurationMs;
+    private Long p99DurationMs;
+    private Double errorRate;
+    private Integer modelCallCount;
+    private Integer modelSuccessCount;
+    private Integer modelFailureCount;
+    private Long promptTokenCount;
+    private Long completionTokenCount;
     private String status;
     private String errorSummary;
 }

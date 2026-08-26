@@ -17,11 +17,13 @@ import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
 import com.hmdp.ai.entity.AiAgentToolCall;
 import com.hmdp.ai.entity.AiConversationEvent;
+import com.hmdp.ai.entity.AiDecisionMetric;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseResultMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationRunMapper;
 import com.hmdp.ai.mapper.AiAgentToolCallMapper;
 import com.hmdp.ai.mapper.AiConversationEventMapper;
+import com.hmdp.ai.mapper.AiDecisionMetricMapper;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.utils.UserHolder;
@@ -52,6 +54,7 @@ public class AiConversationEvaluationService {
     @Resource private ConversationEventService conversationEventService;
     // Compatibility fallback for isolated tests and historical runs before V40.
     @Resource private AiAgentToolCallMapper toolCallMapper;
+    @Resource private AiDecisionMetricMapper decisionMetricMapper;
     @Resource private ShopMapper shopMapper;
     @Resource private ObjectMapper objectMapper;
     @Resource private AiProperties aiProperties;
@@ -313,6 +316,7 @@ public class AiConversationEvaluationService {
             result.setUnexpectedToolCount(toolCoverage.unexpectedCount);
             result.setToolMatched(toolCoverage.matched);
             result.setToolArgumentsMatched(toolArgumentsMatched(evaluationCase.getExpectedToolArgumentsJson(), actualToolCalls));
+            populateModelMetrics(result, decisionSessionIds);
             result.setLocalityMatched(matchesExpectedCity(evaluationCase.getExpectedCity(), finalShopIds));
             result.setFinalStatusMatched(equalsExpected(evaluationCase.getExpectedFinalStatus(), finalStatus));
             result.setShopMatched(expectedShopsMatched(evaluationCase.getExpectedShopIds(), finalShopIds));
@@ -570,7 +574,33 @@ public class AiConversationEvaluationService {
         run.setShopMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getShopMatched())).count());
         run.setCompletedCount((int) (results.size() - failed));
         run.setAvgDurationMs(results.isEmpty() ? 0L : Math.round(results.stream().mapToLong(AiConversationEvaluationCaseResult::getDurationMs).average().orElse(0D)));
+        List<Long> durations = results.stream().map(AiConversationEvaluationCaseResult::getDurationMs).sorted().collect(Collectors.toList());
+        run.setP50DurationMs(percentile(durations, 0.50D));
+        run.setP95DurationMs(percentile(durations, 0.95D));
+        run.setP99DurationMs(percentile(durations, 0.99D));
+        run.setErrorRate(results.isEmpty() ? 0D : (double) failed / results.size());
+        run.setModelCallCount(results.stream().map(AiConversationEvaluationCaseResult::getModelCallCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        run.setModelSuccessCount(results.stream().map(AiConversationEvaluationCaseResult::getModelSuccessCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        run.setModelFailureCount(results.stream().map(AiConversationEvaluationCaseResult::getModelFailureCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        run.setPromptTokenCount(results.stream().map(AiConversationEvaluationCaseResult::getPromptTokenCount).filter(java.util.Objects::nonNull).mapToLong(Long::longValue).sum());
+        run.setCompletionTokenCount(results.stream().map(AiConversationEvaluationCaseResult::getCompletionTokenCount).filter(java.util.Objects::nonNull).mapToLong(Long::longValue).sum());
         run.setErrorSummary(failed == 0 ? null : "失败用例数=" + failed);
+    }
+
+    private void populateModelMetrics(AiConversationEvaluationCaseResult result, Set<Long> sessionIds) {
+        if (sessionIds.isEmpty()) return;
+        List<AiDecisionMetric> metrics = decisionMetricMapper.selectList(new QueryWrapper<AiDecisionMetric>().in("session_id", sessionIds));
+        result.setModelCallCount(metrics.stream().map(AiDecisionMetric::getModelCallCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        result.setModelSuccessCount(metrics.stream().map(AiDecisionMetric::getModelSuccessCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        result.setModelFailureCount(metrics.stream().map(AiDecisionMetric::getModelFailureCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
+        result.setPromptTokenCount(metrics.stream().map(AiDecisionMetric::getPromptTokenCount).filter(java.util.Objects::nonNull).mapToLong(Integer::longValue).sum());
+        result.setCompletionTokenCount(metrics.stream().map(AiDecisionMetric::getCompletionTokenCount).filter(java.util.Objects::nonNull).mapToLong(Integer::longValue).sum());
+    }
+
+    private long percentile(List<Long> values, double quantile) {
+        if (values.isEmpty()) return 0L;
+        int index = (int) Math.ceil(quantile * values.size()) - 1;
+        return values.get(Math.max(0, Math.min(index, values.size() - 1)));
     }
 
     private void requireOwner(AiConversationEvaluationRun run) {

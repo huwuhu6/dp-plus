@@ -32,6 +32,11 @@ public class AiConversationEvaluationCaseResult {
     private Boolean finalStatusMatched;
     private Boolean shopMatched;
     private Long durationMs;
+    private Integer modelCallCount;
+    private Integer modelSuccessCount;
+    private Integer modelFailureCount;
+    private Long promptTokenCount;
+    private Long completionTokenCount;
     private String turnOutputsJson;
     private String errorMessage;
 }
