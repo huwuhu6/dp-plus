@@ -985,3 +985,9 @@ Runtime Event 使用 `chat_id + trace_id + turn_no + sequence_no` 标识完整�
 在本地 MySQL 的 `hmdp` schema 实际执行 Flyway 后，版本从 `V39` 升至 `V40`，所有 AI 物理表均已迁移为 `tbl_ai_*` 前缀，`tbl_ai_working_memory` 与 `tbl_ai_conversation_event` 已存在。新增 `WorkingMemoryRuntimePersistenceIntegrationTest` 使用真实 Spring 上下文、MySQL Mapper 与事务管理器验证状态写入闭环：同一事务内创建 Memory version，并写入关联的 `STATE_REDUCED` Event；测试断言事件的 `working_memory_id` 与新版本一致，随后由测试事务自动回滚。
 
 本轮执行 `mvn -q test` 全量通过；定向真实持久化测试 `mvn -q -Dtest=WorkingMemoryRuntimePersistenceIntegrationTest test` 通过。现有 `conversation-v1` 的最近一次完整模型评测仍是迁移前运行，Runtime 模型改造后的下一次评测会单独登记新的 runId、命中率与端到端耗时，避免混淆两套运行时数据口径。
+
+### V40 后多轮评测
+
+在真实 DashScope `deepseek-v4-flash`、MySQL、Redis、Milvus 与高德 MCP 环境中重跑 `conversation-v1`，有效运行 #35 完成 15/15 条多轮轨迹，平均端到端耗时 `11125ms`。路由、本地性、最终状态与目标商户断言均为 `15/15`；上下文改写断言为 `1/1`；预期工具覆盖为 `9/10`，运行期间记录 372 条 Runtime Event，`TOOL_CALL FAILED=0`、`ERROR=0`。
+
+评测同时验证了 V40 新表的真实写入。此前 fallback 工具分支只保留旧审计记录，导致评价器遗漏规则兜底执行的工具调用；现已同步写入 `TOOL_CALL` 与关联的 `TOOL_RESULT` Event，并标记 `executionMode=FALLBACK_RULE`。剩余工具覆盖缺口是明确的语义 Bad Case：用户说“第一家那个日本料理”时，候选池第一家实际为粤菜、第二家为日料，改写器目前优先服从序号而未正确处理序号与品类冲突。该项保留为下一轮实体消歧评测与修复目标，不以放宽断言掩盖。

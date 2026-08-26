@@ -37,6 +37,7 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -276,9 +277,41 @@ public class AgentConversationService {
         List<String> toolNames = fallbackToolNames(message);
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         for (String toolName : toolNames) {
+            Long callEventId = null;
+            if (conversationEventService != null) {
+                Map<String, Object> call = new LinkedHashMap<String, Object>();
+                call.put("tool", toolName);
+                call.put("arguments", Collections.emptyMap());
+                call.put("decisionSessionId", sessionId);
+                call.put("turnNo", turnNo);
+                call.put("executionMode", "FALLBACK_RULE");
+                callEventId = conversationEventService.record(ConversationEventType.TOOL_CALL,
+                        ConversationEventStatus.SUCCESS, null, null, call, null);
+            }
             try {
-                results.add(executeTool(sessionId, turnNo, toolName, "{}", context, explicitlyReferencedShopId));
+                AgentToolResult result = executeTool(sessionId, turnNo, toolName, "{}", context, explicitlyReferencedShopId);
+                results.add(result);
+                if (conversationEventService != null) {
+                    Map<String, Object> payload = new LinkedHashMap<String, Object>();
+                    payload.put("tool", toolName);
+                    payload.put("decisionSessionId", sessionId);
+                    payload.put("turnNo", turnNo);
+                    payload.put("facts", result.getFacts());
+                    conversationEventService.record(ConversationEventType.TOOL_RESULT,
+                            ConversationEventStatus.SUCCESS, null, callEventId, payload,
+                            Collections.<String, Object>singletonMap("executionMode", "FALLBACK_RULE"));
+                }
             } catch (IllegalArgumentException e) {
+                if (conversationEventService != null) {
+                    Map<String, Object> payload = new LinkedHashMap<String, Object>();
+                    payload.put("tool", toolName);
+                    payload.put("decisionSessionId", sessionId);
+                    payload.put("turnNo", turnNo);
+                    payload.put("error", e.getMessage());
+                    conversationEventService.record(ConversationEventType.TOOL_RESULT,
+                            ConversationEventStatus.FAILED, null, callEventId, payload,
+                            Collections.<String, Object>singletonMap("executionMode", "FALLBACK_RULE"));
+                }
                 log.warn("[AI][agent] event=FALLBACK_TOOL_FAILURE sessionId={} turnNo={} tool={} errorType={}", sessionId,
                         turnNo, toolName, e.getClass().getSimpleName());
             }
