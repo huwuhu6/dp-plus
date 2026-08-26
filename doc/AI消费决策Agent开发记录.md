@@ -1046,6 +1046,8 @@ Runtime Event 使用 `chat_id + trace_id + turn_no + sequence_no` 标识完整�
 
 ## 2026-08-26：聊天编排管道化第一阶段
 
+推荐结果的用户可见证据不再渲染内部 `source_type` 前缀，例如 `LOCAL_DEMO`。该来源字段继续保存在 `tbl_ai_review_document`，并保留给检索、审计和向量元数据使用；仅展示层改为输出评价正文，避免向用户暴露实现标签。新增 `ConsumptionDecisionServiceTest` 回归断言，确保来源类型不会再次进入推荐证据。
+
 将此前仅作为外壳的聊天 Pipeline 改为真实承载请求中间态的执行结构。`ChatProcessingContext` 现在收敛本轮原始/改写 Query、会话与 Working Memory 快照、活动决策、路由动作、归约结果、决策请求和策略结果；这些字段只在单次请求生命周期内存在，不替代持久化 Working Memory。
 
 `BootstrapNode` 负责加载会话、历史、Working Memory 和活动决策并写入用户输入事件；`ContextRewriteNode` 写入改写结果与 Runtime Event；`IntentRoutingNode` 只选择 `ChatProcessingAction`，覆盖澄清事件、挂起解释、新推荐、搜索微调、商户追问、退出和闲聊；`CriteriaReductionNode` 仅在推荐动作下归约条件、生成净化检索 Query、应用位置仲裁和候选排除；`PolicyGuardNode` 写入确定性策略结果；`ExecutionNode` 根据已确定动作分发到推荐、商户追问或闲聊执行器。全量 `mvn -q test` 通过，原有 `ChatOrchestrationServiceTest` 保持绿灯。

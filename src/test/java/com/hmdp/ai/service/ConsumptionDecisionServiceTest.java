@@ -156,6 +156,21 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
+    void recommendationEvidenceDoesNotExposeInternalSourceType() {
+        Shop shop = new Shop();
+        shop.setId(4L);
+        shop.setName("test shop");
+        AiReviewDocument document = new AiReviewDocument();
+        document.setSourceType("LOCAL_DEMO");
+        document.setContent("Evidence body");
+
+        DecisionRecommendation recommendation = ReflectionTestUtils.invokeMethod(service, "toRecommendation",
+                shop, null, Arrays.asList(document), new DecisionRequest(), new DecisionConstraints());
+
+        assertEquals(Arrays.asList("Evidence body"), recommendation.getEvidence());
+    }
+
+    @Test
     void nearbyWithoutCoordinatesPausesForLocation() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setNearby(true);

@@ -784,7 +784,8 @@ public class ConsumptionDecisionService {
         if (documents != null) {
             for (AiReviewDocument document : documents) {
                 if (item.getEvidence().size() >= 2) break;
-                item.getEvidence().add("[" + document.getSourceType() + "] " + document.getContent());
+                // Source type remains available to internal retrieval and audit paths, but is not user-facing evidence.
+                item.getEvidence().add(document.getContent());
                 score += 3D;
             }
         }
