@@ -1035,3 +1035,11 @@ Runtime Event 使用 `chat_id + trace_id + turn_no + sequence_no` 标识完整�
 真实链路复跑过程中发现并修复三项状态问题：显式目标城市虽写入 Working Memory，但执行层仍强制索取经纬度；“改成附近烧烤”会继承旧的预算和硬约束；“我在福州鼓楼，附近再找找”会误落入已有商户追问。现在命名城市可作为无 GPS 的全城搜索锚点，需求替换会清除旧预算、硬约束和锁定标记，附近加搜索动作稳定进入新推荐。
 
 最终真实运行 #40（DashScope `deepseek-v4-flash`、MySQL、Redis、Milvus、高德 MCP）完成 `5/5`：路由 `5/5`、地域 `5/5`、最终状态 `5/5`、Working Memory `5/5`、错误恢复 `5/5`，错误率 `0`，平均端到端耗时 `15224ms`，P95 `20886ms`。此前运行 #38/#39 用于暴露和定位上述缺陷，不计入验收基线。
+
+## 2026-08-26：分支整合回归与多轮鲁棒性复验
+
+将远端聊天 Pipeline 改造与本地 Runtime Event、版本化 Working Memory、鲁棒性评测改造整合到同一条 `main` 历史后，首先执行全量 `mvn -q test`。合并回归暴露出几项接口契约遗漏：`locationIntent` 没有进入 `DecisionConstraints` 的强类型状态；挂起态经模型路由为 `EXPLAIN_SUSPENDED_DECISION` 后没有回到确定性解释分支；搜索微调没有稳定回流推荐链路；以及本轮归约后的净化 Query 未写入 `DecisionRequest`，会被决策服务拒绝为空查询。
+
+修复后，位置仲裁只读取本轮 `CriteriaMergeResult`，不会读取归约前的旧城市；显式目的地、当前设备位置和未指定位置通过 `locationIntent` 统一表达。搜索微调会携带旧候选商户排除列表，当前位置省略句在无候选池但存在决策上下文时也能确定性改写为新的餐饮搜索。`ChatOrchestrationServiceTest` 新增净化 Query 非空断言，覆盖该类跨层参数遗漏。
+
+真实多轮鲁棒性评测首次运行 #41 因上述空 Query 回归以 `COMPLETED_WITH_ERRORS` 结束，5 个场景均被记录为失败；该结果保留用于问题定位。修复后重新运行 #42（`conversation-robustness-v1`，DashScope `deepseek-v4-flash`、MySQL、Redis、Milvus、高德 MCP）：5/5 场景完整通过，路由、工具、地域、本地状态、最终状态和状态恢复均为 `5/5`，错误率 `0`；平均端到端耗时 `17560ms`，P50 `18986ms`，P95/P99 `19875ms`；模型调用 `1` 次且成功 `1` 次，输入/输出 token 分别为 `66/85`。本次运行作为分支整合后的验收基线。

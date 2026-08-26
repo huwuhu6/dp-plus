@@ -179,7 +179,7 @@ class ChatOrchestrationServiceTest {
         when(extractor.extract(anyString())).thenReturn(new DecisionConstraints());
         DecisionResponse next = new DecisionResponse();
         next.setSessionId(37L); next.setStatus("COMPLETED"); next.setAnswer("新的推荐");
-        when(decisionService.decide(any(DecisionRequest.class), any(DecisionConstraints.class))).thenReturn(next);
+        when(decisionService.decide(any(DecisionRequest.class), any(DecisionConstraints.class), any(), any())).thenReturn(next);
 
         ChatMessageRequest request = new ChatMessageRequest();
         request.setMessage("太贵了，换个便宜点的");
@@ -187,8 +187,9 @@ class ChatOrchestrationServiceTest {
 
         ArgumentCaptor<DecisionRequest> decisionRequest = ArgumentCaptor.forClass(DecisionRequest.class);
         ArgumentCaptor<DecisionConstraints> mergedConstraints = ArgumentCaptor.forClass(DecisionConstraints.class);
-        verify(decisionService).decide(decisionRequest.capture(), mergedConstraints.capture());
+        verify(decisionService).decide(decisionRequest.capture(), mergedConstraints.capture(), any(), any());
         assertEquals("START_DECISION", response.getRoute());
+        assertTrue(decisionRequest.getValue().getQuery() != null && !decisionRequest.getValue().getQuery().isBlank());
         assertEquals(Arrays.asList(9L, 10L), decisionRequest.getValue().getExcludeShopIds());
         assertEquals(119, mergedConstraints.getValue().getBudgetPerPerson());
     }
@@ -672,7 +673,7 @@ class ChatOrchestrationServiceTest {
         when(decisionService.getDecision(100L)).thenReturn(paused);
         DecisionResponse started = new DecisionResponse();
         started.setSessionId(101L); started.setStatus("CLARIFYING"); started.setAnswer("请提供当前位置");
-        when(decisionService.decide(any(), any())).thenReturn(started);
+        when(decisionService.decide(any(), any(), any(), any())).thenReturn(started);
 
         ChatMessageRequest request = new ChatMessageRequest();
         request.setMessage("我附近呢");
@@ -682,6 +683,6 @@ class ChatOrchestrationServiceTest {
         assertEquals("CLARIFYING", response.getDecisionStatus());
         assertEquals("CURRENT_DEVICE_LOCATION_CONTINUATION", response.getContextRewrite().getReason());
         verify(decisionService).continueDecision(org.mockito.Mockito.eq(100L), any());
-        verify(decisionService).decide(any(), any());
+        verify(decisionService).decide(any(), any(), any(), any());
     }
 }

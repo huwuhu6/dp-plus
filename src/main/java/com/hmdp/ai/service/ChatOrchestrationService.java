@@ -21,6 +21,16 @@ import com.hmdp.ai.dto.RewriteIntentType;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.runtime.ConversationEventStatus;
 import com.hmdp.ai.runtime.ConversationEventType;
+import com.hmdp.ai.service.pipeline.BootstrapNode;
+import com.hmdp.ai.service.pipeline.ChatPipeline;
+import com.hmdp.ai.service.pipeline.ChatPipelineNode;
+import com.hmdp.ai.service.pipeline.ChatPipelineOperations;
+import com.hmdp.ai.service.pipeline.ChatProcessingContext;
+import com.hmdp.ai.service.pipeline.ContextRewriteNode;
+import com.hmdp.ai.service.pipeline.CriteriaReductionNode;
+import com.hmdp.ai.service.pipeline.ExecutionNode;
+import com.hmdp.ai.service.pipeline.IntentRoutingNode;
+import com.hmdp.ai.service.pipeline.PolicyGuardNode;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -171,7 +181,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                     null, null, rewrite, null);
         }
         if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null
-                && (isNewRecommendationIntent(effectiveMessage) || isContinuationRefinement(effectiveMessage, state))) {
+                && (contextRewrite.getIntentType() == RewriteIntentType.SEARCH_REFINEMENT
+                || isNewRecommendationIntent(effectiveMessage) || isContinuationRefinement(effectiveMessage, state))) {
             DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
             cancel.setSelectedOptionId("END_DECISION");
             cancel.setMessage("被新的餐饮需求替代：" + effectiveMessage);
@@ -190,6 +201,11 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                     chatId, activeSessionId, compact(message));
             return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null, aiProperties.isConfigured(), contextRewrite);
         }
+        if (contextRewrite.getIntentType() == RewriteIntentType.SEARCH_REFINEMENT) {
+            log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} activeSessionId={} route=START_DECISION source=CONTEXT_REWRITE_REFINEMENT query={}",
+                    chatId, activeSessionId, compact(effectiveMessage));
+            return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null, aiProperties.isConfigured(), contextRewrite);
+        }
         String route = resolveContextualFollowUpRoute(chatId, effectiveMessage, state, activeSessionId, activeDecision,
                 contextRewrite);
         if (route == null) route = route(effectiveMessage, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
@@ -203,6 +219,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         response.setRoute(route);
         response.setUsedModel(aiProperties.isConfigured());
         response.setContextRewrite(contextRewrite);
+        if ("EXPLAIN_SUSPENDED_DECISION".equals(route) && isSuspendedDecision(activeDecision)) {
+            return explainSuspendedDecision(chatId, message, activeSessionId, activeDecision);
+        }
         if ("START_DECISION".equals(route)) {
             return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null, aiProperties.isConfigured(), contextRewrite);
         }
@@ -269,15 +288,17 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             decisionRequest.setQuery(effectiveMessage);
             DecisionResponse decision = decisionService.decide(decisionRequest);
             conversationStateService.activateDecision(state, decision.getSessionId());
-            return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, null, decision, null);
+            return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, decision, null);
         }
         List<Long> excludedCandidates = refinementExclusions(contextRewrite, memory);
+        decisionRequest.setExcludeShopIds(excludedCandidates);
         com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(memory.getActiveCriteria(),
                 constraintExtractor.extract(effectiveMessage), originalMessage, memory.getCandidatePool(), memory.getFocusedShopId());
+        decisionRequest.setQuery(cleanRetrievalQuery(effectiveMessage, mergeResult.getConstraints()));
         conversationStateService.reduceCriteria(state, mergeResult);
         conversationStateService.applyNamedSearchLocation(state, mergeResult.getConstraints());
         String explicitLocationScope = locationResolutionScope(mergeResult.getConstraints());
-        applyLocationSlot(decisionRequest, state);
+        applyLocationSlot(decisionRequest, state, mergeResult.getConstraints());
         log.info("[AI][chat] event=CRITERIA_MERGED chatId={} inherited={} replaced={} appended={} cleared={} invalidated={} query={}", chatId,
                 mergeResult.getInherited(), mergeResult.getReplaced(), mergeResult.getAppended(), mergeResult.getCleared(),
                 mergeResult.getInvalidated(), compact(effectiveMessage));
@@ -767,9 +788,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return response;
     }
 
-    private void applyLocationSlot(DecisionRequest request, AiChatSession state) {
+    private void applyLocationSlot(DecisionRequest request, AiChatSession state,
+                                   com.hmdp.ai.dto.DecisionConstraints criteria) {
         com.hmdp.ai.dto.ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
-        com.hmdp.ai.dto.DecisionConstraints criteria = memory.getActiveCriteria();
+        boolean mayUseDeviceLocation = criteria == null
+                || (!"EXPLICIT_TARGET".equalsIgnoreCase(criteria.getLocationIntent())
+                && !hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea()));
         if (criteria != null && hasText(criteria.getTargetCity())) {
             request.setCity(criteria.getTargetCity());
             // Keep an unresolved area as a semantic preference, not a strict SQL filter.

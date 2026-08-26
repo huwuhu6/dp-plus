@@ -32,6 +32,16 @@ public class ConversationContextRewriter {
     public ContextRewriteResult rewrite(String query, List<Map<String, Object>> history, AgentSessionContext context,
                                         boolean allowSearchContinuation) {
         if (query == null || query.trim().isEmpty()) return ContextRewriteResult.unchanged(query, "EMPTY_QUERY");
+        if (allowSearchContinuation && refersToCurrentDeviceLocation(query)) {
+            ContextRewriteResult result = new ContextRewriteResult();
+            result.setOriginalQuery(query);
+            result.setRewrittenQuery("在当前设备附近搜索餐饮商户");
+            result.setApplied(true);
+            result.setUsedModel(false);
+            result.setReason("CURRENT_DEVICE_LOCATION_CONTINUATION");
+            result.setIntentType(RewriteIntentType.SEARCH_REFINEMENT);
+            return result;
+        }
         if (!hasBusinessContext(context)) {
             return ContextRewriteResult.unchanged(query, "NO_WORKING_MEMORY");
         }

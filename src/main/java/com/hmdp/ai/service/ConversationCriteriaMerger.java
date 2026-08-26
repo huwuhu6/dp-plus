@@ -35,9 +35,15 @@ public class ConversationCriteriaMerger {
         if (isCurrentLocationIntent(text)) {
             clear(result, "targetCity", () -> merged.setTargetCity(""));
             clear(result, "targetArea", () -> merged.setTargetArea(""));
+            replace(result, "locationIntent", merged.getLocationIntent(), "CURRENT_DEVICE",
+                    () -> merged.setLocationIntent("CURRENT_DEVICE"));
         } else {
             if (hasText(delta.getTargetCity())) replace(result, "targetCity", merged.getTargetCity(), delta.getTargetCity(), () -> merged.setTargetCity(delta.getTargetCity()));
             if (hasText(delta.getTargetArea())) replace(result, "targetArea", merged.getTargetArea(), delta.getTargetArea(), () -> merged.setTargetArea(delta.getTargetArea()));
+            if (hasText(delta.getLocationIntent()) && !"UNSPECIFIED".equals(delta.getLocationIntent())) {
+                replace(result, "locationIntent", merged.getLocationIntent(), delta.getLocationIntent(),
+                        () -> merged.setLocationIntent(delta.getLocationIntent()));
+            }
         }
         if (hasText(delta.getKeyword())) replace(result, "keyword", merged.getKeyword(), delta.getKeyword(), () -> merged.setKeyword(delta.getKeyword()));
         if (hasText(delta.getCuisine())) replace(result, "cuisine", merged.getCuisine(), delta.getCuisine(), () -> merged.setCuisine(delta.getCuisine()));
@@ -139,7 +145,6 @@ public class ConversationCriteriaMerger {
         if (source == null) return target;
         target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword()); target.setLocationIntent(source.getLocationIntent());
         target.setCuisine(source.getCuisine()); target.setBudgetPerPerson(source.getBudgetPerPerson());
-        target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword());
         target.setRadiusKm(source.getRadiusKm()); target.setNearby(source.getNearby());
         target.setArrivalTime(source.getArrivalTime()); target.setOccasion(source.getOccasion());
         target.setQuiet(source.getQuiet()); target.setAvoidQueue(source.getAvoidQueue());

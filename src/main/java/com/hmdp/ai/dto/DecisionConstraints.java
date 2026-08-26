@@ -12,6 +12,8 @@ public class DecisionConstraints {
     /** User's explicit search destination. It is never a substitute for device location. */
     private String targetCity = "";
     private String targetArea = "";
+    /** Explicit destination, current device, or unspecified location intent. */
+    private String locationIntent = "UNSPECIFIED";
     /** Restaurant name or cuisine phrase after geographic slots have been consumed structurally. */
     private String keyword = "";
     private String cuisine = "";

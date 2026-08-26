@@ -107,6 +107,7 @@ public class ConstraintExtractor {
     private DecisionConstraints normalize(DecisionConstraints constraints) {
         if (constraints.getTargetCity() == null) constraints.setTargetCity("");
         if (constraints.getTargetArea() == null) constraints.setTargetArea("");
+        constraints.setLocationIntent(normalizeLocationIntent(constraints.getLocationIntent(), constraints));
         if (constraints.getKeyword() == null) constraints.setKeyword("");
         constraints.setCuisine(canonicalizeCuisine(constraints.getCuisine()));
         if (constraints.getBudgetPerPerson() == null) constraints.setBudgetPerPerson(-1);
@@ -166,6 +167,7 @@ public class ConstraintExtractor {
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("targetCity", property("string", "Explicit target city requested by the user, for example 重庆 or 福州. Empty string if absent."));
         properties.put("targetArea", property("string", "Explicit target district, business area, or landmark, for example 解放碑 or 鼓楼区. Empty string if absent."));
+        properties.put("locationIntent", property("string", "EXPLICIT_TARGET for a named destination, CURRENT_DEVICE for the user's current location, or UNSPECIFIED."));
         properties.put("keyword", property("string", "Restaurant name or core cuisine keyword. Do not include targetCity or targetArea."));
         properties.put("cuisine", property("string", "Cuisine, such as 日料. Empty string if unknown."));
         properties.put("budgetPerPerson", property("integer", "Maximum per-person budget. -1 if unknown."));
