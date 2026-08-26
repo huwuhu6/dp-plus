@@ -3,6 +3,8 @@ package com.hmdp.ai.service.pipeline;
 import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ChatStreamEventData;
+import com.hmdp.ai.dto.ContextRewriteResult;
+import com.hmdp.ai.dto.DecisionConstraints;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -57,5 +59,42 @@ class ChatPipelineTest {
         assertEquals("running", events.get(0).getStatus());
         assertEquals("success", events.get(1).getStatus());
         assertEquals("正在测试节点状态", events.get(0).getMessage());
+    }
+
+    @Test
+    void publishesNodeSpecificSuccessMetadata() {
+        List<ChatStreamEventData> events = new ArrayList<ChatStreamEventData>();
+        ChatPipelineOperations operations = new ChatPipelineOperations() {
+            @Override public void bootstrap(ChatProcessingContext context) { }
+            @Override public void rewrite(ChatProcessingContext context) {
+                ContextRewriteResult rewrite = new ContextRewriteResult();
+                rewrite.setRewrittenQuery("查询附近川菜");
+                context.setContextRewrite(rewrite);
+            }
+            @Override public void route(ChatProcessingContext context) {
+                context.setAction(ChatProcessingAction.START_DECISION);
+                context.setRoutingReason("new_recommendation_intent");
+            }
+            @Override public void reduceCriteria(ChatProcessingContext context) {
+                DecisionConstraints criteria = new DecisionConstraints();
+                criteria.setCuisine("川菜");
+                context.setMergedConstraints(criteria);
+            }
+            @Override public void applyPolicyGuard(ChatProcessingContext context) { }
+            @Override public void execute(ChatProcessingContext context) { }
+        };
+        ChatPipeline pipeline = new ChatPipeline(Arrays.asList(
+                new ContextRewriteNode(operations), new IntentRoutingNode(operations),
+                new CriteriaReductionNode(operations), new ExecutionNode(operations)));
+        ChatProcessingContext context = new ChatProcessingContext(new ChatMessageRequest(), null);
+        context.setEventConsumer(events::add);
+
+        pipeline.process(context);
+
+        assertEquals("查询附近川菜", events.get(1).getMetadata().get("rewrittenQuery"));
+        assertEquals(ChatProcessingAction.START_DECISION, events.get(3).getMetadata().get("action"));
+        assertEquals("new_recommendation_intent", events.get(3).getMetadata().get("reason"));
+        assertEquals("川菜", ((DecisionConstraints) events.get(5).getMetadata().get("criteria")).getCuisine());
+        assertEquals(ChatProcessingAction.START_DECISION, events.get(7).getMetadata().get("executionMode"));
     }
 }

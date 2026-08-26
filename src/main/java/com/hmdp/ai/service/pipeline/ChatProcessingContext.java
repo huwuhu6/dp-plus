@@ -39,6 +39,7 @@ public class ChatProcessingContext {
     private ContextRewriteResult contextRewrite;
     private ChatProcessingAction action = ChatProcessingAction.NONE;
     private String route;
+    private String routingReason;
     private boolean cancelActiveDecision;
     private boolean usedModel;
     private DecisionRequest decisionRequest;
@@ -49,6 +50,14 @@ public class ChatProcessingContext {
 
     public boolean isCompleted() {
         return response != null;
+    }
+
+    public String getRewrittenQuery() {
+        return contextRewrite == null ? null : contextRewrite.getRewrittenQuery();
+    }
+
+    public DecisionConstraints getSearchCriteria() {
+        return mergedConstraints;
     }
 
     public void publishEvent(String eventName, ChatStreamEventData data) {

@@ -155,9 +155,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         String message = context.getOriginalMessage();
         if (request.getSelectedOptionId() != null && isPausedDecision(activeDecision)) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT);
+            context.setRoutingReason("selected_option_for_paused_decision");
             return;
         }
         if (isLocationClarification(activeDecision) && isPotentialNamedLocation(message)) {
+            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.LOCATION_RESOLUTION);
+            context.setRoutingReason("named_location_for_clarification");
             ChatMessageResponse locationResponse = resolveNamedLocation(context.getChatId(), message,
                     context.getChatSession(), context.getActiveDecisionSessionId(), activeDecision);
             if (locationResponse != null) {
@@ -168,6 +171,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (isSuspendedDecision(activeDecision) && request.getSelectedOptionId() == null
                 && isSuspendedDecisionMetaQuestion(message)) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED);
+            context.setRoutingReason("suspended_decision_meta_question");
             return;
         }
         boolean replacesPausedDecision = isPausedDecision(activeDecision) && request.getSelectedOptionId() == null
@@ -177,12 +181,14 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (replacesPausedDecision) {
             cancelPausedDecision(context);
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
+            context.setRoutingReason("new_recommendation_replaces_paused_decision");
             context.setUsedModel(false);
             return;
         }
         if (isNewRecommendationIntent(message)
                 || context.getContextRewrite().getIntentType() == RewriteIntentType.SEARCH_REFINEMENT) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
+            context.setRoutingReason("new_recommendation_intent");
             context.setUsedModel(aiProperties.isConfigured());
             return;
         }
@@ -191,6 +197,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (route == null) route = route(context.getEffectiveMessage(), activeDecision == null ? "NONE" : activeDecision.getStatus(), context.getChatHistory());
         context.setRoute(route);
         context.setAction(toProcessingAction(route));
+        context.setRoutingReason("resolved_route:" + route);
         context.setUsedModel(aiProperties.isConfigured());
         if (conversationEventService != null) {
             conversationEventService.record(ConversationEventType.ROUTE_DECISION, ConversationEventStatus.SUCCESS,

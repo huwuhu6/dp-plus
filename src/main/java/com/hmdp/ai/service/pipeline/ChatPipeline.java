@@ -26,6 +26,7 @@ public class ChatPipeline {
         event.setStatus(stage);
         event.setMessage(node.statusMessage());
         event.getMetadata().put("node", node.getClass().getSimpleName());
+        if ("success".equals(stage)) node.enrichSuccessMetadata(context, event);
         context.publishEvent("node_status", event);
     }
 }
