@@ -22,6 +22,7 @@ public class AiProperties {
     private String holdoutDatasetVersion = "holdout-v1";
     private String conversationEvaluationDatasetVersion = "conversation-v1";
     private String conversationHoldoutDatasetVersion = "conversation-holdout-v1";
+    private String conversationRobustnessDatasetVersion = "conversation-robustness-v1";
 
     public boolean isConfigured() {
         return apiKey != null && !apiKey.trim().isEmpty();

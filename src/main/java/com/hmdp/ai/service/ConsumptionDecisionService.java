@@ -291,6 +291,9 @@ public class ConsumptionDecisionService {
 
     private boolean requiresLocation(DecisionRequest request) {
         if (request.getLatitude() != null && request.getLongitude() != null) return false;
+        // A user-selected city is a valid non-GPS search anchor.  Coordinates are
+        // required only for nearby/radius calculation, not for a city-wide search.
+        if (hasText(request.getCity())) return false;
         return !"DECLINED".equals(request.getLocationStatus());
     }
 

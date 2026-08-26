@@ -12,6 +12,7 @@ import com.hmdp.ai.dto.ConversationEvaluationRunResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunComparisonResponse;
 import com.hmdp.ai.dto.ConversationEvaluationDiagnosticsResponse;
 import com.hmdp.ai.dto.DecisionRecommendation;
+import com.hmdp.ai.dto.ConversationWorkingMemory;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
@@ -55,6 +56,7 @@ public class AiConversationEvaluationService {
     // Compatibility fallback for isolated tests and historical runs before V40.
     @Resource private AiAgentToolCallMapper toolCallMapper;
     @Resource private AiDecisionMetricMapper decisionMetricMapper;
+    @Resource private ConversationStateService conversationStateService;
     @Resource private ShopMapper shopMapper;
     @Resource private ObjectMapper objectMapper;
     @Resource private AiProperties aiProperties;
@@ -79,6 +81,10 @@ public class AiConversationEvaluationService {
 
     public ConversationEvaluationRunResponse submitHoldoutCases() {
         return submitCases(aiProperties.getConversationHoldoutDatasetVersion());
+    }
+
+    public ConversationEvaluationRunResponse submitRobustnessCases() {
+        return submitCases(aiProperties.getConversationRobustnessDatasetVersion());
     }
 
     private ConversationEvaluationRunResponse runCases(String datasetVersion) {
@@ -241,7 +247,9 @@ public class AiConversationEvaluationService {
         failureCounts.put("locality", (int) results.stream().filter(item -> !Boolean.TRUE.equals(item.getLocalityMatched())).count());
         failureCounts.put("finalStatus", (int) results.stream().filter(item -> !Boolean.TRUE.equals(item.getFinalStatusMatched())).count());
         failureCounts.put("shop", (int) results.stream().filter(item -> !Boolean.TRUE.equals(item.getShopMatched())).count());
-        failureCounts.put("execution", (int) results.stream().filter(item -> item.getErrorMessage() != null && !item.getErrorMessage().isEmpty()).count());
+        failureCounts.put("recovery", (int) results.stream().filter(item -> Boolean.FALSE.equals(item.getRecoveryMatched())).count());
+        failureCounts.put("workingMemory", (int) results.stream().filter(item -> Boolean.FALSE.equals(item.getMemoryMatched())).count());
+        failureCounts.put("execution", (int) results.stream().filter(this::unexpectedError).count());
         ConversationEvaluationDiagnosticsResponse response = new ConversationEvaluationDiagnosticsResponse();
         response.setRun(run);
         response.setFailureCounts(failureCounts);
@@ -267,14 +275,32 @@ public class AiConversationEvaluationService {
             List<ContextRewriteResult> contextRewrites = new ArrayList<>();
             List<List<DecisionRecommendation>> recommendationSnapshots = new ArrayList<>();
             String finalStatus = null;
+            int actualErrorCount = 0;
+            boolean afterError = false;
+            List<String> recoveryRoutes = new ArrayList<>();
             for (Map<String, Object> turn : turns) {
                 ChatMessageRequest request = new ChatMessageRequest();
                 request.setChatId(chatId);
                 request.setMessage(String.valueOf(turn.get("message")));
                 if (turn.get("selectedOptionId") != null) request.setSelectedOptionId(String.valueOf(turn.get("selectedOptionId")));
                 applyLocation(turn.get("location"), request);
-                ChatMessageResponse response = chatOrchestrationService.chat(request);
+                ChatMessageResponse response;
+                try {
+                    response = chatOrchestrationService.chat(request);
+                } catch (Exception turnError) {
+                    actualErrorCount++;
+                    afterError = true;
+                    routes.add("ERROR");
+                    contextRewrites.add(null);
+                    recommendationSnapshots.add(Collections.emptyList());
+                    Map<String, Object> output = new LinkedHashMap<>();
+                    output.put("route", "ERROR");
+                    output.put("error", compact(turnError.getMessage()));
+                    outputs.add(output);
+                    continue;
+                }
                 routes.add(response.getRoute());
+                if (afterError) recoveryRoutes.add(response.getRoute());
                 contextRewrites.add(response.getContextRewrite());
                 if (response.getDecisionSessionId() != null) decisionSessionIds.add(response.getDecisionSessionId());
                 if (response.getDecisionStatus() != null) finalStatus = response.getDecisionStatus();
@@ -301,6 +327,10 @@ public class AiConversationEvaluationService {
             result.setActualFinalStatus(finalStatus);
             result.setRecommendedShopIds(finalShopIds.stream().distinct().map(String::valueOf).collect(Collectors.joining(",")));
             result.setRouteMatched(expectedRoutes.equals(routes));
+            result.setActualErrorCount(actualErrorCount);
+            result.setRecoveryMatched(matchesRecovery(evaluationCase.getExpectedErrorCount(), actualErrorCount,
+                    evaluationCase.getExpectedRecoveryRoutesJson(), recoveryRoutes));
+            result.setMemoryMatched(matchesMemory(evaluationCase.getExpectedMemoryJson(), chatId));
             ContextRewriteCoverage rewriteCoverage = evaluateContextRewriteCoverage(
                     evaluationCase.getExpectedContextRewritesJson(), contextRewrites, recommendationSnapshots);
             result.setContextRewriteMatched(rewriteCoverage.matched);
@@ -328,6 +358,8 @@ public class AiConversationEvaluationService {
             result.setLocalityMatched(false);
             result.setFinalStatusMatched(false);
             result.setShopMatched(false);
+            result.setRecoveryMatched(false);
+            result.setMemoryMatched(false);
             result.setErrorMessage(compact(e.getMessage()));
         }
         result.setDurationMs(System.currentTimeMillis() - startedAt);
@@ -365,7 +397,14 @@ public class AiConversationEvaluationService {
                 || !Boolean.TRUE.equals(result.getLocalityMatched())
                 || !Boolean.TRUE.equals(result.getFinalStatusMatched())
                 || !Boolean.TRUE.equals(result.getShopMatched())
-                || (result.getErrorMessage() != null && !result.getErrorMessage().isEmpty());
+                || Boolean.FALSE.equals(result.getRecoveryMatched())
+                || Boolean.FALSE.equals(result.getMemoryMatched())
+                || unexpectedError(result);
+    }
+
+    private boolean unexpectedError(AiConversationEvaluationCaseResult result) {
+        return value(result.getActualErrorCount()) > 0
+                && !Boolean.TRUE.equals(result.getRecoveryMatched());
     }
 
     private ConversationEvaluationDiagnosticsResponse.CaseDiagnostic toDiagnostic(AiConversationEvaluationCaseResult result,
@@ -381,6 +420,9 @@ public class AiConversationEvaluationService {
             diagnostic.setExpectedToolArgumentsJson(evaluationCase.getExpectedToolArgumentsJson());
             diagnostic.setExpectedFinalStatus(evaluationCase.getExpectedFinalStatus());
             diagnostic.setExpectedCity(evaluationCase.getExpectedCity());
+            diagnostic.setExpectedErrorCount(evaluationCase.getExpectedErrorCount());
+            diagnostic.setExpectedRecoveryRoutesJson(evaluationCase.getExpectedRecoveryRoutesJson());
+            diagnostic.setExpectedMemoryJson(evaluationCase.getExpectedMemoryJson());
         }
         diagnostic.setActualRoutesJson(result.getActualRoutesJson());
         diagnostic.setActualContextRewritesJson(result.getActualContextRewritesJson());
@@ -395,6 +437,9 @@ public class AiConversationEvaluationService {
         diagnostic.setLocalityMatched(result.getLocalityMatched());
         diagnostic.setFinalStatusMatched(result.getFinalStatusMatched());
         diagnostic.setShopMatched(result.getShopMatched());
+        diagnostic.setActualErrorCount(result.getActualErrorCount());
+        diagnostic.setRecoveryMatched(result.getRecoveryMatched());
+        diagnostic.setMemoryMatched(result.getMemoryMatched());
         diagnostic.setDurationMs(result.getDurationMs());
         diagnostic.setErrorMessage(result.getErrorMessage());
         return diagnostic;
@@ -557,7 +602,7 @@ public class AiConversationEvaluationService {
     }
 
     private void finish(AiConversationEvaluationRun run, List<AiConversationEvaluationCaseResult> results) {
-        long failed = results.stream().filter(item -> item.getErrorMessage() != null).count();
+        long failed = results.stream().filter(this::hasFailure).count();
         run.setStatus(failed == 0 ? "COMPLETED" : "COMPLETED_WITH_ERRORS");
         run.setRouteMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getRouteMatched())).count());
         run.setContextRewriteExpectedCount(results.stream().map(AiConversationEvaluationCaseResult::getExpectedContextRewriteCount)
@@ -588,13 +633,63 @@ public class AiConversationEvaluationService {
     }
 
     private void populateModelMetrics(AiConversationEvaluationCaseResult result, Set<Long> sessionIds) {
-        if (sessionIds.isEmpty()) return;
+        result.setModelCallCount(0);
+        result.setModelSuccessCount(0);
+        result.setModelFailureCount(0);
+        result.setPromptTokenCount(0L);
+        result.setCompletionTokenCount(0L);
+        if (sessionIds.isEmpty() || decisionMetricMapper == null) return;
         List<AiDecisionMetric> metrics = decisionMetricMapper.selectList(new QueryWrapper<AiDecisionMetric>().in("session_id", sessionIds));
         result.setModelCallCount(metrics.stream().map(AiDecisionMetric::getModelCallCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
         result.setModelSuccessCount(metrics.stream().map(AiDecisionMetric::getModelSuccessCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
         result.setModelFailureCount(metrics.stream().map(AiDecisionMetric::getModelFailureCount).filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).sum());
         result.setPromptTokenCount(metrics.stream().map(AiDecisionMetric::getPromptTokenCount).filter(java.util.Objects::nonNull).mapToLong(Integer::longValue).sum());
         result.setCompletionTokenCount(metrics.stream().map(AiDecisionMetric::getCompletionTokenCount).filter(java.util.Objects::nonNull).mapToLong(Integer::longValue).sum());
+    }
+
+    private boolean matchesRecovery(Integer expectedErrorCount, int actualErrorCount,
+                                    String expectedRecoveryRoutesJson, List<String> actualRecoveryRoutes) throws Exception {
+        int expected = expectedErrorCount == null ? 0 : expectedErrorCount;
+        if (expected != actualErrorCount) return false;
+        if (expectedRecoveryRoutesJson == null || expectedRecoveryRoutesJson.trim().isEmpty()) return true;
+        List<String> expectedRoutes = objectMapper.readValue(expectedRecoveryRoutesJson, new TypeReference<List<String>>() { });
+        return expectedRoutes.equals(actualRecoveryRoutes);
+    }
+
+    private boolean matchesMemory(String expectedMemoryJson, String chatId) throws Exception {
+        if (expectedMemoryJson == null || expectedMemoryJson.trim().isEmpty()) return true;
+        if (conversationStateService == null) return false;
+        Map<String, Object> expected = objectMapper.readValue(expectedMemoryJson, new TypeReference<Map<String, Object>>() { });
+        ConversationWorkingMemory memory = conversationStateService.workingMemory(conversationStateService.getOrCreate(chatId));
+        String expectedSearchCity = stringValue(expected.get("searchCity"));
+        if (expectedSearchCity != null && (memory.getSearchLocation() == null
+                || !expectedSearchCity.equals(memory.getSearchLocation().getCity()))) return false;
+        String expectedPhase = stringValue(expected.get("dialogPhase"));
+        if (expectedPhase != null && !equalsExpected(expectedPhase, memory.getDialogPhase())) return false;
+        if (expected.containsKey("candidatePoolEmpty")) {
+            boolean expectedEmpty = Boolean.parseBoolean(String.valueOf(expected.get("candidatePoolEmpty")));
+            boolean actualEmpty = memory.getCandidatePool() == null || memory.getCandidatePool().isEmpty();
+            if (expectedEmpty != actualEmpty) return false;
+        }
+        if (expected.containsKey("focusedShopIdNull")) {
+            boolean expectedNull = Boolean.parseBoolean(String.valueOf(expected.get("focusedShopIdNull")));
+            if (expectedNull != (memory.getFocusedShopId() == null)) return false;
+        }
+        String expectedCuisine = stringValue(expected.get("cuisine"));
+        if (expectedCuisine != null && (memory.getActiveCriteria() == null
+                || !expectedCuisine.equals(memory.getActiveCriteria().getCuisine()))) return false;
+        if (expected.containsKey("budgetPerPerson")) {
+            Integer expectedBudget = integerValue(expected.get("budgetPerPerson"));
+            if (expectedBudget != null && (memory.getActiveCriteria() == null
+                    || !expectedBudget.equals(memory.getActiveCriteria().getBudgetPerPerson()))) return false;
+        }
+        if (expected.containsKey("hardConstraintsEmpty")) {
+            boolean expectedEmpty = Boolean.parseBoolean(String.valueOf(expected.get("hardConstraintsEmpty")));
+            boolean actualEmpty = memory.getActiveCriteria() == null || memory.getActiveCriteria().getHardConstraints() == null
+                    || memory.getActiveCriteria().getHardConstraints().isEmpty();
+            if (expectedEmpty != actualEmpty) return false;
+        }
+        return true;
     }
 
     private long percentile(List<Long> values, double quantile) {

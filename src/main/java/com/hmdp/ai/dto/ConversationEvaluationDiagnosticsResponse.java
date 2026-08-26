@@ -23,6 +23,9 @@ public class ConversationEvaluationDiagnosticsResponse {
         private String expectedToolArgumentsJson;
         private String expectedFinalStatus;
         private String expectedCity;
+        private Integer expectedErrorCount;
+        private String expectedRecoveryRoutesJson;
+        private String expectedMemoryJson;
         private String actualRoutesJson;
         private String actualContextRewritesJson;
         private String actualToolNamesJson;
@@ -36,6 +39,9 @@ public class ConversationEvaluationDiagnosticsResponse {
         private Boolean localityMatched;
         private Boolean finalStatusMatched;
         private Boolean shopMatched;
+        private Integer actualErrorCount;
+        private Boolean recoveryMatched;
+        private Boolean memoryMatched;
         private Long durationMs;
         private String errorMessage;
     }

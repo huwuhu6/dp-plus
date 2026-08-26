@@ -39,7 +39,7 @@ public class ConstraintExtractor {
 
     private DecisionConstraints extractByModel(String query) throws Exception {
         List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(message("system", "你是消费决策需求解析器。只能根据用户原话提取约束；未知值使用空字符串、-1 或 false，不得臆测。"));
+        messages.add(message("system", "你是餐饮消费决策需求解析器。只能根据用户原话提取约束；显式目标地点与设备当前位置必须分开：targetCity 是用户要求搜索的城市，targetArea 是用户要求搜索的行政区、商圈或地标，不能把它们放进 keyword。未知值使用空字符串、-1 或 false，不得臆测。"));
         messages.add(message("user", query));
 
         Map<String, Object> function = new LinkedHashMap<>();
@@ -95,6 +95,9 @@ public class ConstraintExtractor {
     }
 
     private DecisionConstraints normalize(DecisionConstraints constraints) {
+        if (constraints.getTargetCity() == null) constraints.setTargetCity("");
+        if (constraints.getTargetArea() == null) constraints.setTargetArea("");
+        if (constraints.getKeyword() == null) constraints.setKeyword("");
         constraints.setCuisine(canonicalizeCuisine(constraints.getCuisine()));
         if (constraints.getBudgetPerPerson() == null) constraints.setBudgetPerPerson(-1);
         if (constraints.getRadiusKm() == null) constraints.setRadiusKm(-1D);
@@ -106,6 +109,7 @@ public class ConstraintExtractor {
         if (constraints.getHardConstraints() == null) constraints.setHardConstraints(new ArrayList<String>());
         if (constraints.getSoftPreferences() == null) constraints.setSoftPreferences(new ArrayList<String>());
         if (constraints.getMissingInformation() == null) constraints.setMissingInformation(new ArrayList<String>());
+        if (constraints.getLockedConstraints() == null) constraints.setLockedConstraints(new java.util.HashSet<String>());
         return constraints;
     }
 
@@ -129,6 +133,9 @@ public class ConstraintExtractor {
 
     private Map<String, Object> constraintSchema() {
         Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("targetCity", property("string", "Explicit target city requested by the user, for example 重庆 or 福州. Empty string if absent."));
+        properties.put("targetArea", property("string", "Explicit target district, business area, or landmark, for example 解放碑 or 鼓楼区. Empty string if absent."));
+        properties.put("keyword", property("string", "Restaurant name or core cuisine keyword. Do not include targetCity or targetArea."));
         properties.put("cuisine", property("string", "Cuisine, such as 日料. Empty string if unknown."));
         properties.put("budgetPerPerson", property("integer", "Maximum per-person budget. -1 if unknown."));
         properties.put("radiusKm", property("number", "Search radius in kilometers. -1 if unknown."));

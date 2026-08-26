@@ -310,36 +310,28 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
-    void explicitPlaceSkipsPreviousBrowserLocationAndRequestsMapConfirmation() {
+    void explicitPlaceDoesNotReusePreviousBrowserLocation() {
         ChatOrchestrationService service = new ChatOrchestrationService();
         ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
         ChatMemoryService memoryService = mock(ChatMemoryService.class);
         ConversationStateService stateService = mock(ConversationStateService.class);
-        AmapMcpLocationResolutionService locationService = mock(AmapMcpLocationResolutionService.class);
         ReflectionTestUtils.setField(service, "aiClient", mock(OpenAiCompatibleClient.class));
         ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
         ReflectionTestUtils.setField(service, "decisionService", decisionService);
         ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
         ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
         ReflectionTestUtils.setField(service, "conversationStateService", stateService);
-        ReflectionTestUtils.setField(service, "locationResolutionService", locationService);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         when(memoryService.resolveChatId(any())).thenReturn("test-chat");
         when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
         AiChatSession state = new AiChatSession();
         state.setChatId("test-chat");
         when(stateService.getOrCreate("test-chat")).thenReturn(state);
-        when(locationService.isAvailable()).thenReturn(true);
         DecisionResponse decision = new DecisionResponse();
         decision.setSessionId(57L);
         decision.setStatus("CLARIFYING");
         decision.setOptions(new java.util.ArrayList<>());
         when(decisionService.decide(any())).thenReturn(decision);
-        ResolvedLocationCandidate candidate = new ResolvedLocationCandidate();
-        candidate.setLabel("重庆市");
-        candidate.setLatitude(29.563D);
-        candidate.setLongitude(106.551D);
-        when(locationService.resolve("重庆")).thenReturn(Arrays.asList(candidate));
 
         ChatMessageRequest request = new ChatMessageRequest();
         request.setMessage("帮我找重庆附近的火锅");
@@ -348,9 +340,8 @@ class ChatOrchestrationServiceTest {
         ArgumentCaptor<DecisionRequest> decisionRequest = ArgumentCaptor.forClass(DecisionRequest.class);
         verify(decisionService).decide(decisionRequest.capture());
         assertEquals(null, decisionRequest.getValue().getLatitude());
-        assertEquals("LOCATION_RESOLUTION", response.getRoute());
+        assertEquals("START_DECISION", response.getRoute());
         assertEquals(57L, response.getDecisionSessionId());
-        verify(locationService).resolve("重庆");
     }
 
     @Test
@@ -359,10 +350,15 @@ class ChatOrchestrationServiceTest {
         AmapMcpLocationResolutionService locationService = mock(AmapMcpLocationResolutionService.class);
         ReflectionTestUtils.setField(service, "locationResolutionService", locationService);
         when(locationService.isAvailable()).thenReturn(true);
+        com.hmdp.ai.dto.DecisionConstraints nearby = new com.hmdp.ai.dto.DecisionConstraints();
+        com.hmdp.ai.dto.DecisionConstraints namedCity = new com.hmdp.ai.dto.DecisionConstraints();
+        namedCity.setTargetCity("重庆");
+        com.hmdp.ai.dto.DecisionConstraints namedArea = new com.hmdp.ai.dto.DecisionConstraints();
+        namedArea.setTargetArea("解放碑");
 
-        assertNull(ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "帮我找附近的日料"));
-        assertNull(ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "推荐一家附近的日料店"));
-        assertEquals("重庆", ReflectionTestUtils.invokeMethod(service, "extractExplicitLocationScope", "帮我找重庆附近的火锅"));
+        assertNull(ReflectionTestUtils.invokeMethod(service, "locationResolutionScope", nearby));
+        assertNull(ReflectionTestUtils.invokeMethod(service, "locationResolutionScope", namedCity));
+        assertEquals("解放碑", ReflectionTestUtils.invokeMethod(service, "locationResolutionScope", namedArea));
         assertEquals(false, ReflectionTestUtils.invokeMethod(service, "isPotentialNamedLocation", "这家营业到几点"));
         assertEquals(true, ReflectionTestUtils.invokeMethod(service, "isPotentialNamedLocation", "福州鼓楼区"));
         assertEquals(true, ReflectionTestUtils.invokeMethod(service, "refersToCurrentDeviceLocation", "我刚飞到福州，按我现在位置重新推荐"));
@@ -378,27 +374,24 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
-    void explicitPlaceStillBlocksDeviceLocationWhenMapResolutionIsUnavailable() {
+    void explicitPlaceDoesNotDependOnMapAvailabilityWhenCityIsStructured() {
         ChatOrchestrationService service = new ChatOrchestrationService();
         OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
         ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
         ChatMemoryService memoryService = mock(ChatMemoryService.class);
         ConversationStateService stateService = mock(ConversationStateService.class);
-        AmapMcpLocationResolutionService locationService = mock(AmapMcpLocationResolutionService.class);
         ReflectionTestUtils.setField(service, "aiClient", aiClient);
         ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
         ReflectionTestUtils.setField(service, "decisionService", decisionService);
         ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
         ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
         ReflectionTestUtils.setField(service, "conversationStateService", stateService);
-        ReflectionTestUtils.setField(service, "locationResolutionService", locationService);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         when(memoryService.resolveChatId(any())).thenReturn("test-chat");
         when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
         AiChatSession state = new AiChatSession();
         state.setChatId("test-chat");
         when(stateService.getOrCreate("test-chat")).thenReturn(state);
-        when(locationService.isAvailable()).thenReturn(false);
         DecisionResponse decision = new DecisionResponse();
         decision.setSessionId(58L);
         decision.setStatus("CLARIFYING");
@@ -412,9 +405,7 @@ class ChatOrchestrationServiceTest {
         ArgumentCaptor<DecisionRequest> decisionRequest = ArgumentCaptor.forClass(DecisionRequest.class);
         verify(decisionService).decide(decisionRequest.capture());
         assertNull(decisionRequest.getValue().getLatitude());
-        assertEquals("LOCATION_RESOLUTION", response.getRoute());
-        assertTrue(response.getAnswer().contains("地图解析服务不可用"));
-        verify(locationService, never()).resolve(anyString());
+        assertEquals("START_DECISION", response.getRoute());
     }
 
     @Test

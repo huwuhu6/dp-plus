@@ -37,6 +37,9 @@ public class AiConversationEvaluationCaseResult {
     private Integer modelFailureCount;
     private Long promptTokenCount;
     private Long completionTokenCount;
+    private Integer actualErrorCount;
+    private Boolean recoveryMatched;
+    private Boolean memoryMatched;
     private String turnOutputsJson;
     private String errorMessage;
 }

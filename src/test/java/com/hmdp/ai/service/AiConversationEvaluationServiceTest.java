@@ -169,6 +169,46 @@ class AiConversationEvaluationServiceTest {
     }
 
     @Test
+    void continuesAfterExpectedTurnErrorAndAssertsRecoveryRoute() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
+        AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
+        AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
+        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
+        ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
+        ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "runMapper", runMapper);
+        ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
+        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+
+        AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
+        evaluationCase.setId(4L);
+        evaluationCase.setCaseCode("RECOVERY_AFTER_ERROR");
+        evaluationCase.setTurnsJson("[{\"message\":\"bad action\"},{\"message\":\"recover\"}]");
+        evaluationCase.setExpectedRoutesJson("[\"ERROR\",\"START_DECISION\"]");
+        evaluationCase.setExpectedErrorCount(1);
+        evaluationCase.setExpectedRecoveryRoutesJson("[\"START_DECISION\"]");
+        evaluationCase.setExpectedToolNamesJson("[]");
+        evaluationCase.setExpectedFinalStatus("COMPLETED");
+        when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
+        doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(15L); return 1; })
+                .when(runMapper).insert(any(AiConversationEvaluationRun.class));
+        when(chatService.chat(any())).thenThrow(new IllegalArgumentException("invalid option"))
+                .thenReturn(response("START_DECISION", "COMPLETED"));
+        when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+
+        ConversationEvaluationRunResponse response = service.runActiveCases();
+
+        assertEquals("COMPLETED", response.getRun().getStatus());
+        assertEquals(1, response.getCaseResults().get(0).getActualErrorCount());
+        assertEquals(true, response.getCaseResults().get(0).getRecoveryMatched());
+        assertEquals("[\"ERROR\",\"START_DECISION\"]", response.getCaseResults().get(0).getActualRoutesJson());
+    }
+
+    @Test
     void comparesConversationRunsOnlyWithinTheSameDataset() {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);

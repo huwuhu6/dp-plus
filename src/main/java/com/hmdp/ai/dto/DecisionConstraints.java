@@ -3,10 +3,17 @@ package com.hmdp.ai.dto;
 import lombok.Data;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Data
 public class DecisionConstraints {
+    /** User's explicit search destination. It is never a substitute for device location. */
+    private String targetCity = "";
+    private String targetArea = "";
+    /** Restaurant name or cuisine phrase after geographic slots have been consumed structurally. */
+    private String keyword = "";
     private String cuisine = "";
     private Integer budgetPerPerson = -1;
     private Double radiusKm = -1D;
@@ -18,4 +25,5 @@ public class DecisionConstraints {
     private List<String> hardConstraints = new ArrayList<>();
     private List<String> softPreferences = new ArrayList<>();
     private List<String> missingInformation = new ArrayList<>();
+    private Set<String> lockedConstraints = new HashSet<>();
 }

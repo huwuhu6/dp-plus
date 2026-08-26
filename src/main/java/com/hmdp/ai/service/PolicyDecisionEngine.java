@@ -30,6 +30,12 @@ public class PolicyDecisionEngine {
             decision.setBlocking(true);
             return decision;
         }
+        if (constraints != null && hasText(constraints.getTargetCity())) {
+            return PolicyDecision.of(EXECUTE_RECOMMENDATION, "已获得用户明确指定的目标城市");
+        }
+        if (memory != null && memory.getSearchLocation() != null && hasText(memory.getSearchLocation().getCity())) {
+            return PolicyDecision.of(EXECUTE_RECOMMENDATION, "复用用户明确指定的目标城市");
+        }
         if (hasCoordinates(request)) return PolicyDecision.of(EXECUTE_RECOMMENDATION, "已获得有效搜索地理锚点");
         if (memory != null && hasCoordinates(memory.getSearchLocation())) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION, "复用已确认的搜索目标位置");

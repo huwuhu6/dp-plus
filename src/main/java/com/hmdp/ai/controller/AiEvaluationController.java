@@ -52,6 +52,11 @@ public class AiEvaluationController {
         return Result.ok(conversationEvaluationService.submitHoldoutCases());
     }
 
+    @PostMapping("/conversation-runs/robustness")
+    public Result runConversationRobustnessCases() {
+        return Result.ok(conversationEvaluationService.submitRobustnessCases());
+    }
+
     @GetMapping("/conversation-runs/{runId}")
     public Result getConversationRun(@PathVariable Long runId) {
         return Result.ok(conversationEvaluationService.getRun(runId));

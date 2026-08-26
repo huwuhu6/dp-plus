@@ -20,6 +20,12 @@ public class AiConversationEvaluationCase {
     private String expectedFinalStatus;
     private String expectedShopIds;
     private String expectedCity;
+    /** Expected recoverable errors across the scripted turns. */
+    private Integer expectedErrorCount;
+    /** Routes observed after the first expected error; optional for non-recovery cases. */
+    private String expectedRecoveryRoutesJson;
+    /** Minimal final Working Memory assertions, never a serialized memory snapshot. */
+    private String expectedMemoryJson;
     private Boolean active;
     private String notes;
 }

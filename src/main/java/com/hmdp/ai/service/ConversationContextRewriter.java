@@ -22,7 +22,7 @@ public class ConversationContextRewriter {
 
     public ContextRewriteResult rewrite(String query, List<Map<String, Object>> history, AgentSessionContext context) {
         if (query == null || query.trim().isEmpty()) return ContextRewriteResult.unchanged(query, "EMPTY_QUERY");
-        if (context == null || context.getShownShops() == null || context.getShownShops().isEmpty()) {
+        if (!hasBusinessContext(context)) {
             return ContextRewriteResult.unchanged(query, "NO_WORKING_MEMORY");
         }
         if (!needsRewrite(query)) return ContextRewriteResult.unchanged(query, "SELF_CONTAINED");
@@ -55,7 +55,7 @@ public class ConversationContextRewriter {
     }
 
     private boolean needsRewrite(String query) {
-        String[] signals = {"第一家", "第二家", "第三家", "这家", "那家", "上一家", "刚才那家", "换个", "便宜点", "贵点", "走过去", "多远", "多久", "有包厢", "有优惠", "有券", "团购"};
+        String[] signals = {"第一家", "第二家", "第三家", "这家", "那家", "上一家", "刚才那家", "换个", "便宜点", "贵点", "走过去", "多远", "多久", "有包厢", "有优惠", "有券", "团购", "继续", "安静点", "附近呢"};
         for (String signal : signals) if (query.contains(signal)) return true;
         return false;
     }
@@ -66,7 +66,22 @@ public class ConversationContextRewriter {
             DecisionRecommendation item = context.getShownShops().get(index);
             candidates.add((index + 1) + ". " + item.getShopName() + "(id=" + item.getShopId() + ", 人均=" + item.getAvgPrice() + ")");
         }
-        return "当前聚焦=" + context.getFocusedShopName() + "(id=" + context.getFocusedShopId() + ");候选=" + candidates;
+        return "当前聚焦=" + context.getFocusedShopName() + "(id=" + context.getFocusedShopId() + ");活跃条件="
+                + context.getDecisionConstraints() + ";候选=" + candidates;
+    }
+
+    private boolean hasBusinessContext(AgentSessionContext context) {
+        if (context == null) return false;
+        if (context.getShownShops() != null && !context.getShownShops().isEmpty()) return true;
+        return context.getDecisionConstraints() != null
+                && (hasText(context.getDecisionConstraints().getCuisine())
+                || hasText(context.getDecisionConstraints().getTargetCity())
+                || hasText(context.getDecisionConstraints().getTargetArea())
+                || Boolean.TRUE.equals(context.getDecisionConstraints().getNearby()));
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private String compactHistory(List<Map<String, Object>> history) {

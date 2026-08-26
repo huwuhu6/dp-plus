@@ -292,6 +292,39 @@ public class ConversationStateService {
         state.setVersion(committed.getVersion()); state.setWorkingMemoryJson(committed.getMemoryJson());
         state.setActiveDecisionSessionId(memory.getActiveDecisionSessionId()); state.setLastDecisionSessionId(memory.getLastDecisionSessionId());
     }
+
+    /**
+     * A named destination is a search anchor, not browser GPS. Persist it independently
+     * so a later turn cannot accidentally reuse coordinates from a different city.
+     */
+    public void applyNamedSearchLocation(AiChatSession state, DecisionConstraints criteria) {
+        if (criteria == null || !hasText(criteria.getTargetCity())) return;
+        ConversationWorkingMemory memory = workingMemory(state);
+        ConversationLocationSlot target = memory.getSearchLocation();
+        boolean changed = !criteria.getTargetCity().equals(target.getCity())
+                || !sameText(criteria.getTargetArea(), target.getDistrict());
+        if (!changed && "RESOLVED_BY_NAME".equals(target.getStatus())
+                && target.getLatitude() == null && target.getLongitude() == null) {
+            return;
+        }
+        target.setStatus("RESOLVED_BY_NAME");
+        target.setCity(criteria.getTargetCity());
+        target.setDistrict(criteria.getTargetArea());
+        target.setProvince(null);
+        target.setLatitude(null);
+        target.setLongitude(null);
+        target.setSource("USER_EXPLICIT_DESTINATION");
+        target.setCapturedAt(LocalDateTime.now());
+        target.setExpiresAt(null);
+        if (changed) {
+            int previousCandidateCount = invalidateCandidatePool(memory);
+            log.info("[AI][state] event=CASCADE_INVALIDATED chatId={} reason=TARGET_CITY_CHANGED previousCandidates={}",
+                    state.getChatId(), previousCandidateCount);
+        }
+        updateWorkingMemory(state, memory);
+        log.info("[AI][state] event=SEARCH_LOCATION_NAMED chatId={} city={} area={}", state.getChatId(),
+                target.getCity(), target.getDistrict());
+    }
     private String writeLegacySlots(ConversationWorkingMemory memory) { ConversationSlots slots = new ConversationSlots(); slots.setLocation(memory.getLocation()); slots.setPendingLocationCandidates(memory.getPendingLocationCandidates()); try { return objectMapper.writeValueAsString(slots); } catch (Exception e) { throw new IllegalStateException("Conversation location slots cannot be saved", e); } }
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
     private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getSearchLocation() == null) memory.setSearchLocation(new ConversationLocationSlot()); if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (memory.getActiveCriteria() == null) memory.setActiveCriteria(new DecisionConstraints()); if (memory.getCandidatePool() == null) memory.setCandidatePool(new ArrayList<DecisionRecommendation>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
@@ -314,7 +347,7 @@ public class ConversationStateService {
     }
 
     private boolean isSearchDomainField(String field) {
-        return "cuisine".equals(field) || "budgetPerPerson".equals(field) || "radiusKm".equals(field)
+        return "targetCity".equals(field) || "targetArea".equals(field) || "cuisine".equals(field) || "budgetPerPerson".equals(field) || "radiusKm".equals(field)
                 || "nearby".equals(field) || "arrivalTime".equals(field) || "occasion".equals(field)
                 || "quiet".equals(field) || "avoidQueue".equals(field) || "hardConstraints".equals(field)
                 || "softPreferences".equals(field);
@@ -347,4 +380,5 @@ public class ConversationStateService {
     private void clearLocation(ConversationLocationSlot location, String status) { location.setStatus(status); location.setLatitude(null); location.setLongitude(null); location.setProvince(null); location.setCity(null); location.setDistrict(null); location.setAccuracyMeters(null); location.setExpiresAt(null); }
     private void ensureOwner(AiChatSession state) { if (state.getUserId() == null) return; if (UserHolder.getUser() == null || !state.getUserId().equals(UserHolder.getUser().getId())) throw new SecurityException("No permission to access this chat session"); }
     private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
+    private boolean sameText(String left, String right) { return java.util.Objects.equals(left == null ? "" : left, right == null ? "" : right); }
 }

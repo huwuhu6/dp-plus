@@ -19,6 +19,20 @@ public class ConversationCriteriaMerger {
         String text = query == null ? "" : query.replaceAll("\\s+", "");
 
         inherit(result, previous);
+        if (isDemandReplacement(text, previous, delta)) {
+            clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
+            clear(result, "hardConstraints", () -> merged.setHardConstraints(new ArrayList<String>()));
+            clear(result, "lockedConstraints", () -> merged.setLockedConstraints(new java.util.HashSet<String>()));
+            clear(result, "keyword", () -> merged.setKeyword(""));
+        }
+        if (isCurrentLocationIntent(text)) {
+            clear(result, "targetCity", () -> merged.setTargetCity(""));
+            clear(result, "targetArea", () -> merged.setTargetArea(""));
+        } else {
+            if (hasText(delta.getTargetCity())) replace(result, "targetCity", merged.getTargetCity(), delta.getTargetCity(), () -> merged.setTargetCity(delta.getTargetCity()));
+            if (hasText(delta.getTargetArea())) replace(result, "targetArea", merged.getTargetArea(), delta.getTargetArea(), () -> merged.setTargetArea(delta.getTargetArea()));
+        }
+        if (hasText(delta.getKeyword())) replace(result, "keyword", merged.getKeyword(), delta.getKeyword(), () -> merged.setKeyword(delta.getKeyword()));
         if (hasText(delta.getCuisine())) replace(result, "cuisine", merged.getCuisine(), delta.getCuisine(), () -> merged.setCuisine(delta.getCuisine()));
         if (delta.getBudgetPerPerson() != null && delta.getBudgetPerPerson() > 0) replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(delta.getBudgetPerPerson()), () -> merged.setBudgetPerPerson(delta.getBudgetPerPerson()));
         if (delta.getRadiusKm() != null && delta.getRadiusKm() > 0) replace(result, "radiusKm", String.valueOf(merged.getRadiusKm()), String.valueOf(delta.getRadiusKm()), () -> merged.setRadiusKm(delta.getRadiusKm()));
@@ -49,18 +63,21 @@ public class ConversationCriteriaMerger {
         DecisionConstraints target = new DecisionConstraints();
         if (source == null) return target;
         target.setCuisine(source.getCuisine()); target.setBudgetPerPerson(source.getBudgetPerPerson());
+        target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword());
         target.setRadiusKm(source.getRadiusKm()); target.setNearby(source.getNearby());
         target.setArrivalTime(source.getArrivalTime()); target.setOccasion(source.getOccasion());
         target.setQuiet(source.getQuiet()); target.setAvoidQueue(source.getAvoidQueue());
         target.setHardConstraints(new ArrayList<String>(source.getHardConstraints() == null ? new ArrayList<String>() : source.getHardConstraints()));
         target.setSoftPreferences(new ArrayList<String>(source.getSoftPreferences() == null ? new ArrayList<String>() : source.getSoftPreferences()));
         target.setMissingInformation(new ArrayList<String>(source.getMissingInformation() == null ? new ArrayList<String>() : source.getMissingInformation()));
+        target.setLockedConstraints(new java.util.HashSet<String>(source.getLockedConstraints() == null ? new java.util.HashSet<String>() : source.getLockedConstraints()));
         return target;
     }
 
     private void inherit(CriteriaMergeResult result, DecisionConstraints previous) {
         if (previous == null) return;
         if (hasText(previous.getCuisine())) result.getInherited().add("cuisine=" + previous.getCuisine());
+        if (hasText(previous.getTargetCity())) result.getInherited().add("targetCity=" + previous.getTargetCity());
         if (previous.getBudgetPerPerson() != null && previous.getBudgetPerPerson() > 0) result.getInherited().add("budgetPerPerson=" + previous.getBudgetPerPerson());
         if (previous.getRadiusKm() != null && previous.getRadiusKm() > 0) result.getInherited().add("radiusKm=" + previous.getRadiusKm());
         if (hasText(previous.getOccasion())) result.getInherited().add("occasion=" + previous.getOccasion());
@@ -95,5 +112,14 @@ public class ConversationCriteriaMerger {
 
     private List<String> unique(List<String> values) { return new ArrayList<String>(new LinkedHashSet<String>(values == null ? new ArrayList<String>() : values)); }
     private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
+    private boolean isCurrentLocationIntent(String text) { return containsAny(text, "我附近", "我这附近", "当前位置", "当前定位", "我这里", "我身边"); }
+    /** “改成/换成 + 新品类” replaces the old demand instead of silently retaining its hard filters. */
+    private boolean isDemandReplacement(String text, DecisionConstraints previous, DecisionConstraints delta) {
+        if (previous == null || delta == null) return false;
+        boolean cuisineChanged = hasText(delta.getCuisine()) && !delta.getCuisine().equals(previous.getCuisine());
+        boolean keywordChanged = hasText(delta.getKeyword()) && !delta.getKeyword().equals(previous.getKeyword());
+        if (!cuisineChanged && !keywordChanged) return false;
+        return containsAny(text, "改成", "换成", "不吃了改", "算了改");
+    }
     private boolean containsAny(String source, String... values) { for (String value : values) if (source.contains(value)) return true; return false; }
 }
