@@ -119,7 +119,7 @@ public class ConversationCriteriaMerger {
         boolean cuisineChanged = hasText(delta.getCuisine()) && !delta.getCuisine().equals(previous.getCuisine());
         boolean keywordChanged = hasText(delta.getKeyword()) && !delta.getKeyword().equals(previous.getKeyword());
         if (!cuisineChanged && !keywordChanged) return false;
-        return containsAny(text, "改成", "换成", "不吃了改", "算了改");
+        return containsAny(text, "算了", "不吃了", "重新来", "换个需求");
     }
     private boolean containsAny(String source, String... values) { for (String value : values) if (source.contains(value)) return true; return false; }
 }
