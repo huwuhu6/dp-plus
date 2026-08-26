@@ -74,11 +74,13 @@ public class AgentConversationService {
         try {
             AgentSessionContext context = workingMemoryContext;
             context.setTurnNo(context.getTurnNo() + 1);
-            ReferenceResolution reference = resolveShopReference(request.getMessage().trim(), context);
+            String userMessage = request.getMessage().trim();
+            List<BoundFactTask> compoundTasks = resolveCompoundFactTasks(userMessage, context);
+            ReferenceResolution reference = resolveShopReference(userMessage, context);
             if (reference.isAmbiguous()) {
                 log.info("[AI][agent] event=REFERENCE_AMBIGUOUS sessionId={} query={} candidates={}", sessionId,
-                        compact(request.getMessage().trim()), reference.candidateNames);
-                saveMessage(sessionId, "USER", "AGENT_FOLLOW_UP", request.getMessage().trim());
+                        compact(userMessage), reference.candidateNames);
+                saveMessage(sessionId, "USER", "AGENT_FOLLOW_UP", userMessage);
                 AgentConversationResponse response = ambiguousReferenceResponse(sessionId, context, reference.candidateNames);
                 saveMessage(sessionId, "ASSISTANT", "AGENT_REFERENCE_CLARIFY", response.getAnswer());
                 return response;
@@ -87,18 +89,19 @@ public class AgentConversationService {
                 context.setFocusedShopId(reference.shop.getShopId());
                 context.setFocusedShopName(reference.shop.getShopName());
                 log.info("[AI][agent] event=REFERENCE_RESOLVED sessionId={} query={} shopId={} shopName={}", sessionId,
-                        compact(request.getMessage().trim()), reference.shop.getShopId(), reference.shop.getShopName());
+                        compact(userMessage), reference.shop.getShopId(), reference.shop.getShopName());
             }
             log.info("[AI][agent] event=TURN_START sessionId={} turnNo={} query={} context={}", sessionId,
-                    context.getTurnNo(), compact(request.getMessage().trim()), compact(contextSummary(context)));
-            saveMessage(sessionId, "USER", "AGENT_FOLLOW_UP", request.getMessage().trim());
-            ToolPlanningResult planning = runToolLoop(sessionId, context, request.getMessage().trim(),
-                    reference.shop == null ? null : reference.shop.getShopId());
+                    context.getTurnNo(), compact(userMessage), compact(contextSummary(context)));
+            saveMessage(sessionId, "USER", "AGENT_FOLLOW_UP", userMessage);
+            ToolPlanningResult planning = compoundTasks.isEmpty()
+                    ? runToolLoop(sessionId, context, userMessage, reference.shop == null ? null : reference.shop.getShopId())
+                    : runBoundFactTasks(sessionId, context, compoundTasks);
             List<AgentToolResult> results = planning.results;
             boolean usedModel = planning.usedModel;
             if (results.isEmpty()) {
                 try {
-                    results.addAll(runFallbackTools(sessionId, context.getTurnNo(), request.getMessage().trim(), context,
+                    results.addAll(runFallbackTools(sessionId, context.getTurnNo(), userMessage, context,
                             reference.shop == null ? null : reference.shop.getShopId()));
                     if (results.isEmpty()) results.add(new AgentToolResult().summary("业务数据暂不可用")
                             .displayText("抱歉，这次查询没有完成。你可以稍后重试，或换一种问法。"));
@@ -111,7 +114,7 @@ public class AgentConversationService {
             for (AgentToolResult result : results) agentToolStateReducer.apply(context, result);
 
             AgentConversationResponse response = response(sessionId, context, results, usedModel);
-            response.setAnswer(polishAnswer(request.getMessage().trim(), response.getAnswer(), usedModel));
+            response.setAnswer(polishAnswer(userMessage, response.getAnswer(), usedModel));
             saveMessage(sessionId, "ASSISTANT", "AGENT_TOOL_ANSWER", response.getAnswer());
             return response;
         } catch (IllegalArgumentException e) {
@@ -151,7 +154,29 @@ public class AgentConversationService {
     public boolean hasCandidateReference(String message, AgentSessionContext context) {
         if (context == null || context.getShownShops() == null || context.getShownShops().isEmpty()) return false;
         ReferenceResolution reference = resolveShopReference(message == null ? "" : message.trim(), context);
-        return reference.shop != null || reference.isAmbiguous();
+        return reference.shop != null || reference.isAmbiguous()
+                || !resolveCompoundFactTasks(message == null ? "" : message.trim(), context).isEmpty();
+    }
+
+    /**
+     * A message such as "第一家有券，第二家评价如何" is not ambiguous: each fact has a
+     * concrete candidate binding. Keep these bindings outside the model so multiple tool calls
+     * cannot collapse onto the focused shop.
+     */
+    private ToolPlanningResult runBoundFactTasks(Long sessionId, AgentSessionContext context,
+                                                 List<BoundFactTask> tasks) {
+        List<AgentToolResult> results = new ArrayList<AgentToolResult>();
+        log.info("[AI][agent] event=COMPOUND_REFERENCE_RESOLVED sessionId={} turnNo={} tasks={}", sessionId,
+                context.getTurnNo(), tasks.stream().map(BoundFactTask::summary).toList());
+        for (BoundFactTask task : tasks) {
+            try {
+                results.add(executeTool(sessionId, context.getTurnNo(), task.toolName, task.arguments(), context, task.shop.getShopId()));
+            } catch (IllegalArgumentException e) {
+                log.warn("[AI][agent] event=COMPOUND_TOOL_FAILURE sessionId={} turnNo={} tool={} shopId={} errorType={}",
+                        sessionId, context.getTurnNo(), task.toolName, task.shop.getShopId(), e.getClass().getSimpleName());
+            }
+        }
+        return new ToolPlanningResult(results, false);
     }
 
     private ToolPlanningResult runToolLoop(Long sessionId, AgentSessionContext context, String userMessage, Long explicitlyReferencedShopId) {
@@ -392,6 +417,10 @@ public class AgentConversationService {
     }
 
     private ReferenceResolution resolveShopReference(String message, AgentSessionContext context) {
+        // Explicitly named/numbered multi-shop facts are actionable tasks, not an ambiguous reference.
+        if (!resolveCompoundFactTasks(message, context).isEmpty()) {
+            return new ReferenceResolution(null, new ArrayList<String>());
+        }
         DecisionRecommendation ordinalShop = resolveOrdinalReference(message, context);
         if (ordinalShop != null) return new ReferenceResolution(ordinalShop, new ArrayList<String>());
 
@@ -415,6 +444,58 @@ public class AgentConversationService {
             return new ReferenceResolution(focusedShop, new ArrayList<String>());
         }
         return new ReferenceResolution(null, names);
+    }
+
+    private List<BoundFactTask> resolveCompoundFactTasks(String message, AgentSessionContext context) {
+        List<ShopMention> mentions = explicitShopMentions(message, context);
+        if (mentions.size() < 2) return new ArrayList<BoundFactTask>();
+        List<BoundFactTask> tasks = new ArrayList<BoundFactTask>();
+        for (int index = 0; index < mentions.size(); index++) {
+            ShopMention mention = mentions.get(index);
+            int end = index + 1 < mentions.size() ? mentions.get(index + 1).position : message.length();
+            String clause = message.substring(mention.position, end);
+            if (containsVoucherSignal(clause)) tasks.add(new BoundFactTask("query_shop_vouchers", mention.shop));
+            if (containsEvidenceSignal(clause)) tasks.add(new BoundFactTask("search_shop_evidence", mention.shop));
+        }
+        return tasks;
+    }
+
+    private List<ShopMention> explicitShopMentions(String message, AgentSessionContext context) {
+        List<ShopMention> mentions = new ArrayList<ShopMention>();
+        if (message == null || context == null || context.getShownShops() == null) return mentions;
+        addOrdinalMention(mentions, message, "\u7b2c\u4e00\u5bb6", 0, context);
+        addOrdinalMention(mentions, message, "\u9996\u9009", 0, context);
+        addOrdinalMention(mentions, message, "\u7b2c\u4e8c\u5bb6", 1, context);
+        addOrdinalMention(mentions, message, "\u7b2c\u4e09\u5bb6", 2, context);
+        for (DecisionRecommendation shop : context.getShownShops()) {
+            if (shop.getShopName() == null || shop.getShopName().trim().isEmpty()) continue;
+            int position = message.indexOf(shop.getShopName());
+            if (position >= 0) mentions.add(new ShopMention(position, shop));
+        }
+        mentions.sort(java.util.Comparator.comparingInt(item -> item.position));
+        List<ShopMention> unique = new ArrayList<ShopMention>();
+        for (ShopMention mention : mentions) {
+            boolean duplicate = unique.stream().anyMatch(item -> item.position == mention.position
+                    || (item.shop.getShopId() != null && item.shop.getShopId().equals(mention.shop.getShopId())));
+            if (!duplicate) unique.add(mention);
+        }
+        return unique;
+    }
+
+    private void addOrdinalMention(List<ShopMention> mentions, String message, String token, int candidateIndex,
+                                   AgentSessionContext context) {
+        if (candidateIndex >= context.getShownShops().size()) return;
+        int position = message.indexOf(token);
+        if (position >= 0) mentions.add(new ShopMention(position, context.getShownShops().get(candidateIndex)));
+    }
+
+    private boolean containsVoucherSignal(String text) {
+        return text.contains("\u4f18\u60e0") || text.contains("\u4ee3\u91d1\u5238") || text.contains("\u56e2\u8d2d") || text.contains("\u5238");
+    }
+
+    private boolean containsEvidenceSignal(String text) {
+        return text.contains("\u8bc4\u4ef7") || text.contains("\u8bc4\u8bba") || text.contains("\u53e3\u7891")
+                || text.contains("\u6392\u961f") || text.contains("\u73af\u5883") || text.contains("\u670d\u52a1");
     }
 
     private List<String> shopNames(List<DecisionRecommendation> shops) {
@@ -537,6 +618,29 @@ public class AgentConversationService {
         }
 
         private boolean isAmbiguous() { return !candidateNames.isEmpty(); }
+    }
+
+    private static class ShopMention {
+        private final int position;
+        private final DecisionRecommendation shop;
+
+        private ShopMention(int position, DecisionRecommendation shop) {
+            this.position = position;
+            this.shop = shop;
+        }
+    }
+
+    private static class BoundFactTask {
+        private final String toolName;
+        private final DecisionRecommendation shop;
+
+        private BoundFactTask(String toolName, DecisionRecommendation shop) {
+            this.toolName = toolName;
+            this.shop = shop;
+        }
+
+        private String arguments() { return "{\"shopId\":" + shop.getShopId() + "}"; }
+        private String summary() { return toolName + "#" + shop.getShopId(); }
     }
 
     private Map<String, Object> message(String role, String content) {

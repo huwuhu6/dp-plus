@@ -20,12 +20,15 @@ class ConstraintExtractorTest {
         ConstraintExtractor extractor = new ConstraintExtractor();
         ReflectionTestUtils.setField(extractor, "aiClient", client);
         ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
-        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"cuisine\\\":\\\"港式茶餐厅\\\",\\\"budgetPerPerson\\\":100,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"occasion\\\":\\\"情侣约会\\\",\\\"quiet\\\":false,\\\"avoidQueue\\\":false,\\\"hardConstraints\\\":[],\\\"softPreferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"重庆\\\",\\\"targetArea\\\":\\\"解放碑\\\",\\\"keyword\\\":\\\"火锅\\\",\\\"cuisine\\\":\\\"港式茶餐厅\\\",\\\"budgetPerPerson\\\":100,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"occasion\\\":\\\"情侣约会\\\",\\\"quiet\\\":false,\\\"avoidQueue\\\":false,\\\"hardConstraints\\\":[],\\\"softPreferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
         when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
 
         DecisionConstraints constraints = extractor.extract("人均100的港式茶餐厅");
 
         assertEquals("港式", constraints.getCuisine());
+        assertEquals("重庆", constraints.getTargetCity());
+        assertEquals("解放碑", constraints.getTargetArea());
+        assertEquals("火锅", constraints.getKeyword());
         assertEquals(Integer.valueOf(100), constraints.getBudgetPerPerson());
         assertEquals("约会", constraints.getOccasion());
     }
@@ -44,5 +47,22 @@ class ConstraintExtractorTest {
         assertEquals("日料", constraints.getCuisine());
         assertEquals(0.1D, constraints.getRadiusKm());
         assertEquals(true, constraints.getNearby());
+    }
+
+    @Test
+    void currentDeviceIntentClearsConflictingTargetSlotsFromModel() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"locationIntent\\\":\\\"CURRENT_DEVICE\\\",\\\"targetCity\\\":\\\"北京\\\",\\\"targetArea\\\":\\\"朝阳区\\\",\\\"keyword\\\":\\\"烧烤\\\",\\\"cuisine\\\":\\\"烧烤\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":true,\\\"arrivalTime\\\":\\\"\\\",\\\"occasion\\\":\\\"\\\",\\\"quiet\\\":false,\\\"avoidQueue\\\":false,\\\"hardConstraints\\\":[],\\\"softPreferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("看看我附近的烧烤");
+
+        assertEquals("CURRENT_DEVICE", constraints.getLocationIntent());
+        assertEquals("", constraints.getTargetCity());
+        assertEquals("", constraints.getTargetArea());
     }
 }

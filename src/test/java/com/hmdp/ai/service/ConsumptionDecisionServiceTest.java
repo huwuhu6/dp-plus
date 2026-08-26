@@ -293,6 +293,47 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
+    void namedCityWithoutRelaxableConstraintsReturnsNoDataInsteadOfRelaxation() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetCity("重庆");
+        when(constraintExtractor.extract("重庆有什么好吃的")).thenReturn(constraints);
+        when(shopMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(profileMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("重庆有什么好吃的");
+        request.setCity("重庆");
+        request.setLocationStatus("RESOLVED_BY_NAME");
+        DecisionResponse response = service.decide(request);
+
+        assertEquals("ZERO_RESULT_NO_DATA", response.getStatus());
+        assertEquals("SWITCH_CITY", response.getOptions().get(0).getId());
+        assertEquals("END_DECISION", response.getOptions().get(1).getId());
+        assertTrue(response.getQuestion().contains("重庆目前暂无收录"));
+    }
+
+    @Test
+    void neverOffersOrAppliesBudgetIncreaseWhenRelativeCheaperBudgetIsLocked() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setBudgetPerPerson(64);
+        constraints.setRadiusKm(3D);
+        constraints.getLockedConstraints().add("budgetPerPerson");
+        when(shopMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(profileMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("\u66f4\u4fbf\u5b9c\u70b9");
+        request.setLatitude(26.08D);
+        request.setLongitude(119.30D);
+        request.setLocationStatus("AVAILABLE");
+        DecisionResponse paused = service.decide(request, constraints);
+
+        assertEquals("WAITING_RELAXATION", paused.getStatus());
+        assertTrue(paused.getOptions().stream().anyMatch(item -> "EXPAND_RADIUS".equals(item.getId())));
+        assertFalse(paused.getOptions().stream().anyMatch(item -> "INCREASE_BUDGET".equals(item.getId())));
+    }
+
+    @Test
     void relaxationResumesWithoutExtractingConstraintsAgain() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setCuisine("不存在菜系");

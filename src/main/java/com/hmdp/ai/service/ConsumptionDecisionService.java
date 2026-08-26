@@ -116,7 +116,8 @@ public class ConsumptionDecisionService {
         AiDecisionSession session = sessionMapper.selectById(sessionId);
         if (session == null) throw new IllegalArgumentException("决策记录不存在");
         ensureSessionOwner(session);
-        if (!"CLARIFYING".equals(session.getStatus()) && !"WAITING_RELAXATION".equals(session.getStatus())) {
+        if (!"CLARIFYING".equals(session.getStatus()) && !"WAITING_RELAXATION".equals(session.getStatus())
+                && !"ZERO_RESULT_NO_DATA".equals(session.getStatus())) {
             throw new IllegalArgumentException("当前决策不需要补充信息或放宽条件");
         }
         log.info("[AI][session={}] state={} action=FOLLOW_UP_RECEIVED selectedOptionId={} hasLatitude={} hasLongitude={} message={}",
@@ -150,13 +151,15 @@ public class ConsumptionDecisionService {
                     log.info("[AI][session={}] state=CLARIFYING action=LOCATION_ACCEPTED latitude={} longitude={}",
                             sessionId, request.getLatitude(), request.getLongitude());
                 }
-            } else {
+            } else if ("WAITING_RELAXATION".equals(pausedStatus)) {
                 if (followUp == null || followUp.getSelectedOptionId() == null) {
                     throw new IllegalArgumentException("请使用 selectedOptionId 选择一个放宽方案");
                 }
                 applyRelaxation(constraints, followUp.getSelectedOptionId());
                 log.info("[AI][session={}] state=WAITING_RELAXATION action=RELAXATION_SELECTED option={}",
                         sessionId, followUp.getSelectedOptionId());
+            } else {
+                throw new IllegalArgumentException("当前目标城市暂无入库商户，请切换城市后重新发起搜索");
             }
             session.setRequestContextJson(objectMapper.writeValueAsString(request));
             session.setPendingType(null);
@@ -260,6 +263,9 @@ public class ConsumptionDecisionService {
             recordCompletedStep(response, session.getId(), "RETRIEVING", "从结构化数据和证据中召回候选", metrics.getRetrievingDurationMs());
             recordCompletedStep(response, session.getId(), "RERANKING", "在 " + candidates.size() + " 家候选中完成确定性重排", metrics.getRerankingDurationMs());
             if (candidates.isEmpty()) {
+                if (hasAdministrativeScope(request) && !hasRelaxableConstraints(constraints)) {
+                    return pauseForNoData(session, request, response, metrics, start);
+                }
                 return pauseForRelaxation(session, response, metrics, start);
             }
 
@@ -393,13 +399,17 @@ public class ConsumptionDecisionService {
         DecisionConstraints constraints = response.getConstraints();
         response.setStatus("WAITING_RELAXATION");
         boolean autoRetried = response.getRelaxation() != null && Boolean.TRUE.equals(response.getRelaxation().getAutomatic());
-        response.setQuestion(autoRetried
+        boolean lockedBudget = isLocked(constraints, "budgetPerPerson");
+        response.setQuestion(lockedBudget
+                ? "当前搜索范围内暂无人均低于 " + constraints.getBudgetPerPerson()
+                + " 元的商户。已保留你的“更便宜”要求，不会提高预算；你可以扩大搜索范围或结束本次推荐。"
+                : autoRetried
                 ? "默认附近范围已在保留地点、菜系、预算等硬条件下自动扩大一次，仍未找到匹配商户。请明确选择一项条件放宽后继续，或结束本次推荐。"
                 : "当前条件下没有找到匹配的餐饮商户。你可以选择明确放宽一项条件继续，或结束本次推荐；系统不会自动修改你的限制。");
         if (constraints.getRadiusKm() > 0) {
             response.getOptions().add(new DecisionOption("EXPAND_RADIUS", "扩大搜索距离到 " + round(constraints.getRadiusKm() + 2D) + " km"));
         }
-        if (constraints.getBudgetPerPerson() > 0) {
+        if (constraints.getBudgetPerPerson() > 0 && !isLocked(constraints, "budgetPerPerson")) {
             response.getOptions().add(new DecisionOption("INCREASE_BUDGET", "将人均预算上限提高到 "
                     + (constraints.getBudgetPerPerson() + 50) + " 元"));
         }
@@ -415,9 +425,34 @@ public class ConsumptionDecisionService {
         if (requiresLightTasteEvidence(constraints)) {
             response.getOptions().add(new DecisionOption("RELAX_LIGHT_TASTE", "保留其他条件，不再强制清淡口味"));
         }
+        if (constraints.getHardConstraints() != null && !constraints.getHardConstraints().isEmpty()) {
+            response.getOptions().add(new DecisionOption("RELAX_HARD_CONSTRAINTS", "保留地点和核心需求，移除额外硬性限制"));
+        }
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
         recordStep(response, session.getId(), "WAITING_RELAXATION", "候选为空，等待用户明确选择放宽项", startedAt);
         return finishPausedDecision(session, response, metrics, "WAITING_RELAXATION", "RELAXATION", startedAt);
+    }
+
+    /** A named city without user-relaxable filters is a data-coverage outcome, not a relaxation task. */
+    private DecisionResponse pauseForNoData(AiDecisionSession session, DecisionRequest request, DecisionResponse response,
+                                            DecisionMetrics metrics, long startedAt) throws Exception {
+        String scope = hasText(request.getDistrict()) ? request.getDistrict()
+                : (hasText(request.getCity()) ? request.getCity() : request.getProvince());
+        response.setStatus("ZERO_RESULT_NO_DATA");
+        response.setQuestion(scope + "目前暂无收录餐饮商户。你可以尝试切换其他城市或周边区域后再搜索。");
+        response.getOptions().add(new DecisionOption("SWITCH_CITY", "切换城市重新搜索"));
+        response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
+        recordStep(response, session.getId(), "ZERO_RESULT_NO_DATA", "指定地理范围内暂无入库商户，不提供虚假的放宽选项", startedAt);
+        log.info("[AI][session={}] state=ZERO_RESULT_NO_DATA action=NO_DATA_SCOPE scope={} relaxable=false",
+                session.getId(), scope);
+        return finishPausedDecision(session, response, metrics, "ZERO_RESULT_NO_DATA", "NO_DATA", startedAt);
+    }
+
+    private boolean hasRelaxableConstraints(DecisionConstraints constraints) {
+        return (constraints.getBudgetPerPerson() > 0 && !isLocked(constraints, "budgetPerPerson")) || constraints.getRadiusKm() > 0
+                || hasText(constraints.getCuisine()) || Boolean.TRUE.equals(constraints.getQuiet())
+                || Boolean.TRUE.equals(constraints.getAvoidQueue()) || requiresLightTasteEvidence(constraints)
+                || (constraints.getHardConstraints() != null && !constraints.getHardConstraints().isEmpty());
     }
 
     private DecisionResponse finishPausedDecision(AiDecisionSession session, DecisionResponse response,
@@ -441,7 +476,8 @@ public class ConsumptionDecisionService {
     private void applyRelaxation(DecisionConstraints constraints, String optionId) {
         if ("EXPAND_RADIUS".equals(optionId) && constraints.getRadiusKm() > 0) {
             constraints.setRadiusKm(round(constraints.getRadiusKm() + 2D));
-        } else if ("INCREASE_BUDGET".equals(optionId) && constraints.getBudgetPerPerson() > 0) {
+        } else if ("INCREASE_BUDGET".equals(optionId) && constraints.getBudgetPerPerson() > 0
+                && !isLocked(constraints, "budgetPerPerson")) {
             log.info("[AI][decision] action=BUDGET_RELAXATION previousBudget={} nextBudget={}",
                     constraints.getBudgetPerPerson(), constraints.getBudgetPerPerson() + 50);
             constraints.setBudgetPerPerson(constraints.getBudgetPerPerson() + 50);
@@ -453,9 +489,16 @@ public class ConsumptionDecisionService {
             constraints.setAvoidQueue(false);
         } else if ("RELAX_LIGHT_TASTE".equals(optionId) && requiresLightTasteEvidence(constraints)) {
             constraints.getSoftPreferences().remove("口味清淡");
+        } else if ("RELAX_HARD_CONSTRAINTS".equals(optionId)
+                && constraints.getHardConstraints() != null && !constraints.getHardConstraints().isEmpty()) {
+            constraints.setHardConstraints(new ArrayList<>());
         } else {
             throw new IllegalArgumentException("selectedOptionId 无效或不适用于当前约束");
         }
+    }
+
+    private boolean isLocked(DecisionConstraints constraints, String field) {
+        return constraints.getLockedConstraints() != null && constraints.getLockedConstraints().contains(field);
     }
 
     private boolean isEndRequest(DecisionFollowUpRequest followUp) {
@@ -569,6 +612,9 @@ public class ConsumptionDecisionService {
         if (hasText(request.getProvince())) shopQuery.eq("province", request.getProvince());
         if (hasText(request.getCity())) shopQuery.eq("city", request.getCity());
         if (hasText(request.getDistrict())) shopQuery.eq("district", request.getDistrict());
+        if (request.getExcludeShopIds() != null && !request.getExcludeShopIds().isEmpty()) {
+            shopQuery.notIn("id", request.getExcludeShopIds());
+        }
         List<Shop> shops = shopMapper.selectList(shopQuery);
         if (hasAdministrativeScope(request)) {
             log.info("[AI][session={}] state=RETRIEVING action=ADMIN_SCOPE_FILTER province={} city={} district={} candidates={}",
@@ -599,7 +645,10 @@ public class ConsumptionDecisionService {
 
         SemanticRecallResult semanticResult = SemanticRecallResult.unavailable();
         if (semanticShopRetriever != null) {
-            semanticResult = semanticShopRetriever.recall(request.getQuery(), hardMatched, profileByShopId, reviewsByShopId);
+            String semanticQuery = semanticRetrievalQuery(request, constraints);
+            log.info("[AI][session={}] state=SEMANTIC_RETRIEVING action=GEO_TOKENS_PRUNED originalQuery={} semanticQuery={}",
+                    response.getSessionId(), compact(request.getQuery()), compact(semanticQuery));
+            semanticResult = semanticShopRetriever.recall(semanticQuery, hardMatched, profileByShopId, reviewsByShopId);
             metrics.setSemanticRetrievalUsed(semanticResult.isAvailable());
             metrics.setSemanticRetrievingDurationMs(semanticResult.getDurationMs());
         }
@@ -662,6 +711,23 @@ public class ConsumptionDecisionService {
 
     private boolean hasAdministrativeScope(DecisionRequest request) {
         return hasText(request.getProvince()) || hasText(request.getCity()) || hasText(request.getDistrict());
+    }
+
+    /** Geography is consumed by SQL filters and must not become a cuisine-style semantic signal. */
+    private String semanticRetrievalQuery(DecisionRequest request, DecisionConstraints constraints) {
+        String query = request.getQuery() == null ? "" : request.getQuery();
+        query = removeToken(query, request.getProvince());
+        query = removeToken(query, request.getCity());
+        query = removeToken(query, request.getDistrict());
+        query = removeToken(query, constraints == null ? null : constraints.getTargetCity());
+        query = removeToken(query, constraints == null ? null : constraints.getTargetArea());
+        query = query.replaceAll("\\s+", " ").trim();
+        if (hasText(query)) return query;
+        return constraints != null && hasText(constraints.getKeyword()) ? constraints.getKeyword() : request.getQuery();
+    }
+
+    private String removeToken(String source, String token) {
+        return hasText(token) ? source.replace(token, " ") : source;
     }
 
     private boolean matchesCuisine(String profileCuisine, String requestedCuisine) {

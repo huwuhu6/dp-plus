@@ -70,7 +70,8 @@ public class ToolExecutionOrchestrator {
         try {
             BaseAgentTool tool = toolRegistry.find(request.getToolName());
             Map<String, Object> input = objectMapper.readValue(blankToObject(request.getArguments()), new TypeReference<Map<String, Object>>() { });
-            if (request.getExplicitlyReferencedShopId() != null && isSingleShopTool(request.getToolName())) {
+            if (request.getExplicitlyReferencedShopId() != null && isSingleShopTool(request.getToolName())
+                    && !hasValidShopId(input.get("shopId"))) {
                 input.put("shopId", request.getExplicitlyReferencedShopId());
             }
             enrichWithDeterministicContext(input, request.getToolName(), context);
@@ -104,6 +105,13 @@ public class ToolExecutionOrchestrator {
     private boolean isSingleShopTool(String toolName) {
         return "get_shop_detail".equals(toolName) || "query_shop_vouchers".equals(toolName)
                 || "search_shop_evidence".equals(toolName);
+    }
+
+    private boolean hasValidShopId(Object value) {
+        if (value == null) return false;
+        if (value instanceof Number) return ((Number) value).longValue() > 0L;
+        try { return Long.parseLong(String.valueOf(value).trim()) > 0L; }
+        catch (NumberFormatException e) { return false; }
     }
 
     /** Materializes all state required by tools into a per-request input snapshot. */

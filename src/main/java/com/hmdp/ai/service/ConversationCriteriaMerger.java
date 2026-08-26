@@ -1,6 +1,7 @@
 package com.hmdp.ai.service;
 
 import com.hmdp.ai.dto.CriteriaMergeResult;
+import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionConstraints;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +14,12 @@ import java.util.List;
 public class ConversationCriteriaMerger {
 
     public CriteriaMergeResult merge(DecisionConstraints previous, DecisionConstraints delta, String query) {
+        return merge(previous, delta, query, new ArrayList<DecisionRecommendation>(), null);
+    }
+
+    /** Reduces an explicit delta using the previous recommendation only for relative constraints. */
+    public CriteriaMergeResult merge(DecisionConstraints previous, DecisionConstraints delta, String query,
+                                     List<DecisionRecommendation> candidatePool, Long focusedShopId) {
         DecisionConstraints merged = copy(previous);
         CriteriaMergeResult result = new CriteriaMergeResult();
         result.setConstraints(merged);
@@ -34,7 +41,11 @@ public class ConversationCriteriaMerger {
         }
         if (hasText(delta.getKeyword())) replace(result, "keyword", merged.getKeyword(), delta.getKeyword(), () -> merged.setKeyword(delta.getKeyword()));
         if (hasText(delta.getCuisine())) replace(result, "cuisine", merged.getCuisine(), delta.getCuisine(), () -> merged.setCuisine(delta.getCuisine()));
-        if (delta.getBudgetPerPerson() != null && delta.getBudgetPerPerson() > 0) replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(delta.getBudgetPerPerson()), () -> merged.setBudgetPerPerson(delta.getBudgetPerPerson()));
+        if (delta.getBudgetPerPerson() != null && delta.getBudgetPerPerson() > 0) {
+            replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(delta.getBudgetPerPerson()),
+                    () -> merged.setBudgetPerPerson(delta.getBudgetPerPerson()));
+            unlockBudgetWhenExplicitlyOverridden(result, merged);
+        }
         if (delta.getRadiusKm() != null && delta.getRadiusKm() > 0) replace(result, "radiusKm", String.valueOf(merged.getRadiusKm()), String.valueOf(delta.getRadiusKm()), () -> merged.setRadiusKm(delta.getRadiusKm()));
         if (hasText(delta.getArrivalTime())) replace(result, "arrivalTime", merged.getArrivalTime(), delta.getArrivalTime(), () -> merged.setArrivalTime(delta.getArrivalTime()));
         if (hasText(delta.getOccasion())) replace(result, "occasion", merged.getOccasion(), delta.getOccasion(), () -> merged.setOccasion(delta.getOccasion()));
@@ -45,7 +56,10 @@ public class ConversationCriteriaMerger {
         append(result, "softPreferences", merged.getSoftPreferences(), delta.getSoftPreferences());
 
         if (containsAny(text, "不限菜系", "什么都行", "随便吃", "不限制菜系")) clear(result, "cuisine", () -> merged.setCuisine(""));
-        if (containsAny(text, "预算不限", "不限制预算", "人均不限")) clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
+        if (containsAny(text, "预算不限", "不限制预算", "人均不限")) {
+            clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
+            unlockBudgetWhenExplicitlyOverridden(result, merged);
+        }
         if (containsAny(text, "不限距离", "不考虑距离", "全城都行")) {
             clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
             clear(result, "nearby", () -> merged.setNearby(false));
@@ -53,15 +67,77 @@ public class ConversationCriteriaMerger {
         if (containsAny(text, "不要安静", "不用安静")) clear(result, "quiet", () -> merged.setQuiet(false));
         if (containsAny(text, "排队也行", "不用避开排队")) clear(result, "avoidQueue", () -> merged.setAvoidQueue(false));
         if (containsAny(text, "不要辣", "不吃辣", "清淡", "少油")) addPreference(merged, "清淡/不辣");
+        applyRelativeConstraints(result, merged, text, candidatePool, focusedShopId);
 
         merged.setHardConstraints(unique(merged.getHardConstraints()));
         merged.setSoftPreferences(unique(merged.getSoftPreferences()));
         return result;
     }
 
+    private void applyRelativeConstraints(CriteriaMergeResult result, DecisionConstraints merged, String text,
+                                          List<DecisionRecommendation> candidatePool, Long focusedShopId) {
+        if (containsAny(text, "太贵", "便宜点", "更便宜")) {
+            Long anchorPrice = relativePriceAnchor(candidatePool, focusedShopId);
+            if (anchorPrice != null && anchorPrice > 1L) {
+                int budget = Math.toIntExact(anchorPrice - 1L);
+                replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(budget),
+                        () -> merged.setBudgetPerPerson(budget));
+                if (merged.getLockedConstraints() == null) merged.setLockedConstraints(new java.util.HashSet<String>());
+                if (merged.getLockedConstraints().add("budgetPerPerson")) {
+                    result.getAppended().add("lockedConstraints:budgetPerPerson");
+                }
+                result.getAppended().add("relativeBudget:anchorPrice=" + anchorPrice + "->budgetPerPerson=" + budget);
+            }
+        }
+        if (containsAny(text, "更近", "近一点", "近点", "附近一点")) {
+            Double anchorDistance = relativeDistanceAnchor(candidatePool, focusedShopId);
+            if (anchorDistance != null && anchorDistance > 0.5D) {
+                double radius = Math.max(0.5D, Math.round(anchorDistance * 0.9D * 10D) / 10D);
+                replace(result, "radiusKm", String.valueOf(merged.getRadiusKm()), String.valueOf(radius),
+                        () -> merged.setRadiusKm(radius));
+                result.getAppended().add("relativeDistance:anchorKm=" + anchorDistance + "->radiusKm=" + radius);
+            }
+        }
+    }
+
+    private Long relativePriceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId) {
+        if (candidates == null || candidates.isEmpty()) return null;
+        if (focusedShopId != null) {
+            for (DecisionRecommendation candidate : candidates) {
+                if (focusedShopId.equals(candidate.getShopId()) && candidate.getAvgPrice() != null) {
+                    return candidate.getAvgPrice();
+                }
+            }
+        }
+        Long minimum = null;
+        for (DecisionRecommendation candidate : candidates) {
+            if (candidate.getAvgPrice() == null || candidate.getAvgPrice() <= 0L) continue;
+            if (minimum == null || candidate.getAvgPrice() < minimum) minimum = candidate.getAvgPrice();
+        }
+        return minimum;
+    }
+
+    private Double relativeDistanceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId) {
+        if (candidates == null || candidates.isEmpty()) return null;
+        if (focusedShopId != null) {
+            for (DecisionRecommendation candidate : candidates) {
+                if (focusedShopId.equals(candidate.getShopId()) && candidate.getDistanceKm() != null) {
+                    return candidate.getDistanceKm();
+                }
+            }
+        }
+        Double minimum = null;
+        for (DecisionRecommendation candidate : candidates) {
+            if (candidate.getDistanceKm() == null || candidate.getDistanceKm() <= 0D) continue;
+            if (minimum == null || candidate.getDistanceKm() < minimum) minimum = candidate.getDistanceKm();
+        }
+        return minimum;
+    }
+
     private DecisionConstraints copy(DecisionConstraints source) {
         DecisionConstraints target = new DecisionConstraints();
         if (source == null) return target;
+        target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword()); target.setLocationIntent(source.getLocationIntent());
         target.setCuisine(source.getCuisine()); target.setBudgetPerPerson(source.getBudgetPerPerson());
         target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword());
         target.setRadiusKm(source.getRadiusKm()); target.setNearby(source.getNearby());
@@ -76,6 +152,10 @@ public class ConversationCriteriaMerger {
 
     private void inherit(CriteriaMergeResult result, DecisionConstraints previous) {
         if (previous == null) return;
+        if (hasText(previous.getTargetCity())) result.getInherited().add("targetCity=" + previous.getTargetCity());
+        if (hasText(previous.getTargetArea())) result.getInherited().add("targetArea=" + previous.getTargetArea());
+        if (hasText(previous.getLocationIntent())) result.getInherited().add("locationIntent=" + previous.getLocationIntent());
+        if (hasText(previous.getKeyword())) result.getInherited().add("keyword=" + previous.getKeyword());
         if (hasText(previous.getCuisine())) result.getInherited().add("cuisine=" + previous.getCuisine());
         if (hasText(previous.getTargetCity())) result.getInherited().add("targetCity=" + previous.getTargetCity());
         if (previous.getBudgetPerPerson() != null && previous.getBudgetPerPerson() > 0) result.getInherited().add("budgetPerPerson=" + previous.getBudgetPerPerson());
@@ -93,6 +173,11 @@ public class ConversationCriteriaMerger {
         if (!result.getCleared().contains(field)) result.getCleared().add(field);
     }
 
+    private void clearWhenPresent(CriteriaMergeResult result, String field, String before, Runnable mutation) {
+        if (!hasText(before)) return;
+        clear(result, field, mutation);
+    }
+
     private void append(CriteriaMergeResult result, String field, List<String> target, List<String> additions) {
         if (additions == null || additions.isEmpty()) return;
         if (target == null) target = new ArrayList<String>();
@@ -108,6 +193,12 @@ public class ConversationCriteriaMerger {
     private void addPreference(DecisionConstraints constraints, String preference) {
         if (constraints.getSoftPreferences() == null) constraints.setSoftPreferences(new ArrayList<String>());
         constraints.getSoftPreferences().add(preference);
+    }
+
+    private void unlockBudgetWhenExplicitlyOverridden(CriteriaMergeResult result, DecisionConstraints constraints) {
+        if (constraints.getLockedConstraints() != null && constraints.getLockedConstraints().remove("budgetPerPerson")) {
+            result.getCleared().add("lockedConstraints:budgetPerPerson");
+        }
     }
 
     private List<String> unique(List<String> values) { return new ArrayList<String>(new LinkedHashSet<String>(values == null ? new ArrayList<String>() : values)); }

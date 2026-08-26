@@ -1,5 +1,35 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-08-25：轻量路由模型与零结果后的当前位置续接
+
+将聊天路由从主 Agent 模型中拆出为独立的 `ai.routing` 配置，默认使用 DashScope 的 `qwen-flash`，超时 4 秒；主推荐、约束抽取与工具规划仍保持 `deepseek-v4-flash`。`qwen-flash` 同时继续承担已有的 Query Rewrite 调用。路由 Client 复用 OpenAI-compatible 协议，但按独立模型、Endpoint、密钥和超时执行，配置不可用时回退原有主模型调用，再失败才使用 Java 规则路由。
+
+回放零结果会话发现“我附近呢”没有候选店铺可供指代消歧，旧代码直接以 `NO_WORKING_MEMORY_CANDIDATES` 跳过改写，再由路由模型误判为闲聊。本次将当前位置表达提升为确定性状态转换：当已有消费决策上下文时，`ConversationContextRewriter` 即使候选池为空，也会将“我附近呢 / 当前位置”等改写为“在当前设备附近搜索餐饮商户”，标记 `CURRENT_DEVICE_LOCATION_CONTINUATION`，不调用模型、不虚构店铺。Gateway 识别该标记后直接进入 `START_DECISION`；若旧会话处于挂起态，先结束旧会话，再开始新的当前位置检索。
+
+`ConstraintExtractor` 对显式“我附近/当前位置/当前定位”增加模型输出后的确定性兜底：强制 `locationIntent=CURRENT_DEVICE`、`nearby=true`，并清空 `targetCity`、`targetArea`。Reducer 随之清理旧命名搜索地点；无浏览器 GPS 时策略门禁进入 `CLARIFYING` 请求定位，有授权坐标时复用设备坐标。路由 Prompt 同步注入“零结果或挂起态下的位置切换继承餐饮推荐意图”的优先规则，避免被泛化为闲聊。
+
+新增回归覆盖零候选池的位置续接改写，以及 `ZERO_RESULT_NO_DATA -> 我附近呢 -> START_DECISION -> CLARIFYING` 的端到端状态链。全量回归测试：19 个测试套件、93 个用例、0 failure、0 error、3 skipped（`mvn -q test`）。
+
+## 2026-08-25：命名目的地与当前设备位置的互斥状态切换
+
+回放会话 `web-1787662311235-av4p7h3q` 发现，用户先将搜索目的地指定为北京，随后说“看看我附近有什么好吃的”时，`nearby=true` 只被当作新增筛选条件，旧的 `targetCity=北京` 与 `searchLocation.city=北京` 仍然保留。Gateway 因此继续以北京作为命名目的地检索，而不是切换到用户设备位置；设备坐标为空时又错误进入可松弛检索状态。
+
+`DecisionConstraints` 新增并启用 `locationIntent`，将位置语义收敛为 `EXPLICIT_TARGET`、`CURRENT_DEVICE`、`UNSPECIFIED` 三种互斥状态。约束提取 Tool Schema 与模型 Prompt 明确要求：用户说“我附近/当前位置”时输出 `CURRENT_DEVICE`，且 `targetCity`、`targetArea` 必须为空；模型输出冲突字段时，归一化层也会以 `CURRENT_DEVICE` 为准清空目标地点。关键词识别仅作为模型调用失败时的降级兜底，不参与城市识别。
+
+`ConversationCriteriaMerger` 在 `CURRENT_DEVICE` Delta 到达时确定性清除历史目标城市和区域；`ConversationStateService` 同步清空持久化的 `searchLocation`，从而使旧城市坐标与候选池不再影响下一轮。`ChatOrchestrationService` 与 `PolicyDecisionEngine` 仅在 `CURRENT_DEVICE` 或 nearby 语义成立时复用授权设备坐标；若未授权或坐标缺失，则进入 `CLARIFYING` 请求定位，绝不回退使用旧的命名城市。
+
+新增回归覆盖模型冲突槽位清洗、命名目的地切换至当前设备位置时的 Criteria 归约、持久化 `searchLocation` 清理，以及在不带 nearby 标记时复用 `CURRENT_DEVICE` 的已授权坐标。全量回归测试：19 个测试套件、91 个用例、0 failure、0 error、3 skipped（`mvn -q test`）。
+
+## 2026-08-25：零结果覆盖不足与条件过严的状态分流
+
+显式目的地的地理仲裁修复后，回放“重庆有什么好吃的”确认 SQL 已按 `city=重庆` 过滤，但候选为空时仍统一进入 `WAITING_RELAXATION`。当用户只提供城市、没有菜系、预算、距离或其他可放宽约束时，界面只剩“结束推荐”选项，却仍提示“可以放宽条件”，属于错误的状态语义。
+
+`ConsumptionDecisionService` 现在按确定性规则区分两类零结果：存在菜系、预算、半径、安静/排队偏好、清淡偏好或额外硬约束时，保留 `WAITING_RELAXATION` 并只展示真实可执行的放宽项；已指定行政区且不存在任何可松弛条件时，进入 `ZERO_RESULT_NO_DATA`，明确说明该城市/区域当前暂无入库餐饮商户，并给出 `SWITCH_CITY`、`END_DECISION` 两个操作。新增 `RELAX_HARD_CONSTRAINTS` 也使硬约束在确实存在时可被显式移除，而不会隐式改写用户条件。
+
+Gateway 增加挂起态感知路由：在 `WAITING_RELAXATION` 或 `ZERO_RESULT_NO_DATA` 下，“放宽什么条件”“什么意思”“我刚刚不是说要重庆吗”等解释性追问直接走 `EXPLAIN_SUSPENDED_DECISION`，保持原 `decisionSessionId`，不触发新搜索、不进入商户详情工具。通用闲聊 Prompt 同时注入只读 Working Memory 摘要（目标城市、区域、菜系、预算与候选数），避免模型将已确认的“重庆”等事实误说成未提供条件。
+
+新增回归用例覆盖：命名城市且无可松弛条件时返回 `ZERO_RESULT_NO_DATA` 与正确选项；零结果挂起时追问已确认城市会保持会话并返回状态解释，不调用新决策或商户追问链路。全量 `mvn -q test` 通过。
+
 ## 2026-08-16：推荐默认定位与地点消歧
 
 推荐不再仅在用户使用“附近”等关键词时才索要位置。任何进入餐饮推荐链路、且没有有效会话定位的请求，都会停在 `CLARIFYING` 状态，要求用户授权当前位置；用户显式选择不提供位置时，才允许全城搜索。
@@ -883,6 +913,12 @@ Gateway 在每次新推荐前先提取本轮约束，再经 `ConversationCriteri
 新增 `V34__conversation_evaluation_waiting_relaxation_expectations.sql`，将 `START_NEW_RECOM_CLEAR_INTENT`、`LOCATION_SWITCH_HANGZHOU_TO_FUZHOU`、`CRITERIA_REFINEMENT_RETAINS_LOCATION` 的期望最终状态修正为 `WAITING_RELAXATION`。用例说明同时要求保留放宽路径，并分别约束不得回退到旧品类、旧城市或丢弃已继承条件。后续如需细化该维度，将把放宽选项 ID 纳入轨迹断言；当前状态、本地性、目标商户和无伪造推荐的断言已覆盖该安全边界。
 
 应用 V34 后以真实 DashScope `deepseek-v4-flash`、`qwen-flash`、MySQL、Redis、Milvus 和工具链重跑 `conversation-v1`（运行 #15）：12 条轨迹均完成，路由 `12/12`、上下文改写 `1/1`、必要工具断言 `12/12`、本地性 `12/12`、目标商户 `12/12`、最终状态 `12/12`，平均端到端耗时 `13129ms`。三条严格条件无候选轨迹仍返回 `WAITING_RELAXATION`，这证明链路保持了“不用跨城或不符合条件的商户凑结果”的边界，同时把后续选择权明确交还给用户。
+
+## 2026-08-25：相对价格锁定与多店复合事实追问
+
+现场会话回放发现“太贵了，换个更便宜的”会先依据当前焦点商户计算出更低的人均上限，但在无结果时仍显示“提高预算”的松弛选项，最终可能推荐比原店更贵的商户。为此在 `DecisionConstraints` 增加持久化的 `lockedConstraints`，`ConversationCriteriaMerger` 将相对降价归约为预算上限时写入 `budgetPerPerson` 锁定。`ConsumptionDecisionService` 在生成和执行 `INCREASE_BUDGET` 两处都校验该锁定；锁定后只能扩大范围、放宽其他非锁定条件或结束推荐，不能反向修改“更便宜”的用户意图。
+
+同一回放中的“第一家有优惠券吗？第二家评价怎么样？”此前被单店引用解析器误判为歧义。现在 `AgentConversationService` 会从 Working Memory 候选池中确定性识别多个明确序号或店名，拆分为绑定各自 `shopId` 的只读事实任务，再分别调用优惠券和评价工具；模糊代词且没有焦点店时才会要求用户澄清。新增回归覆盖相对预算锁定、锁定预算时不展示上浮选项，以及两家商户分别绑定 `query_shop_vouchers(shopId=8)`、`search_shop_evidence(shopId=9)`。针对性测试集 `ConversationCriteriaMergerTest`、`ConsumptionDecisionServiceTest`、`AgentConversationServiceTest` 共 35 项通过。
 
 ## 2026-08-25：澄清策略决策与搜索目标位置隔离
 

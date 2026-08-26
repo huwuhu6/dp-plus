@@ -16,7 +16,7 @@ class PolicyDecisionEngineTest {
     void asksForLocationWhenRecommendationHasNoGeographicAnchor() {
         assertEquals(PolicyDecisionEngine.CLARIFY_LOCATION,
                 engine.decideRecommendation(new DecisionRequest(), new DecisionConstraints(),
-                        new ConversationWorkingMemory(), null).getAction());
+                        new ConversationWorkingMemory()).getAction());
     }
 
     @Test
@@ -27,8 +27,10 @@ class PolicyDecisionEngineTest {
         ConversationLocationSlot device = memory.getLocation();
         device.setStatus("AVAILABLE"); device.setLatitude(26.08D); device.setLongitude(119.19D);
 
-        assertEquals(PolicyDecisionEngine.RESOLVE_EXPLICIT_LOCATION,
-                engine.decideRecommendation(request, new DecisionConstraints(), memory, "重庆").getAction());
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetCity("重庆");
+        assertEquals(PolicyDecisionEngine.EXECUTE_RECOMMENDATION,
+                engine.decideRecommendation(request, constraints, memory).getAction());
     }
 
     @Test
@@ -38,7 +40,19 @@ class PolicyDecisionEngineTest {
         target.setStatus("AVAILABLE"); target.setLatitude(29.56D); target.setLongitude(106.55D);
 
         assertEquals(PolicyDecisionEngine.EXECUTE_RECOMMENDATION,
-                engine.decideRecommendation(new DecisionRequest(), new DecisionConstraints(), memory, null).getAction());
+                engine.decideRecommendation(new DecisionRequest(), new DecisionConstraints(), memory).getAction());
+    }
+
+    @Test
+    void currentDeviceIntentCanReuseAuthorizedDeviceLocationWithoutNearbyFlag() {
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        ConversationLocationSlot device = memory.getLocation();
+        device.setStatus("AVAILABLE"); device.setLatitude(26.08D); device.setLongitude(119.19D);
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setLocationIntent("CURRENT_DEVICE");
+
+        assertEquals(PolicyDecisionEngine.EXECUTE_RECOMMENDATION,
+                engine.decideRecommendation(new DecisionRequest(), constraints, memory).getAction());
     }
 
     @Test

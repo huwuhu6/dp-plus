@@ -197,6 +197,7 @@ public class ConversationStateService {
         if (reduction == null || reduction.getConstraints() == null) return;
         ConversationWorkingMemory memory = workingMemory(state);
         memory.setActiveCriteria(reduction.getConstraints());
+        synchronizeNamedSearchLocation(state, memory, reduction);
         if (changesCandidateUniverse(reduction)) {
             boolean hadFocusedShop = memory.getFocusedShopId() != null;
             int previousCandidateCount = invalidateCandidatePool(memory);
@@ -351,6 +352,41 @@ public class ConversationStateService {
                 || "nearby".equals(field) || "arrivalTime".equals(field) || "occasion".equals(field)
                 || "quiet".equals(field) || "avoidQueue".equals(field) || "hardConstraints".equals(field)
                 || "softPreferences".equals(field);
+    }
+
+    /** Keeps a named destination physically separate from browser-provided coordinates. */
+    private void synchronizeNamedSearchLocation(AiChatSession state, ConversationWorkingMemory memory,
+                                                CriteriaMergeResult reduction) {
+        DecisionConstraints criteria = reduction.getConstraints();
+        if (!hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea())) {
+            if (containsClearedField(reduction.getCleared(), "targetCity") || containsClearedField(reduction.getCleared(), "targetArea")) {
+                clearLocation(memory.getSearchLocation(), "MISSING");
+                log.info("[AI][state] event=NAMED_SEARCH_LOCATION_CLEARED chatId={} action=USE_DEVICE_LOCATION_IF_AUTHORIZED", state.getChatId());
+            }
+            return;
+        }
+        if (!containsField(reduction.getReplaced(), "targetCity")
+                && !containsField(reduction.getReplaced(), "targetArea")) return;
+
+        ConversationLocationSlot target = memory.getSearchLocation();
+        clearLocation(target, "RESOLVED_BY_NAME");
+        target.setCity(criteria.getTargetCity());
+        target.setDistrict(criteria.getTargetArea());
+        target.setSource("USER_EXPLICIT");
+        target.setCapturedAt(LocalDateTime.now());
+        log.info("[AI][state] event=NAMED_SEARCH_LOCATION_REDUCED chatId={} targetCity={} targetArea={} action=CLEAR_TARGET_COORDINATES",
+                state.getChatId(), criteria.getTargetCity(), criteria.getTargetArea());
+    }
+
+    private boolean containsField(List<String> changes, String field) {
+        if (changes == null) return false;
+        for (String change : changes) {
+            if (change != null && change.startsWith(field + ":")) return true;
+        }
+        return false;
+    }
+    private boolean containsClearedField(List<String> changes, String field) {
+        return changes != null && changes.contains(field);
     }
     private int invalidateCandidatePool(ConversationWorkingMemory memory) {
         int previousCandidateCount = memory.getCandidatePool().size();

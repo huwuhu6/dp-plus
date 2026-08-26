@@ -127,6 +127,62 @@ class ConversationStateServiceTest {
     }
 
     @Test
+    void namedCityChangeClearsOldTargetCoordinatesAndCandidates() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        memory.getSearchLocation().setStatus("AVAILABLE");
+        memory.getSearchLocation().setCity("福州");
+        memory.getSearchLocation().setLatitude(26.08D);
+        memory.getSearchLocation().setLongitude(119.19D);
+        DecisionRecommendation stale = new DecisionRecommendation();
+        stale.setShopId(99L); stale.setShopName("福州旧候选");
+        memory.getCandidatePool().add(stale);
+        memory.setFocusedShopId(99L);
+        AiChatSession state = state(memory, "named-location-reducer-test");
+        CriteriaMergeResult reduction = new CriteriaMergeResult();
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetCity("重庆");
+        constraints.setTargetArea("解放碑");
+        reduction.setConstraints(constraints);
+        reduction.getReplaced().add("targetCity:福州->重庆");
+        reduction.getReplaced().add("targetArea:鼓楼区->解放碑");
+
+        service.reduceCriteria(state, reduction);
+
+        ConversationWorkingMemory updated = service.workingMemory(state);
+        assertEquals("重庆", updated.getSearchLocation().getCity());
+        assertEquals("解放碑", updated.getSearchLocation().getDistrict());
+        assertEquals("RESOLVED_BY_NAME", updated.getSearchLocation().getStatus());
+        assertNull(updated.getSearchLocation().getLatitude());
+        assertEquals(0, updated.getCandidatePool().size());
+        assertNull(updated.getFocusedShopId());
+    }
+
+    @Test
+    void currentDeviceIntentClearsStaleNamedDestinationBeforeLocationGate() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        memory.getSearchLocation().setStatus("RESOLVED_BY_NAME");
+        memory.getSearchLocation().setCity("北京");
+        memory.getSearchLocation().setDistrict("朝阳区");
+        AiChatSession state = state(memory, "current-device-location-test");
+        CriteriaMergeResult reduction = new CriteriaMergeResult();
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        constraints.setNearby(true);
+        reduction.setConstraints(constraints);
+        reduction.getCleared().add("targetCity");
+        reduction.getCleared().add("targetArea");
+
+        service.reduceCriteria(state, reduction);
+
+        ConversationLocationSlot target = service.workingMemory(state).getSearchLocation();
+        assertEquals("MISSING", target.getStatus());
+        assertNull(target.getCity());
+        assertNull(target.getDistrict());
+    }
+
+    @Test
     void appliesFollowUpCandidatePoolIntoWorkingMemory() throws Exception {
         ConversationStateService service = service();
         ConversationWorkingMemory memory = new ConversationWorkingMemory();

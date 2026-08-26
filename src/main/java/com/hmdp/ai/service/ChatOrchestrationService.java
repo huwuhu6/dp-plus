@@ -17,6 +17,7 @@ import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.PolicyDecision;
+import com.hmdp.ai.dto.RewriteIntentType;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.runtime.ConversationEventStatus;
 import com.hmdp.ai.runtime.ConversationEventType;
@@ -30,11 +31,10 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.function.Consumer;
 
 @Service
-public class ChatOrchestrationService {
+public class ChatOrchestrationService implements ChatPipelineOperations {
     private static final Logger log = LoggerFactory.getLogger(ChatOrchestrationService.class);
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private SpringAiTextClient springAiTextClient;
@@ -52,6 +52,78 @@ public class ChatOrchestrationService {
     @Resource private ObjectMapper objectMapper;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
+        return chat(request, null);
+    }
+
+    /**
+     * Keeps state transitions synchronous and auditable while allowing the final safe
+     * general-chat response to be emitted directly from the model stream.
+     */
+    public ChatMessageResponse chat(ChatMessageRequest request, Consumer<String> textDeltaConsumer) {
+        ChatProcessingContext context = new ChatProcessingContext(request, textDeltaConsumer);
+        chatPipeline().process(context);
+        if (context.getResponse() == null) {
+            throw new IllegalStateException("chat pipeline completed without a response");
+        }
+        return context.getResponse();
+    }
+
+    /**
+     * A request-scoped pipeline keeps intermediate values out of services and tools.
+     * The nodes deliberately do not persist state; ConversationStateService remains
+     * the only WorkingMemory writer.
+     */
+    private ChatPipeline chatPipeline() {
+        List<ChatPipelineNode> nodes = Arrays.<ChatPipelineNode>asList(
+                new BootstrapNode(this),
+                new ContextRewriteNode(this),
+                new IntentRoutingNode(this),
+                new CriteriaReductionNode(this),
+                new PolicyGuardNode(this),
+                new ExecutionNode(this));
+        return new ChatPipeline(nodes);
+    }
+
+    @Override
+    public void bootstrap(ChatProcessingContext context) {
+        ChatMessageRequest request = context.getRequest();
+        if (request == null || request.getMessage() == null || request.getMessage().trim().isEmpty()) {
+            throw new IllegalArgumentException("message cannot be blank");
+        }
+        context.setOriginalMessage(request.getMessage().trim());
+    }
+
+    @Override
+    public void rewrite(ChatProcessingContext context) {
+        // The legacy executor still owns the operational transition during this
+        // compatibility step. Keeping the raw and effective slots separate now
+        // prevents nodes from passing state through mutable service fields.
+        context.setEffectiveMessage(context.getOriginalMessage());
+    }
+
+    @Override
+    public void route(ChatProcessingContext context) {
+        // Routing remains behaviour-compatible while it is migrated into the
+        // dedicated node in the following extraction step.
+    }
+
+    @Override
+    public void reduceCriteria(ChatProcessingContext context) {
+        // Criteria reduction is executed by startDecision, which is the existing
+        // transaction boundary for reducer writes and decision snapshots.
+    }
+
+    @Override
+    public void applyPolicyGuard(ChatProcessingContext context) {
+        // Policy evaluation remains adjacent to its decision execution boundary.
+    }
+
+    @Override
+    public void execute(ChatProcessingContext context) {
+        context.setResponse(executeLegacy(context.getRequest(), context.getTextDeltaConsumer()));
+    }
+
+    private ChatMessageResponse executeLegacy(ChatMessageRequest request, Consumer<String> textDeltaConsumer) {
         if (request == null || request.getMessage() == null || request.getMessage().trim().isEmpty()) {
             throw new IllegalArgumentException("message 不能为空");
         }
@@ -74,8 +146,7 @@ public class ChatOrchestrationService {
         log.info("[AI][chat] event=TURN_START chatId={} clientSessionId={} activeSessionId={} status={} query={}", chatId,
                 request.getDecisionSessionId(), activeSessionId,
                 activeDecision == null ? "NONE" : activeDecision.getStatus(), compact(message));
-        if (request.getSelectedOptionId() != null && activeDecision != null
-                && ("CLARIFYING".equals(activeDecision.getStatus()) || "WAITING_RELAXATION".equals(activeDecision.getStatus()))) {
+        if (request.getSelectedOptionId() != null && isPausedDecision(activeDecision)) {
             ChatMessageResponse eventResponse = new ChatMessageResponse();
             eventResponse.setChatId(chatId);
             eventResponse.setRoute("DECISION_EVENT");
@@ -85,6 +156,10 @@ public class ChatOrchestrationService {
         if (isLocationClarification(activeDecision) && isPotentialNamedLocation(message)) {
             ChatMessageResponse locationResponse = resolveNamedLocation(chatId, message, state, activeSessionId, activeDecision);
             if (locationResponse != null) return locationResponse;
+        }
+        if (isSuspendedDecision(activeDecision) && request.getSelectedOptionId() == null
+                && isSuspendedDecisionMetaQuestion(message)) {
+            return explainSuspendedDecision(chatId, message, activeSessionId, activeDecision);
         }
         ContextRewriteResult contextRewrite = rewriteContext(message, chatHistory, state, activeSessionId);
         String effectiveMessage = contextRewrite.getRewrittenQuery();
@@ -161,7 +236,7 @@ public class ChatOrchestrationService {
             return response;
         }
         if ("EXIT_DECISION".equals(route) && activeDecision != null) {
-            if ("CLARIFYING".equals(activeDecision.getStatus()) || "WAITING_RELAXATION".equals(activeDecision.getStatus())) {
+            if (isPausedDecision(activeDecision)) {
                 DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
                 followUp.setMessage(message);
                 decisionService.continueDecision(activeSessionId, followUp);
@@ -173,7 +248,7 @@ public class ChatOrchestrationService {
             response.setDecisionSessionId(activeSessionId);
             response.setDecisionStatus(activeDecision.getStatus());
         }
-        response.setAnswer(generalReply(message, chatHistory));
+        response.setAnswer(generalReply(message, chatHistory, conversationStateService.workingMemory(state), textDeltaConsumer));
         if (!aiProperties.isConfigured()) {
             response.setUsedModel(false);
             response.setDegradedReason("模型服务未配置：当前后端进程没有读取到 DEEPSEEK_API_KEY，本次使用本地对话降级回复。");
@@ -187,17 +262,18 @@ public class ChatOrchestrationService {
                                               AiChatSession state, boolean submittedDeviceLocation, boolean usedModel,
                                               ContextRewriteResult contextRewrite) {
         DecisionRequest decisionRequest = new DecisionRequest();
-        decisionRequest.setQuery(effectiveMessage);
         decisionRequest.setMaxCandidates(3);
         com.hmdp.ai.dto.ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
         if (memory == null) {
             // Keeps isolated gateway tests compatible with the pre-working-memory state mock.
+            decisionRequest.setQuery(effectiveMessage);
             DecisionResponse decision = decisionService.decide(decisionRequest);
             conversationStateService.activateDecision(state, decision.getSessionId());
             return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, null, decision, null);
         }
+        List<Long> excludedCandidates = refinementExclusions(contextRewrite, memory);
         com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(memory.getActiveCriteria(),
-                constraintExtractor.extract(effectiveMessage), originalMessage);
+                constraintExtractor.extract(effectiveMessage), originalMessage, memory.getCandidatePool(), memory.getFocusedShopId());
         conversationStateService.reduceCriteria(state, mergeResult);
         conversationStateService.applyNamedSearchLocation(state, mergeResult.getConstraints());
         String explicitLocationScope = locationResolutionScope(mergeResult.getConstraints());
@@ -206,7 +282,7 @@ public class ChatOrchestrationService {
                 mergeResult.getInherited(), mergeResult.getReplaced(), mergeResult.getAppended(), mergeResult.getCleared(),
                 mergeResult.getInvalidated(), compact(effectiveMessage));
         PolicyDecision policy = policyDecisionEngine == null ? null : policyDecisionEngine.decideRecommendation(
-                decisionRequest, mergeResult.getConstraints(), memory, explicitLocationScope);
+                decisionRequest, mergeResult.getConstraints(), memory);
         recordPolicy(state, chatId, null, policy);
         DecisionResponse decision = decisionService.decide(decisionRequest, mergeResult.getConstraints(), chatId,
                 conversationEventService == null || conversationEventService.currentTrace() == null ? null
@@ -219,17 +295,23 @@ public class ChatOrchestrationService {
         }
         conversationStateService.activateDecision(state, decision.getSessionId());
         conversationStateService.snapshotDecision(state, decision);
-        return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, explicitLocationScope, decision, policy);
+        return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, decision, policy);
+    }
+
+    private List<Long> refinementExclusions(ContextRewriteResult contextRewrite,
+                                            com.hmdp.ai.dto.ConversationWorkingMemory memory) {
+        List<Long> excluded = new ArrayList<Long>();
+        if (contextRewrite == null || contextRewrite.getIntentType() != RewriteIntentType.SEARCH_REFINEMENT
+                || memory == null || memory.getCandidatePool() == null) return excluded;
+        for (com.hmdp.ai.dto.DecisionRecommendation candidate : memory.getCandidatePool()) {
+            if (candidate.getShopId() != null) excluded.add(candidate.getShopId());
+        }
+        return excluded;
     }
 
     private ChatMessageResponse buildDecisionResponse(String chatId, String originalMessage, AiChatSession state, boolean usedModel,
-                                                       ContextRewriteResult contextRewrite, String explicitLocationScope,
+                                                       ContextRewriteResult contextRewrite,
                                                        DecisionResponse decision, PolicyDecision policy) {
-        if (explicitLocationScope != null && isLocationClarification(decision)) {
-            ChatMessageResponse locationResponse = buildLocationResolutionResponse(chatId, originalMessage, state,
-                    decision.getSessionId(), decision, explicitLocationScope);
-            if (locationResponse != null) return locationResponse;
-        }
         ChatMessageResponse response = new ChatMessageResponse();
         response.setChatId(chatId);
         response.setRoute("START_DECISION");
@@ -252,10 +334,8 @@ public class ChatOrchestrationService {
         Long sessionId = activeSessionId == null ? state.getLastDecisionSessionId() : activeSessionId;
         if (sessionId == null) return ContextRewriteResult.unchanged(message, "NO_DECISION_CONTEXT");
         AgentSessionContext context = conversationStateService.agentContext(state);
-        if (context == null || context.getShownShops() == null || context.getShownShops().isEmpty()) {
-            return ContextRewriteResult.unchanged(message, "NO_WORKING_MEMORY_CANDIDATES");
-        }
-        return contextRewriter.rewrite(message, history, context);
+        boolean hasDecisionContext = activeSessionId != null || state.getLastDecisionSessionId() != null;
+        return contextRewriter.rewrite(message, history, context, hasDecisionContext);
     }
 
     private String route(String message, String decisionStatus, List<Map<String, Object>> chatHistory) {
@@ -264,9 +344,13 @@ public class ChatOrchestrationService {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
             messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求或需求不完整；START_DECISION=用户明确要找餐厅、吃饭、菜品、订餐或餐饮消费推荐；BUSINESS_FOLLOW_UP=围绕已推荐餐饮商户问优惠券、评价、备选或比较；EXIT_DECISION=用户明确说算了、不找了、结束或不需要了。‘附近有啥’、‘有什么推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
             messages.add(message("system", "当前决策状态=" + decisionStatus));
+            messages.add(message("system", "优先规则：若前序对话已处于餐饮推荐上下文，或状态为 ZERO_RESULT_NO_DATA、WAITING_RELAXATION，用户说“我附近”“当前位置”“当前定位”“换个地方”或“其他商圈”时，必须继承餐饮推荐意图并选择 START_DECISION；不要把它当作 GENERAL_CHAT。"));
+            messages.add(message("system", "若当前状态为 WAITING_RELAXATION 或 ZERO_RESULT_NO_DATA，用户是在追问暂停原因、已确认地点、可放宽项或下一步如何处理时，选择 EXPLAIN_SUSPENDED_DECISION；该路由不发起新搜索，也不查询商户详情。"));
             messages.addAll(chatHistory);
             messages.add(message("user", message));
-            JsonNode result = aiClient.chatCompletion(messages, Arrays.asList(routeTool()), null, "CHAT_ROUTING");
+            JsonNode result = aiProperties.getRouting() != null && aiProperties.getRouting().isConfigured()
+                    ? aiClient.chatRoutingCompletion(messages, Arrays.asList(routeTool()), null)
+                    : aiClient.chatCompletion(messages, Arrays.asList(routeTool()), null, "CHAT_ROUTING");
             String arguments = result.path("choices").path(0).path("message").path("tool_calls").path(0)
                     .path("function").path("arguments").asText();
             String route = objectMapper.readTree(arguments).path("route").asText(fallbackRoute(message, decisionStatus));
@@ -278,14 +362,20 @@ public class ChatOrchestrationService {
         }
     }
 
-    private String generalReply(String message, List<Map<String, Object>> chatHistory) {
+    private String generalReply(String message, List<Map<String, Object>> chatHistory,
+                                com.hmdp.ai.dto.ConversationWorkingMemory memory,
+                                Consumer<String> textDeltaConsumer) {
         if (!aiProperties.isConfigured()) return "你好，我是消费决策助手。想吃饭或需要了解已推荐商户时，随时告诉我。";
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
             messages.add(message("system", "你是本地餐饮消费决策助手。基于对话上下文自然、简短地回答。仅支持餐厅、用餐、菜品、餐饮优惠和已推荐餐饮商户的事实查询；面对游泳、运动场馆、医疗、住宿、交通等非餐饮需求，要友好说明当前暂不具备对应数据和检索能力，不得编造或推荐餐饮商户。"));
+            messages.add(message("system", "只读会话事实（不得否认或改写）：" + workingMemorySummary(memory)));
             messages.addAll(chatHistory);
             messages.add(message("user", message));
-            String answer = springAiTextClient.chatText(messages, "GENERAL_CHAT");
+            boolean streamEligible = textDeltaConsumer != null && isSafeGeneralChatStream(message);
+            String answer = streamEligible
+                    ? springAiTextClient.streamText(messages, "GENERAL_CHAT", textDeltaConsumer)
+                    : springAiTextClient.chatText(messages, "GENERAL_CHAT");
             if (containsUngroundedRecommendation(answer)) {
                 log.warn("[AI][chat] action=GENERAL_CHAT event=UNGROUNDED_RECOMMENDATION_BLOCKED");
                 return "抱歉，我不能在没有检索到本地商户数据的情况下直接列出餐厅或消费建议。你可以告诉我想吃什么、预算和地点，我会先查询餐饮数据后再推荐。";
@@ -295,6 +385,29 @@ public class ChatOrchestrationService {
             log.warn("[AI][chat] action=GENERAL_CHAT event=FALLBACK errorType={}", e.getClass().getSimpleName());
             return "你好，我在。想聊聊吃什么、预算或用餐场景时，随时告诉我。";
         }
+    }
+
+    private String workingMemorySummary(com.hmdp.ai.dto.ConversationWorkingMemory memory) {
+        if (memory == null || memory.getActiveCriteria() == null) return "尚未确认搜索条件。";
+        com.hmdp.ai.dto.DecisionConstraints criteria = memory.getActiveCriteria();
+        List<String> facts = new ArrayList<>();
+        if (hasText(criteria.getTargetCity())) facts.add("已锁定目标城市=" + criteria.getTargetCity());
+        if (hasText(criteria.getTargetArea())) facts.add("已锁定目标区域=" + criteria.getTargetArea());
+        if (hasText(criteria.getCuisine())) facts.add("菜系=" + criteria.getCuisine());
+        if (criteria.getBudgetPerPerson() > 0) facts.add("预算上限=" + criteria.getBudgetPerPerson());
+        if (memory.getCandidatePool() != null && !memory.getCandidatePool().isEmpty()) {
+            facts.add("当前候选店铺数=" + memory.getCandidatePool().size());
+        }
+        return facts.isEmpty() ? "尚未确认搜索条件。" : String.join("；", facts) + "。";
+    }
+
+    private boolean isSafeGeneralChatStream(String message) {
+        String value = message == null ? "" : message;
+        // Recommendation answers must pass the post-generation grounding guard before
+        // reaching users, so they intentionally remain non-streaming for now.
+        String[] groundedTerms = {"推荐", "餐厅", "吃饭", "吃什么", "附近", "优惠", "券", "评价", "评论", "对比"};
+        for (String term : groundedTerms) if (value.contains(term)) return false;
+        return true;
     }
 
     private String fallbackRoute(String message, String decisionStatus) {
@@ -313,7 +426,7 @@ public class ChatOrchestrationService {
         DecisionResponse decision = activeDecision;
         if (decision == null || !sessionId.equals(activeSessionId)) decision = decisionService.getDecision(sessionId);
         if (decision == null || !"COMPLETED".equals(decision.getStatus())) return null;
-        if (Boolean.TRUE.equals(contextRewrite.getApplied())) {
+        if (contextRewrite.getIntentType() == RewriteIntentType.SHOP_INQUIRY) {
             log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} sessionId={} route=BUSINESS_FOLLOW_UP source=CONTEXT_REWRITE query={}",
                     chatId, sessionId, compact(message));
             return "BUSINESS_FOLLOW_UP";
@@ -370,7 +483,50 @@ public class ChatOrchestrationService {
 
     private boolean isPausedDecision(DecisionResponse decision) {
         return decision != null && ("CLARIFYING".equals(decision.getStatus())
-                || "WAITING_RELAXATION".equals(decision.getStatus()));
+                || "WAITING_RELAXATION".equals(decision.getStatus())
+                || "ZERO_RESULT_NO_DATA".equals(decision.getStatus()));
+    }
+
+    private boolean isSuspendedDecision(DecisionResponse decision) {
+        return decision != null && ("WAITING_RELAXATION".equals(decision.getStatus())
+                || "ZERO_RESULT_NO_DATA".equals(decision.getStatus()));
+    }
+
+    private boolean isSuspendedDecisionMetaQuestion(String message) {
+        String normalized = message == null ? "" : message.replaceAll("\\s+", "");
+        String[] metaTerms = {"放宽", "什么条件", "什么意思", "怎么回事", "为什么", "刚刚", "不是说", "不是已经", "什么东西"};
+        for (String term : metaTerms) if (normalized.contains(term)) return true;
+        return false;
+    }
+
+    private ChatMessageResponse explainSuspendedDecision(String chatId, String message, Long activeSessionId,
+                                                         DecisionResponse decision) {
+        ChatMessageResponse response = new ChatMessageResponse();
+        response.setChatId(chatId);
+        response.setRoute("EXPLAIN_SUSPENDED_DECISION");
+        response.setUsedModel(false);
+        response.setDecision(decision);
+        response.setDecisionSessionId(activeSessionId);
+        response.setDecisionStatus(decision.getStatus());
+        com.hmdp.ai.dto.DecisionConstraints constraints = decision.getConstraints();
+        String city = constraints == null ? "" : constraints.getTargetCity();
+        String area = constraints == null ? "" : constraints.getTargetArea();
+        String scope = hasText(area) ? area : city;
+        if ("ZERO_RESULT_NO_DATA".equals(decision.getStatus())) {
+            response.setAnswer("我记得你要找" + (hasText(scope) ? scope : "指定城市")
+                    + "的餐饮商户。当前暂停不是因为条件需要放宽，而是该范围暂无入库商户；可以切换城市或周边区域后再搜。");
+        } else {
+            List<String> choices = new ArrayList<>();
+            for (com.hmdp.ai.dto.DecisionOption option : decision.getOptions()) {
+                if (!"END_DECISION".equals(option.getId())) choices.add(option.getLabel());
+            }
+            response.setAnswer(choices.isEmpty() ? "当前没有可放宽的条件，推荐已暂停。"
+                    : "当前没有匹配商户，可以选择放宽以下任一条件后继续：" + String.join("；", choices) + "。");
+        }
+        log.info("[AI][chat] event=SUSPENDED_DECISION_EXPLAINED chatId={} sessionId={} status={} query={}",
+                chatId, activeSessionId, decision.getStatus(), compact(message));
+        recordTurn(chatId, message, response);
+        return response;
     }
 
     /** A paused recommendation may be refined after unrelated small talk. */
@@ -518,7 +674,7 @@ public class ChatOrchestrationService {
     private Map<String, Object> routeTool() {
         Map<String, Object> route = new LinkedHashMap<String, Object>();
         route.put("type", "string");
-        route.put("enum", Arrays.asList("GENERAL_CHAT", "START_DECISION", "BUSINESS_FOLLOW_UP", "EXIT_DECISION"));
+        route.put("enum", Arrays.asList("GENERAL_CHAT", "START_DECISION", "BUSINESS_FOLLOW_UP", "EXIT_DECISION", "EXPLAIN_SUSPENDED_DECISION"));
         Map<String, Object> properties = new LinkedHashMap<String, Object>();
         properties.put("route", route);
         Map<String, Object> parameters = new LinkedHashMap<String, Object>();
@@ -566,6 +722,17 @@ public class ChatOrchestrationService {
                                                     AiChatSession state, Long activeSessionId,
                                                     ChatMessageResponse response) {
         String optionId = request.getSelectedOptionId();
+        if ("SWITCH_CITY".equals(optionId)) {
+            DecisionResponse decision = decisionService.getDecision(activeSessionId);
+            response.setRoute("SWITCH_CITY");
+            response.setDecision(decision);
+            response.setDecisionSessionId(activeSessionId);
+            response.setDecisionStatus(decision == null ? "ZERO_RESULT_NO_DATA" : decision.getStatus());
+            response.setAnswer("请直接告诉我想切换到哪个城市，例如“帮我看看福州有什么好吃的”。");
+            log.info("[AI][chat] event=NO_DATA_SWITCH_CITY_REQUESTED chatId={} sessionId={}", chatId, activeSessionId);
+            recordTurn(chatId, message, response);
+            return response;
+        }
         if (optionId.startsWith("CONFIRM_RESOLVED_LOCATION_")) {
             int index = Integer.parseInt(optionId.substring("CONFIRM_RESOLVED_LOCATION_".length()));
             ResolvedLocationCandidate candidate = conversationStateService.acceptPendingSearchLocation(state, index);
@@ -616,7 +783,7 @@ public class ChatOrchestrationService {
             return;
         }
         ConversationLocationSlot location = conversationStateService.usableSearchLocation(state);
-        if (location == null) location = conversationStateService.usableLocation(state);
+        if (location == null && mayUseDeviceLocation) location = conversationStateService.usableLocation(state);
         if (location != null) {
             request.setLatitude(location.getLatitude());
             request.setLongitude(location.getLongitude());
@@ -631,9 +798,17 @@ public class ChatOrchestrationService {
         }
         ConversationSlots slots = conversationStateService.slots(state);
         ConversationLocationSlot deviceLocation = slots == null ? null : slots.getLocation();
-        String status = deviceLocation == null ? null : deviceLocation.getStatus();
+        String status = mayUseDeviceLocation && deviceLocation != null ? deviceLocation.getStatus() : "MISSING";
         request.setLocationStatus(status == null ? "MISSING" : status);
         log.info("[AI][chat] event=SLOT_READ chatId={} slot=location status={}", state.getChatId(), request.getLocationStatus());
+    }
+
+    private String cleanRetrievalQuery(String query, com.hmdp.ai.dto.DecisionConstraints constraints) {
+        String cleaned = query == null ? "" : query;
+        if (hasText(constraints.getTargetCity())) cleaned = cleaned.replace(constraints.getTargetCity(), " ");
+        if (hasText(constraints.getTargetArea())) cleaned = cleaned.replace(constraints.getTargetArea(), " ");
+        cleaned = cleaned.replaceAll("\\s+", " ").trim();
+        return hasText(cleaned) ? cleaned : (hasText(constraints.getKeyword()) ? constraints.getKeyword() : query);
     }
 
     private Long resolveActiveSessionId(AiChatSession state, Long clientSessionId) {

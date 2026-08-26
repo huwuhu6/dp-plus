@@ -30,11 +30,20 @@ public class ConstraintExtractor {
 
     public DecisionConstraints extract(String query) {
         try {
-            return normalize(extractByModel(query));
+            return enforceCurrentDeviceIntent(normalize(extractByModel(query)), query);
         } catch (Exception e) {
             log.warn("[AI][model] action=CONSTRAINT_EXTRACTION event=FALLBACK reason={}", e.getClass().getSimpleName());
-            return normalize(extractByRule(query));
+            return enforceCurrentDeviceIntent(normalize(extractByRule(query)), query);
         }
+    }
+
+    private DecisionConstraints enforceCurrentDeviceIntent(DecisionConstraints constraints, String query) {
+        if (!containsCurrentDeviceReference(query)) return constraints;
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        constraints.setNearby(true);
+        constraints.setTargetCity("");
+        constraints.setTargetArea("");
+        return constraints;
     }
 
     private DecisionConstraints extractByModel(String query) throws Exception {
@@ -60,6 +69,7 @@ public class ConstraintExtractor {
 
     private DecisionConstraints extractByRule(String query) {
         DecisionConstraints constraints = new DecisionConstraints();
+        if (containsCurrentDeviceReference(query)) constraints.setLocationIntent("CURRENT_DEVICE");
         if (query.contains("日料") || query.contains("寿司")) {
             constraints.setCuisine("日料");
         } else if (query.contains("火锅")) {
@@ -129,6 +139,27 @@ public class ConstraintExtractor {
         String normalized = occasion.trim();
         if (normalized.contains("约会") || normalized.contains("情侣") || normalized.contains("女朋友") || normalized.contains("男朋友")) return "约会";
         return normalized;
+    }
+
+    private String normalizeText(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String normalizeLocationIntent(String locationIntent, DecisionConstraints constraints) {
+        if ("CURRENT_DEVICE".equalsIgnoreCase(locationIntent)) return "CURRENT_DEVICE";
+        if ("EXPLICIT_TARGET".equalsIgnoreCase(locationIntent)
+                || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())) return "EXPLICIT_TARGET";
+        return "UNSPECIFIED";
+    }
+
+    private boolean containsCurrentDeviceReference(String query) {
+        String text = query == null ? "" : query.replaceAll("\\s+", "");
+        return text.contains("我附近") || text.contains("我这附近") || text.contains("我身边")
+                || text.contains("当前位置") || text.contains("当前定位") || text.contains("现在位置");
     }
 
     private Map<String, Object> constraintSchema() {

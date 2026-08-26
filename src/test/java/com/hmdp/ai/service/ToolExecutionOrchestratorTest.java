@@ -15,6 +15,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -87,5 +88,28 @@ class ToolExecutionOrchestratorTest {
         assertEquals("{\"shopId\":18}", result.getEffectiveArguments());
         assertEquals(18L, context.getFocusedShopId());
         assertEquals("当前店", context.getFocusedShopName());
+    }
+
+    @Test
+    void preservesPlannerShopIdInsteadOfOverwritingItWithFocusedReference() {
+        AgentToolRegistry registry = mock(AgentToolRegistry.class);
+        AtomicReference<Map<String, Object>> inputHolder = new AtomicReference<Map<String, Object>>();
+        BaseAgentTool detail = new BaseAgentTool() {
+            @Override public String name() { return "get_shop_detail"; }
+            @Override public String description() { return "detail"; }
+            @Override public Map<String, Object> parameterSchema() { return Map.of(); }
+            @Override public AgentToolResult execute(Map<String, Object> input) {
+                inputHolder.set(input);
+                return new AgentToolResult().summary("detail").displayText("detail");
+            }
+        };
+        when(registry.find("get_shop_detail")).thenReturn(detail);
+
+        ToolExecutionResult result = orchestrator(registry).executeOne(
+                new ToolExecutionRequest(0, "get_shop_detail", "{\"shopId\":74}", 89L), new AgentSessionContext());
+
+        assertTrue(result.isSuccess());
+        assertEquals(74, ((Number) inputHolder.get().get("shopId")).intValue());
+        assertEquals("{\"shopId\":74}", result.getEffectiveArguments());
     }
 }

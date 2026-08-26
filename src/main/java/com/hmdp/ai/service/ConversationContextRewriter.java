@@ -4,6 +4,7 @@ import com.hmdp.ai.client.QueryRewriteClient;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
+import com.hmdp.ai.dto.RewriteIntentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,15 @@ public class ConversationContextRewriter {
     @Resource private QueryRewriteClient queryRewriteClient;
 
     public ContextRewriteResult rewrite(String query, List<Map<String, Object>> history, AgentSessionContext context) {
+        return rewrite(query, history, context, false);
+    }
+
+    /**
+     * Location scope changes are deterministic search continuations, even when a previous
+     * attempt returned no candidates and therefore cannot provide a shop reference table.
+     */
+    public ContextRewriteResult rewrite(String query, List<Map<String, Object>> history, AgentSessionContext context,
+                                        boolean allowSearchContinuation) {
         if (query == null || query.trim().isEmpty()) return ContextRewriteResult.unchanged(query, "EMPTY_QUERY");
         if (!hasBusinessContext(context)) {
             return ContextRewriteResult.unchanged(query, "NO_WORKING_MEMORY");
@@ -45,6 +55,7 @@ public class ConversationContextRewriter {
             result.setApplied(!query.equals(rewritten));
             result.setUsedModel(true);
             result.setReason("ELLIPSIS_RESOLVED");
+            result.setIntentType(classifyIntent(query, rewritten, context));
             log.info("[AI][chat] event=CONTEXT_REWRITE original={} rewritten={} focusedShopId={} candidateCount={}",
                     compact(query), compact(rewritten), context.getFocusedShopId(), context.getShownShops().size());
             return result;
@@ -54,10 +65,37 @@ public class ConversationContextRewriter {
         }
     }
 
+    /**
+     * The rewrite model resolves entities, while this guard makes the downstream state transition
+     * deterministic. It deliberately classifies only unambiguous operation families.
+     */
+    private RewriteIntentType classifyIntent(String original, String rewritten, AgentSessionContext context) {
+        String text = ((original == null ? "" : original) + " " + (rewritten == null ? "" : rewritten)).replaceAll("\\s+", "");
+        if (containsAny(text, "太贵", "便宜点", "更便宜", "换一家", "换一批", "换个口味", "换商圈", "更近", "附近一点", "重新筛选", "重新推荐")) {
+            return RewriteIntentType.SEARCH_REFINEMENT;
+        }
+        if (containsAny(text, "评价", "评论", "口碑", "优惠", "券", "团购", "营业时间", "排队", "地址", "订座", "第一家", "第二家", "第三家", "这家", "那家")) {
+            return RewriteIntentType.SHOP_INQUIRY;
+        }
+        return RewriteIntentType.GENERAL_CHAT;
+    }
+
+    private boolean containsAny(String text, String... values) {
+        for (String value : values) if (text.contains(value)) return true;
+        return false;
+    }
+
     private boolean needsRewrite(String query) {
         String[] signals = {"第一家", "第二家", "第三家", "这家", "那家", "上一家", "刚才那家", "换个", "便宜点", "贵点", "走过去", "多远", "多久", "有包厢", "有优惠", "有券", "团购", "继续", "安静点", "附近呢"};
         for (String signal : signals) if (query.contains(signal)) return true;
         return false;
+    }
+
+    private boolean refersToCurrentDeviceLocation(String query) {
+        String normalized = query == null ? "" : query.replaceAll("\\s+", "");
+        return normalized.matches("^(我?附近|当前(位置|定位)|边上)(呢|有啥|有什么)?[？?]?$")
+                || normalized.contains("我附近") || normalized.contains("我这附近")
+                || normalized.contains("当前位置") || normalized.contains("当前定位");
     }
 
     private String workingMemory(AgentSessionContext context) {

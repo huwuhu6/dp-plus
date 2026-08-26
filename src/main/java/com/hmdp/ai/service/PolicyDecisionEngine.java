@@ -22,13 +22,14 @@ public class PolicyDecisionEngine {
     public static final String COMPARE_SHOPS = "COMPARE_SHOPS";
 
     public PolicyDecision decideRecommendation(DecisionRequest request, DecisionConstraints constraints,
-                                               ConversationWorkingMemory memory, String explicitLocationScope) {
-        if (hasText(explicitLocationScope)) {
-            PolicyDecision decision = PolicyDecision.of(RESOLVE_EXPLICIT_LOCATION,
-                    "本轮明确指定搜索地点，优先解析目标地点而非复用设备定位");
-            decision.setExplicitLocationScope(explicitLocationScope);
-            decision.setBlocking(true);
-            return decision;
+                                               ConversationWorkingMemory memory) {
+        if (constraints != null && (hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea()))) {
+            return PolicyDecision.of(EXECUTE_RECOMMENDATION,
+                    "已获得用户显式指定的目标地点，禁止使用设备定位覆盖");
+        }
+        if (memory != null && hasNamedSearchLocation(memory.getSearchLocation())) {
+            return PolicyDecision.of(EXECUTE_RECOMMENDATION,
+                    "已获得会话中持久化的显式目标地点");
         }
         if (constraints != null && hasText(constraints.getTargetCity())) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION, "已获得用户明确指定的目标城市");
@@ -40,7 +41,9 @@ public class PolicyDecisionEngine {
         if (memory != null && hasCoordinates(memory.getSearchLocation())) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION, "复用已确认的搜索目标位置");
         }
-        if (memory != null && hasCoordinates(memory.getLocation())) {
+        if ((Boolean.TRUE.equals(constraints == null ? null : constraints.getNearby())
+                || "CURRENT_DEVICE".equals(constraints == null ? null : constraints.getLocationIntent()))
+                && memory != null && hasCoordinates(memory.getLocation())) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION, "复用用户授权的设备定位");
         }
         PolicyDecision decision = PolicyDecision.of(CLARIFY_LOCATION, "餐饮推荐缺少地理锚点");
@@ -63,6 +66,10 @@ public class PolicyDecisionEngine {
     private boolean hasCoordinates(ConversationLocationSlot location) {
         return location != null && "AVAILABLE".equals(location.getStatus())
                 && location.getLatitude() != null && location.getLongitude() != null;
+    }
+
+    private boolean hasNamedSearchLocation(ConversationLocationSlot location) {
+        return location != null && (hasText(location.getCity()) || hasText(location.getDistrict()));
     }
 
     private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
