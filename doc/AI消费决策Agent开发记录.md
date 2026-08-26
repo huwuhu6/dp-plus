@@ -979,3 +979,9 @@ Working Memory 不再覆盖式写入旧的 `ai_chat_session`。同一 `chat_id` 
 Runtime Event 使用 `chat_id + trace_id + turn_no + sequence_no` 标识完整多轮链路，覆盖 `USER_INPUT`、`REWRITE`、`ROUTE_DECISION`、`POLICY_DECISION`、`DECISION_STARTED`、`RETRIEVAL`、`RESULT_EVALUATION`、`AUTO_RELAXATION`、`TOOL_CALL`、`TOOL_RESULT` 与 `ASSISTANT_OUTPUT`。非状态事件经内存缓冲后单条批量 SQL 异步插入，避免逐事件提交阻塞聊天；评测链路在断言工具覆盖率前显式 flush，消除异步写入导致的观测竞态。推荐任务 `tbl_ai_decision_session` 继续保留，因为澄清、恢复和取消依赖独立业务生命周期；其 `chat_id`、`trace_id` 用于关联 Runtime Event，而不再扩散为第二套聊天上下文。
 
 本轮代码回归：`WorkingMemoryVersionServiceTest` 覆盖版本追加、State Event 关联和乐观锁冲突；`ConversationStateServiceTest` 覆盖状态归约与候选池级联失效；`ChatOrchestrationServiceTest` 覆盖多轮路由。定向执行 `mvn -q -Dtest=WorkingMemoryVersionServiceTest,ConversationStateServiceTest,ChatOrchestrationServiceTest test` 通过，随后执行全量 `mvn -q test` 作为提交前验证。
+
+### 真实迁移与持久化验收
+
+在本地 MySQL 的 `hmdp` schema 实际执行 Flyway 后，版本从 `V39` 升至 `V40`，所有 AI 物理表均已迁移为 `tbl_ai_*` 前缀，`tbl_ai_working_memory` 与 `tbl_ai_conversation_event` 已存在。新增 `WorkingMemoryRuntimePersistenceIntegrationTest` 使用真实 Spring 上下文、MySQL Mapper 与事务管理器验证状态写入闭环：同一事务内创建 Memory version，并写入关联的 `STATE_REDUCED` Event；测试断言事件的 `working_memory_id` 与新版本一致，随后由测试事务自动回滚。
+
+本轮执行 `mvn -q test` 全量通过；定向真实持久化测试 `mvn -q -Dtest=WorkingMemoryRuntimePersistenceIntegrationTest test` 通过。现有 `conversation-v1` 的最近一次完整模型评测仍是迁移前运行，Runtime 模型改造后的下一次评测会单独登记新的 runId、命中率与端到端耗时，避免混淆两套运行时数据口径。
