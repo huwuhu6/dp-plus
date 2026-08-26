@@ -12,6 +12,7 @@ import com.hmdp.ai.dto.AgentConversationRequest;
 import com.hmdp.ai.dto.AgentConversationResponse;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.AgentToolTraceItem;
+import com.hmdp.ai.dto.ChatStreamEventData;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.entity.AiAgentToolCall;
@@ -41,6 +42,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 @Service
 public class AgentConversationService {
@@ -61,6 +63,12 @@ public class AgentConversationService {
     @Resource private ObjectMapper objectMapper;
 
     public AgentConversationResponse converse(Long sessionId, AgentConversationRequest request, AgentSessionContext workingMemoryContext) {
+        return converse(sessionId, request, workingMemoryContext, null);
+    }
+
+    public AgentConversationResponse converse(Long sessionId, AgentConversationRequest request,
+                                              AgentSessionContext workingMemoryContext,
+                                              Consumer<ChatStreamEventData> eventConsumer) {
         if (workingMemoryContext == null) throw new IllegalArgumentException("workingMemoryContext 不能为空");
         if (request == null || request.getMessage() == null || request.getMessage().trim().isEmpty()) {
             throw new IllegalArgumentException("message 不能为空");
@@ -95,14 +103,15 @@ public class AgentConversationService {
                     context.getTurnNo(), compact(userMessage), compact(contextSummary(context)));
             saveMessage(sessionId, "USER", "AGENT_FOLLOW_UP", userMessage);
             ToolPlanningResult planning = compoundTasks.isEmpty()
-                    ? runToolLoop(sessionId, context, userMessage, reference.shop == null ? null : reference.shop.getShopId())
-                    : runBoundFactTasks(sessionId, context, compoundTasks);
+                    ? runToolLoop(sessionId, context, userMessage, reference.shop == null ? null : reference.shop.getShopId(),
+                    eventConsumer)
+                    : runBoundFactTasks(sessionId, context, compoundTasks, eventConsumer);
             List<AgentToolResult> results = planning.results;
             boolean usedModel = planning.usedModel;
             if (results.isEmpty()) {
                 try {
                     results.addAll(runFallbackTools(sessionId, context.getTurnNo(), userMessage, context,
-                            reference.shop == null ? null : reference.shop.getShopId()));
+                            reference.shop == null ? null : reference.shop.getShopId(), eventConsumer));
                     if (results.isEmpty()) results.add(new AgentToolResult().summary("业务数据暂不可用")
                             .displayText("抱歉，这次查询没有完成。你可以稍后重试，或换一种问法。"));
                 } catch (IllegalArgumentException e) {
@@ -164,13 +173,15 @@ public class AgentConversationService {
      * cannot collapse onto the focused shop.
      */
     private ToolPlanningResult runBoundFactTasks(Long sessionId, AgentSessionContext context,
-                                                 List<BoundFactTask> tasks) {
+                                                 List<BoundFactTask> tasks,
+                                                 Consumer<ChatStreamEventData> eventConsumer) {
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         log.info("[AI][agent] event=COMPOUND_REFERENCE_RESOLVED sessionId={} turnNo={} tasks={}", sessionId,
                 context.getTurnNo(), tasks.stream().map(BoundFactTask::summary).toList());
         for (BoundFactTask task : tasks) {
             try {
-                results.add(executeTool(sessionId, context.getTurnNo(), task.toolName, task.arguments(), context, task.shop.getShopId()));
+                results.add(executeTool(sessionId, context.getTurnNo(), task.toolName, task.arguments(), context,
+                        task.shop.getShopId(), eventConsumer));
             } catch (IllegalArgumentException e) {
                 log.warn("[AI][agent] event=COMPOUND_TOOL_FAILURE sessionId={} turnNo={} tool={} shopId={} errorType={}",
                         sessionId, context.getTurnNo(), task.toolName, task.shop.getShopId(), e.getClass().getSimpleName());
@@ -179,7 +190,9 @@ public class AgentConversationService {
         return new ToolPlanningResult(results, false);
     }
 
-    private ToolPlanningResult runToolLoop(Long sessionId, AgentSessionContext context, String userMessage, Long explicitlyReferencedShopId) {
+    private ToolPlanningResult runToolLoop(Long sessionId, AgentSessionContext context, String userMessage,
+                                           Long explicitlyReferencedShopId,
+                                           Consumer<ChatStreamEventData> eventConsumer) {
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         if (!aiProperties.isConfigured()) return new ToolPlanningResult(results, false);
         List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
@@ -205,7 +218,7 @@ public class AgentConversationService {
             log.info("[AI][agent] event=TOOL_EXECUTION_BATCH sessionId={} turnNo={} plannedTools={} parallelEligible={}", sessionId,
                     context.getTurnNo(), requests.stream().map(ToolExecutionRequest::getToolName).toList(),
                     requests.stream().filter(item -> !"search_alternative_shops".equals(item.getToolName())).count());
-            for (ToolExecutionResult execution : toolExecutionOrchestrator.execute(requests, context)) {
+            for (ToolExecutionResult execution : toolExecutionOrchestrator.execute(requests, context, eventConsumer)) {
                 persistToolExecution(sessionId, context.getTurnNo(), execution);
                 if (execution.isSuccess()) results.add(execution.getResult());
             }
@@ -218,7 +231,8 @@ public class AgentConversationService {
     }
 
     private AgentToolResult executeTool(Long sessionId, Integer turnNo, String toolName, String arguments,
-                                        AgentSessionContext context, Long explicitlyReferencedShopId) {
+                                        AgentSessionContext context, Long explicitlyReferencedShopId,
+                                        Consumer<ChatStreamEventData> eventConsumer) {
         long startedAt = System.currentTimeMillis();
         AiAgentToolCall record = new AiAgentToolCall();
         record.setSessionId(sessionId); record.setTurnNo(turnNo); record.setToolName(toolName);
@@ -227,6 +241,7 @@ public class AgentConversationService {
             materializeToolInput(input, toolName, context, explicitlyReferencedShopId);
             String effectiveArguments = objectMapper.writeValueAsString(input);
             record.setToolInputJson(effectiveArguments);
+            publishToolEvent(eventConsumer, "start", toolName, effectiveArguments, null, null, null);
             log.info("[AI][agent] event=TOOL_START sessionId={} turnNo={} tool={} arguments={}", sessionId, turnNo,
                     toolName, compact(effectiveArguments));
             AgentToolResult result = toolResultCompressor.compress(toolRegistry.find(toolName).execute(input));
@@ -236,17 +251,44 @@ public class AgentConversationService {
             record.setToolOutputJson(objectMapper.writeValueAsString(result.getFacts()));
             record.setDurationMs(System.currentTimeMillis() - startedAt);
             toolCallMapper.insert(record);
+            publishToolEvent(eventConsumer, "end", toolName, effectiveArguments, result.getDurationMs(), result, null);
             log.info("[AI][agent] event=TOOL_SUCCESS sessionId={} turnNo={} tool={} durationMs={} result={}", sessionId,
                     turnNo, toolName, result.getDurationMs(), compact(record.getToolOutputJson()));
             return result;
         } catch (Exception e) {
             record.setStatus("FAILED");
-            record.setToolOutputJson("{\"error\":\"工具执行失败\"}");
             record.setDurationMs(System.currentTimeMillis() - startedAt);
+            publishToolEvent(eventConsumer, "end", toolName, record.getToolInputJson(), record.getDurationMs(), null,
+                    e.getMessage());
+            record.setToolOutputJson("{\"error\":\"工具执行失败\"}");
             toolCallMapper.insert(record);
             log.warn("[AI][agent] event=TOOL_FAILURE sessionId={} turnNo={} tool={} errorType={} detail={}", sessionId,
                     turnNo, toolName, e.getClass().getSimpleName(), compact(e.getMessage()));
             throw new IllegalArgumentException("工具 " + toolName + " 无法执行");
+        }
+    }
+
+    private void publishToolEvent(Consumer<ChatStreamEventData> eventConsumer, String stage, String toolName,
+                                  String arguments, Long durationMs, AgentToolResult result, String errorMessage) {
+        if (eventConsumer == null) return;
+        ChatStreamEventData event = new ChatStreamEventData();
+        event.setEventName("tool_event");
+        event.setStage(stage);
+        event.setToolName(toolName);
+        event.setArguments(arguments);
+        event.setDurationMs(durationMs);
+        if (result != null) {
+            Map<String, Object> output = new LinkedHashMap<String, Object>();
+            output.put("summary", result.getSummary());
+            output.put("facts", result.getFacts());
+            event.setOutput(output);
+        } else if (errorMessage != null) {
+            event.setOutput(errorMessage);
+        }
+        try {
+            eventConsumer.accept(event);
+        } catch (RuntimeException ignored) {
+            // Streaming telemetry must not affect tool execution or tool result persistence.
         }
     }
 
@@ -298,7 +340,8 @@ public class AgentConversationService {
     }
 
     private List<AgentToolResult> runFallbackTools(Long sessionId, Integer turnNo, String message, AgentSessionContext context,
-                                                   Long explicitlyReferencedShopId) {
+                                                   Long explicitlyReferencedShopId,
+                                                   Consumer<ChatStreamEventData> eventConsumer) {
         List<String> toolNames = fallbackToolNames(message);
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         for (String toolName : toolNames) {
@@ -314,7 +357,8 @@ public class AgentConversationService {
                         ConversationEventStatus.SUCCESS, null, null, call, null);
             }
             try {
-                AgentToolResult result = executeTool(sessionId, turnNo, toolName, "{}", context, explicitlyReferencedShopId);
+                AgentToolResult result = executeTool(sessionId, turnNo, toolName, "{}", context,
+                        explicitlyReferencedShopId, eventConsumer);
                 results.add(result);
                 if (conversationEventService != null) {
                     Map<String, Object> payload = new LinkedHashMap<String, Object>();

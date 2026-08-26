@@ -50,7 +50,7 @@ public class ChatStreamService {
             ChatMessageResponse response = chatOrchestrationService.chat(request, chunk -> {
                 modelTextStreamed.set(true);
                 sendModelTextDelta(emitter, chunk);
-            });
+            }, event -> sendPipelineEvent(emitter, event));
             sendStatus(emitter, "RESULT_READY", "已获得可展示的业务结果");
             if (!modelTextStreamed.get()) sendTextDeltas(emitter, response.getAnswer());
             sendRecommendationComponent(emitter, response);
@@ -148,6 +148,14 @@ public class ChatStreamService {
             send(emitter, "text_delta", delta);
         } catch (IOException e) {
             throw new IllegalStateException("SSE client disconnected while streaming model output", e);
+        }
+    }
+
+    private void sendPipelineEvent(SseEmitter emitter, ChatStreamEventData event) {
+        try {
+            send(emitter, event.getEventName(), event);
+        } catch (IOException e) {
+            throw new IllegalStateException("SSE client disconnected while sending pipeline event", e);
         }
     }
 

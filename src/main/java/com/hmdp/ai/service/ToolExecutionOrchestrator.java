@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentSessionContext;
+import com.hmdp.ai.dto.ChatStreamEventData;
+import com.hmdp.ai.tool.AgentToolResult;
 import com.hmdp.ai.tool.AgentToolRegistry;
 import com.hmdp.ai.tool.BaseAgentTool;
 import com.hmdp.ai.tool.ToolExecutionMode;
@@ -15,12 +17,14 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /** Executes independent read-only tools concurrently while serializing stateful tools. */
 @Service
@@ -31,6 +35,11 @@ public class ToolExecutionOrchestrator {
     @Resource private AiProperties aiProperties;
 
     public List<ToolExecutionResult> execute(List<ToolExecutionRequest> requests, AgentSessionContext context) {
+        return execute(requests, context, null);
+    }
+
+    public List<ToolExecutionResult> execute(List<ToolExecutionRequest> requests, AgentSessionContext context,
+                                             Consumer<ChatStreamEventData> eventConsumer) {
         List<ToolExecutionResult> results = new ArrayList<ToolExecutionResult>();
         List<ToolExecutionRequest> parallel = new ArrayList<ToolExecutionRequest>();
         List<ToolExecutionRequest> sequential = new ArrayList<ToolExecutionRequest>();
@@ -48,7 +57,7 @@ public class ToolExecutionOrchestrator {
             try {
                 List<CompletableFuture<ToolExecutionResult>> futures = new ArrayList<CompletableFuture<ToolExecutionResult>>();
                 for (ToolExecutionRequest request : parallel) {
-                    futures.add(CompletableFuture.supplyAsync(() -> executeOne(request, snapshot(context)), executor)
+                    futures.add(CompletableFuture.supplyAsync(() -> executeOne(request, snapshot(context), eventConsumer), executor)
                             .completeOnTimeout(failed(request, "工具执行超时"), timeoutMs(), TimeUnit.MILLISECONDS));
                 }
                 for (CompletableFuture<ToolExecutionResult> future : futures) results.add(future.join());
@@ -57,12 +66,17 @@ public class ToolExecutionOrchestrator {
                 executor.shutdownNow();
             }
         }
-        for (ToolExecutionRequest request : sequential) results.add(executeOne(request, context));
+        for (ToolExecutionRequest request : sequential) results.add(executeOne(request, context, eventConsumer));
         results.sort(Comparator.comparing(ToolExecutionResult::getOrder));
         return results;
     }
 
     public ToolExecutionResult executeOne(ToolExecutionRequest request, AgentSessionContext context) {
+        return executeOne(request, context, null);
+    }
+
+    public ToolExecutionResult executeOne(ToolExecutionRequest request, AgentSessionContext context,
+                                          Consumer<ChatStreamEventData> eventConsumer) {
         long startedAt = System.currentTimeMillis();
         ToolExecutionResult outcome = new ToolExecutionResult();
         outcome.setOrder(request.getOrder());
@@ -76,12 +90,39 @@ public class ToolExecutionOrchestrator {
             }
             enrichWithDeterministicContext(input, request.getToolName(), context);
             outcome.setEffectiveArguments(objectMapper.writeValueAsString(input));
+            publishToolEvent(eventConsumer, "start", outcome);
             outcome.setResult(resultCompressor.compress(tool.execute(input)));
         } catch (Exception e) {
             outcome.setErrorMessage(e.getMessage() == null ? "工具执行失败" : e.getMessage());
         }
         outcome.setDurationMs(System.currentTimeMillis() - startedAt);
+        publishToolEvent(eventConsumer, "end", outcome);
         return outcome;
+    }
+
+    private void publishToolEvent(Consumer<ChatStreamEventData> eventConsumer, String stage,
+                                  ToolExecutionResult outcome) {
+        if (eventConsumer == null) return;
+        ChatStreamEventData event = new ChatStreamEventData();
+        event.setEventName("tool_event");
+        event.setStage(stage);
+        event.setToolName(outcome.getToolName());
+        event.setArguments(outcome.getEffectiveArguments());
+        event.setDurationMs(outcome.getDurationMs());
+        if (outcome.getResult() != null) {
+            AgentToolResult result = outcome.getResult();
+            Map<String, Object> output = new LinkedHashMap<String, Object>();
+            output.put("summary", result.getSummary());
+            output.put("facts", result.getFacts());
+            event.setOutput(output);
+        } else if (outcome.getErrorMessage() != null) {
+            event.setOutput(outcome.getErrorMessage());
+        }
+        try {
+            eventConsumer.accept(event);
+        } catch (RuntimeException ignored) {
+            // Streaming telemetry must not affect tool execution or tool result persistence.
+        }
     }
 
     private AgentSessionContext snapshot(AgentSessionContext context) {

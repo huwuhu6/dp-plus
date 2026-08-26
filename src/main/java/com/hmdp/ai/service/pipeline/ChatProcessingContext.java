@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import com.hmdp.ai.dto.ChatStreamEventData;
 
 /** Per-turn transient data. Durable business state stays in ConversationWorkingMemory. */
 @Getter
@@ -26,6 +27,7 @@ import java.util.function.Consumer;
 public class ChatProcessingContext {
     private final ChatMessageRequest request;
     private final Consumer<String> textDeltaConsumer;
+    private Consumer<ChatStreamEventData> eventConsumer;
     private String originalMessage;
     private String effectiveMessage;
     private String chatId;
@@ -47,5 +49,15 @@ public class ChatProcessingContext {
 
     public boolean isCompleted() {
         return response != null;
+    }
+
+    public void publishEvent(String eventName, ChatStreamEventData data) {
+        if (eventConsumer == null || data == null) return;
+        data.setEventName(eventName);
+        try {
+            eventConsumer.accept(data);
+        } catch (RuntimeException ignored) {
+            // Streaming telemetry must not affect the synchronous business pipeline.
+        }
     }
 }

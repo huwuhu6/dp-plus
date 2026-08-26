@@ -3,6 +3,7 @@ package com.hmdp.ai.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentSessionContext;
+import com.hmdp.ai.dto.ChatStreamEventData;
 import com.hmdp.ai.tool.AgentToolRegistry;
 import com.hmdp.ai.tool.AgentToolResult;
 import com.hmdp.ai.tool.BaseAgentTool;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -111,5 +113,33 @@ class ToolExecutionOrchestratorTest {
         assertTrue(result.isSuccess());
         assertEquals(74, ((Number) inputHolder.get().get("shopId")).intValue());
         assertEquals("{\"shopId\":74}", result.getEffectiveArguments());
+    }
+
+    @Test
+    void publishesToolStartAndEndEventsWithEffectiveArgumentsAndResultSummary() {
+        AgentToolRegistry registry = mock(AgentToolRegistry.class);
+        BaseAgentTool detail = new BaseAgentTool() {
+            @Override public String name() { return "get_shop_detail"; }
+            @Override public String description() { return "detail"; }
+            @Override public Map<String, Object> parameterSchema() { return Map.of(); }
+            @Override public AgentToolResult execute(Map<String, Object> input) {
+                AgentToolResult result = new AgentToolResult().summary("shop detail").displayText("shop detail");
+                result.setFacts(Map.of("shopId", input.get("shopId")));
+                return result;
+            }
+        };
+        when(registry.find("get_shop_detail")).thenReturn(detail);
+        List<ChatStreamEventData> events = new ArrayList<ChatStreamEventData>();
+
+        orchestrator(registry).executeOne(new ToolExecutionRequest(0, "get_shop_detail", "{\"shopId\":18}", null),
+                new AgentSessionContext(), events::add);
+
+        assertEquals(2, events.size());
+        assertEquals("tool_event", events.get(0).getEventName());
+        assertEquals("start", events.get(0).getStage());
+        assertEquals("{\"shopId\":18}", events.get(0).getArguments());
+        assertEquals("end", events.get(1).getStage());
+        assertTrue(events.get(1).getDurationMs() >= 0L);
+        assertEquals("shop detail", ((Map<?, ?>) events.get(1).getOutput()).get("summary"));
     }
 }

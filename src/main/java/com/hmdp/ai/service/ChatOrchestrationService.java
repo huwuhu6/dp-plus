@@ -8,6 +8,7 @@ import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentConversationRequest;
 import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
+import com.hmdp.ai.dto.ChatStreamEventData;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
@@ -70,7 +71,13 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
      * general-chat response to be emitted directly from the model stream.
      */
     public ChatMessageResponse chat(ChatMessageRequest request, Consumer<String> textDeltaConsumer) {
+        return chat(request, textDeltaConsumer, null);
+    }
+
+    public ChatMessageResponse chat(ChatMessageRequest request, Consumer<String> textDeltaConsumer,
+                                    Consumer<ChatStreamEventData> eventConsumer) {
         ChatProcessingContext context = new ChatProcessingContext(request, textDeltaConsumer);
+        context.setEventConsumer(eventConsumer);
         chatPipeline().process(context);
         if (context.getResponse() == null) {
             throw new IllegalStateException("chat pipeline completed without a response");
@@ -323,7 +330,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         recordPolicy(context.getChatSession(), context.getChatId(), sessionId, policy);
         applyPolicy(response, policy);
         AgentSessionContext agentContext = conversationStateService.agentContext(context.getChatSession());
-        response.setConversation(conversationService.converse(sessionId, followUp, agentContext));
+        response.setConversation(context.getEventConsumer() == null
+                ? conversationService.converse(sessionId, followUp, agentContext)
+                : conversationService.converse(sessionId, followUp, agentContext, context.getEventConsumer()));
         conversationStateService.applyAgentContext(context.getChatSession(), sessionId, agentContext);
         response.setDecisionSessionId(sessionId); response.setDecisionStatus(decision.getStatus());
         response.setAnswer(response.getConversation().getAnswer());
