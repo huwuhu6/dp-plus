@@ -101,36 +101,278 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             throw new IllegalArgumentException("message cannot be blank");
         }
         context.setOriginalMessage(request.getMessage().trim());
+        context.setChatId(chatMemoryService.resolveChatId(request.getChatId()));
+        context.setChatHistory(chatMemoryService.load(context.getChatId()));
+        if (conversationEventService != null) {
+            conversationEventService.begin(context.getChatId(), context.getChatHistory().size() / 2 + 1);
+            Map<String, Object> input = new LinkedHashMap<String, Object>();
+            input.put("content", context.getOriginalMessage());
+            input.put("decisionSessionId", request.getDecisionSessionId());
+            conversationEventService.record(ConversationEventType.USER_INPUT, ConversationEventStatus.SUCCESS,
+                    null, null, input, null);
+        }
+        AiChatSession state = conversationStateService.getOrCreate(context.getChatId());
+        if (request.getLocation() != null) conversationStateService.acceptLocation(state, request.getLocation());
+        context.setChatSession(state);
+        context.setWorkingMemory(conversationStateService.workingMemory(state));
+        Long activeSessionId = resolveActiveSessionId(state, request.getDecisionSessionId());
+        context.setActiveDecisionSessionId(activeSessionId);
+        context.setActiveDecision(activeSessionId == null ? null : decisionService.getDecision(activeSessionId));
+        log.info("[AI][chat] event=MEMORY_LOADED chatId={} messages={}", context.getChatId(), context.getChatHistory().size());
+        log.info("[AI][chat] event=TURN_START chatId={} clientSessionId={} activeSessionId={} status={} query={}",
+                context.getChatId(), request.getDecisionSessionId(), activeSessionId,
+                context.getActiveDecision() == null ? "NONE" : context.getActiveDecision().getStatus(),
+                compact(context.getOriginalMessage()));
     }
 
     @Override
     public void rewrite(ChatProcessingContext context) {
-        // The legacy executor still owns the operational transition during this
-        // compatibility step. Keeping the raw and effective slots separate now
-        // prevents nodes from passing state through mutable service fields.
-        context.setEffectiveMessage(context.getOriginalMessage());
+        context.setContextRewrite(rewriteContext(context.getOriginalMessage(), context.getChatHistory(),
+                context.getChatSession(), context.getActiveDecisionSessionId()));
+        context.setEffectiveMessage(context.getContextRewrite().getRewrittenQuery());
+        if (conversationEventService != null) {
+            Map<String, Object> rewrite = new LinkedHashMap<String, Object>();
+            rewrite.put("original", context.getOriginalMessage());
+            rewrite.put("rewritten", context.getEffectiveMessage());
+            rewrite.put("applied", context.getContextRewrite().getApplied());
+            rewrite.put("reason", context.getContextRewrite().getReason());
+            conversationEventService.record(ConversationEventType.REWRITE, ConversationEventStatus.SUCCESS,
+                    null, null, rewrite, null);
+        }
     }
 
     @Override
     public void route(ChatProcessingContext context) {
-        // Routing remains behaviour-compatible while it is migrated into the
-        // dedicated node in the following extraction step.
+        ChatMessageRequest request = context.getRequest();
+        DecisionResponse activeDecision = context.getActiveDecision();
+        String message = context.getOriginalMessage();
+        if (request.getSelectedOptionId() != null && isPausedDecision(activeDecision)) {
+            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT);
+            return;
+        }
+        if (isLocationClarification(activeDecision) && isPotentialNamedLocation(message)) {
+            ChatMessageResponse locationResponse = resolveNamedLocation(context.getChatId(), message,
+                    context.getChatSession(), context.getActiveDecisionSessionId(), activeDecision);
+            if (locationResponse != null) {
+                context.setResponse(locationResponse);
+                return;
+            }
+        }
+        if (isSuspendedDecision(activeDecision) && request.getSelectedOptionId() == null
+                && isSuspendedDecisionMetaQuestion(message)) {
+            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED);
+            return;
+        }
+        boolean replacesPausedDecision = isPausedDecision(activeDecision) && request.getSelectedOptionId() == null
+                && (context.getContextRewrite().getIntentType() == RewriteIntentType.SEARCH_REFINEMENT
+                || isNewRecommendationIntent(context.getEffectiveMessage())
+                || isContinuationRefinement(context.getEffectiveMessage(), context.getChatSession()));
+        if (replacesPausedDecision) {
+            cancelPausedDecision(context);
+            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
+            context.setUsedModel(false);
+            return;
+        }
+        if (isNewRecommendationIntent(message)
+                || context.getContextRewrite().getIntentType() == RewriteIntentType.SEARCH_REFINEMENT) {
+            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
+            context.setUsedModel(aiProperties.isConfigured());
+            return;
+        }
+        String route = resolveContextualFollowUpRoute(context.getChatId(), context.getEffectiveMessage(), context.getChatSession(),
+                context.getActiveDecisionSessionId(), activeDecision, context.getContextRewrite());
+        if (route == null) route = route(context.getEffectiveMessage(), activeDecision == null ? "NONE" : activeDecision.getStatus(), context.getChatHistory());
+        context.setRoute(route);
+        context.setAction(toProcessingAction(route));
+        context.setUsedModel(aiProperties.isConfigured());
+        if (conversationEventService != null) {
+            conversationEventService.record(ConversationEventType.ROUTE_DECISION, ConversationEventStatus.SUCCESS,
+                    null, null, java.util.Collections.<String, Object>singletonMap("route", route), null);
+        }
+        log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}",
+                context.getChatId(), context.getActiveDecisionSessionId(), route);
     }
 
     @Override
     public void reduceCriteria(ChatProcessingContext context) {
-        // Criteria reduction is executed by startDecision, which is the existing
-        // transaction boundary for reducer writes and decision snapshots.
+        if (context.getAction() != com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION) return;
+        prepareDecision(context);
     }
 
     @Override
     public void applyPolicyGuard(ChatProcessingContext context) {
-        // Policy evaluation remains adjacent to its decision execution boundary.
+        if (context.getAction() != com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION
+                || context.getWorkingMemory() == null || context.getMergedConstraints() == null) {
+            return;
+        }
+        context.setPolicyDecision(policyDecisionEngine == null ? null : policyDecisionEngine.decideRecommendation(
+                context.getDecisionRequest(), context.getMergedConstraints(), context.getWorkingMemory()));
+        if (context.getPolicyDecision() != null) {
+            recordPolicy(context.getChatSession(), context.getChatId(), null, context.getPolicyDecision());
+        }
     }
 
     @Override
     public void execute(ChatProcessingContext context) {
-        context.setResponse(executeLegacy(context.getRequest(), context.getTextDeltaConsumer()));
+        context.setResponse(executeAction(context));
+    }
+
+    private void cancelPausedDecision(ChatProcessingContext context) {
+        DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
+        cancel.setSelectedOptionId("END_DECISION");
+        cancel.setMessage("被新的餐饮需求替代：" + context.getEffectiveMessage());
+        decisionService.continueDecision(context.getActiveDecisionSessionId(), cancel);
+        conversationStateService.clearActiveDecision(context.getChatSession());
+        log.info("[AI][chat] event=PENDING_DECISION_SUPERSEDED chatId={} previousSessionId={} query={}",
+                context.getChatId(), context.getActiveDecisionSessionId(), compact(context.getEffectiveMessage()));
+    }
+
+    private void prepareDecision(ChatProcessingContext context) {
+        DecisionRequest request = new DecisionRequest();
+        request.setMaxCandidates(3);
+        context.setDecisionRequest(request);
+        if (context.getWorkingMemory() == null) {
+            request.setQuery(context.getEffectiveMessage());
+            return;
+        }
+        List<Long> excludedCandidates = refinementExclusions(context.getContextRewrite(), context.getWorkingMemory());
+        request.setExcludeShopIds(excludedCandidates);
+        com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(
+                context.getWorkingMemory().getActiveCriteria(), constraintExtractor.extract(context.getEffectiveMessage()),
+                context.getOriginalMessage(), context.getWorkingMemory().getCandidatePool(), context.getWorkingMemory().getFocusedShopId());
+        context.setCriteriaMergeResult(mergeResult);
+        context.setMergedConstraints(mergeResult.getConstraints());
+        request.setQuery(cleanRetrievalQuery(context.getEffectiveMessage(), mergeResult.getConstraints()));
+        conversationStateService.reduceCriteria(context.getChatSession(), mergeResult);
+        conversationStateService.applyNamedSearchLocation(context.getChatSession(), mergeResult.getConstraints());
+        applyLocationSlot(request, context.getChatSession(), mergeResult.getConstraints());
+        log.info("[AI][chat] event=CRITERIA_MERGED chatId={} inherited={} replaced={} appended={} cleared={} invalidated={} query={}",
+                context.getChatId(), mergeResult.getInherited(), mergeResult.getReplaced(), mergeResult.getAppended(),
+                mergeResult.getCleared(), mergeResult.getInvalidated(), compact(context.getEffectiveMessage()));
+    }
+
+    private ChatMessageResponse executeAction(ChatProcessingContext context) {
+        switch (context.getAction()) {
+            case DECISION_EVENT:
+                ChatMessageResponse eventResponse = new ChatMessageResponse();
+                eventResponse.setChatId(context.getChatId());
+                eventResponse.setRoute("DECISION_EVENT");
+                eventResponse.setUsedModel(false);
+                return handleDecisionEvent(context.getChatId(), context.getOriginalMessage(), context.getRequest(),
+                        context.getChatSession(), context.getActiveDecisionSessionId(), eventResponse);
+            case LOCATION_RESOLUTION:
+                ChatMessageResponse locationResponse = resolveNamedLocation(context.getChatId(), context.getOriginalMessage(),
+                        context.getChatSession(), context.getActiveDecisionSessionId(), context.getActiveDecision());
+                if (locationResponse != null) return locationResponse;
+                return executeGeneralChat(context, "GENERAL_CHAT");
+            case EXPLAIN_SUSPENDED:
+                return explainSuspendedDecision(context.getChatId(), context.getOriginalMessage(),
+                        context.getActiveDecisionSessionId(), context.getActiveDecision());
+            case START_DECISION:
+                return executeDecision(context);
+            case BUSINESS_FOLLOW_UP:
+                return executeBusinessFollowUp(context);
+            case EXIT_DECISION:
+                return executeExitDecision(context);
+            case GENERAL_CHAT:
+            case NONE:
+            default:
+                return executeGeneralChat(context, context.getRoute() == null ? "GENERAL_CHAT" : context.getRoute());
+        }
+    }
+
+    private ChatMessageResponse executeDecision(ChatProcessingContext context) {
+        DecisionResponse decision;
+        if (context.getWorkingMemory() == null) {
+            decision = decisionService.decide(context.getDecisionRequest());
+        } else {
+            decision = decisionService.decide(context.getDecisionRequest(), context.getMergedConstraints(), context.getChatId(),
+                    conversationEventService == null || conversationEventService.currentTrace() == null ? null
+                            : conversationEventService.currentTrace().getTraceId());
+        }
+        if (conversationEventService != null) {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("decisionSessionId", decision.getSessionId()); result.put("status", decision.getStatus());
+            conversationEventService.record(ConversationEventType.DECISION_STARTED, ConversationEventStatus.SUCCESS,
+                    null, null, result, null);
+        }
+        conversationStateService.activateDecision(context.getChatSession(), decision.getSessionId());
+        conversationStateService.snapshotDecision(context.getChatSession(), decision);
+        return buildDecisionResponse(context.getChatId(), context.getOriginalMessage(), context.getChatSession(), context.isUsedModel(),
+                context.getContextRewrite(), decision, context.getPolicyDecision());
+    }
+
+    private ChatMessageResponse executeBusinessFollowUp(ChatProcessingContext context) {
+        ChatMessageResponse response = newResponse(context, "BUSINESS_FOLLOW_UP");
+        Long sessionId = resolveFollowUpSessionId(context.getChatId(), context.getChatSession(), context.getActiveDecisionSessionId());
+        if (sessionId == null) {
+            response.setAnswer("没有找到可关联的推荐会话。请告诉我店名，或重新说明用餐需求。");
+            recordTurn(context.getChatId(), context.getOriginalMessage(), response);
+            return response;
+        }
+        DecisionResponse decision = decisionService.getDecision(sessionId);
+        if (!"COMPLETED".equals(decision.getStatus())) {
+            response.setDecisionSessionId(sessionId); response.setDecisionStatus(decision.getStatus());
+            response.setAnswer("刚才的推荐仍在等待补充条件，完成推荐后才能查询具体商户的评价、优惠券或备选。");
+            recordTurn(context.getChatId(), context.getOriginalMessage(), response);
+            return response;
+        }
+        AgentConversationRequest followUp = new AgentConversationRequest();
+        followUp.setMessage(context.getEffectiveMessage());
+        PolicyDecision policy = policyDecisionEngine == null ? null : policyDecisionEngine.decideFollowUp(context.getEffectiveMessage());
+        recordPolicy(context.getChatSession(), context.getChatId(), sessionId, policy);
+        applyPolicy(response, policy);
+        AgentSessionContext agentContext = conversationStateService.agentContext(context.getChatSession());
+        response.setConversation(conversationService.converse(sessionId, followUp, agentContext));
+        conversationStateService.applyAgentContext(context.getChatSession(), sessionId, agentContext);
+        response.setDecisionSessionId(sessionId); response.setDecisionStatus(decision.getStatus());
+        response.setAnswer(response.getConversation().getAnswer());
+        recordTurn(context.getChatId(), context.getOriginalMessage(), response);
+        return response;
+    }
+
+    private ChatMessageResponse executeExitDecision(ChatProcessingContext context) {
+        if (context.getActiveDecision() != null && isPausedDecision(context.getActiveDecision())) {
+            DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
+            followUp.setMessage(context.getOriginalMessage());
+            decisionService.continueDecision(context.getActiveDecisionSessionId(), followUp);
+        }
+        if (context.getActiveDecision() != null) conversationStateService.clearActiveDecision(context.getChatSession());
+        ChatMessageResponse response = executeGeneralChat(context, "EXIT_DECISION");
+        response.setDecisionSessionId(null);
+        return response;
+    }
+
+    private ChatMessageResponse executeGeneralChat(ChatProcessingContext context, String route) {
+        ChatMessageResponse response = newResponse(context, route);
+        if ("GENERAL_CHAT".equals(route) && context.getActiveDecision() != null) {
+            response.setDecisionSessionId(context.getActiveDecisionSessionId());
+            response.setDecisionStatus(context.getActiveDecision().getStatus());
+        }
+        response.setAnswer(generalReply(context.getOriginalMessage(), context.getChatHistory(),
+                conversationStateService.workingMemory(context.getChatSession()), context.getTextDeltaConsumer()));
+        if (!aiProperties.isConfigured()) {
+            response.setUsedModel(false);
+            response.setDegradedReason("模型服务未配置，本次使用本地对话降级回复。");
+            log.warn("[AI][chat] action=GENERAL_CHAT event=MODEL_NOT_CONFIGURED");
+        }
+        recordTurn(context.getChatId(), context.getOriginalMessage(), response);
+        return response;
+    }
+
+    private ChatMessageResponse newResponse(ChatProcessingContext context, String route) {
+        ChatMessageResponse response = new ChatMessageResponse();
+        response.setChatId(context.getChatId()); response.setRoute(route);
+        response.setUsedModel(context.isUsedModel()); response.setContextRewrite(context.getContextRewrite());
+        return response;
+    }
+
+    private com.hmdp.ai.service.pipeline.ChatProcessingAction toProcessingAction(String route) {
+        if ("START_DECISION".equals(route)) return com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION;
+        if ("BUSINESS_FOLLOW_UP".equals(route)) return com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP;
+        if ("EXIT_DECISION".equals(route)) return com.hmdp.ai.service.pipeline.ChatProcessingAction.EXIT_DECISION;
+        if ("EXPLAIN_SUSPENDED_DECISION".equals(route)) return com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED;
+        return com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT;
     }
 
     private ChatMessageResponse executeLegacy(ChatMessageRequest request, Consumer<String> textDeltaConsumer) {

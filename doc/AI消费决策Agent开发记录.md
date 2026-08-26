@@ -1043,3 +1043,9 @@ Runtime Event 使用 `chat_id + trace_id + turn_no + sequence_no` 标识完整�
 修复后，位置仲裁只读取本轮 `CriteriaMergeResult`，不会读取归约前的旧城市；显式目的地、当前设备位置和未指定位置通过 `locationIntent` 统一表达。搜索微调会携带旧候选商户排除列表，当前位置省略句在无候选池但存在决策上下文时也能确定性改写为新的餐饮搜索。`ChatOrchestrationServiceTest` 新增净化 Query 非空断言，覆盖该类跨层参数遗漏。
 
 真实多轮鲁棒性评测首次运行 #41 因上述空 Query 回归以 `COMPLETED_WITH_ERRORS` 结束，5 个场景均被记录为失败；该结果保留用于问题定位。修复后重新运行 #42（`conversation-robustness-v1`，DashScope `deepseek-v4-flash`、MySQL、Redis、Milvus、高德 MCP）：5/5 场景完整通过，路由、工具、地域、本地状态、最终状态和状态恢复均为 `5/5`，错误率 `0`；平均端到端耗时 `17560ms`，P50 `18986ms`，P95/P99 `19875ms`；模型调用 `1` 次且成功 `1` 次，输入/输出 token 分别为 `66/85`。本次运行作为分支整合后的验收基线。
+
+## 2026-08-26：聊天编排管道化第一阶段
+
+将此前仅作为外壳的聊天 Pipeline 改为真实承载请求中间态的执行结构。`ChatProcessingContext` 现在收敛本轮原始/改写 Query、会话与 Working Memory 快照、活动决策、路由动作、归约结果、决策请求和策略结果；这些字段只在单次请求生命周期内存在，不替代持久化 Working Memory。
+
+`BootstrapNode` 负责加载会话、历史、Working Memory 和活动决策并写入用户输入事件；`ContextRewriteNode` 写入改写结果与 Runtime Event；`IntentRoutingNode` 只选择 `ChatProcessingAction`，覆盖澄清事件、挂起解释、新推荐、搜索微调、商户追问、退出和闲聊；`CriteriaReductionNode` 仅在推荐动作下归约条件、生成净化检索 Query、应用位置仲裁和候选排除；`PolicyGuardNode` 写入确定性策略结果；`ExecutionNode` 根据已确定动作分发到推荐、商户追问或闲聊执行器。全量 `mvn -q test` 通过，原有 `ChatOrchestrationServiceTest` 保持绿灯。

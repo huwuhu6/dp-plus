@@ -3,7 +3,12 @@ package com.hmdp.ai.service.pipeline;
 import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ContextRewriteResult;
+import com.hmdp.ai.dto.ConversationWorkingMemory;
+import com.hmdp.ai.dto.CriteriaMergeResult;
+import com.hmdp.ai.dto.DecisionConstraints;
+import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.entity.AiChatSession;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +31,7 @@ public class ChatProcessingContext {
     private String chatId;
     private List<Map<String, Object>> chatHistory = Collections.emptyList();
     private AiChatSession chatSession;
+    private ConversationWorkingMemory workingMemory;
     private Long activeDecisionSessionId;
     private DecisionResponse activeDecision;
     private ContextRewriteResult contextRewrite;
@@ -33,6 +39,10 @@ public class ChatProcessingContext {
     private String route;
     private boolean cancelActiveDecision;
     private boolean usedModel;
+    private DecisionRequest decisionRequest;
+    private DecisionConstraints mergedConstraints;
+    private CriteriaMergeResult criteriaMergeResult;
+    private PolicyDecision policyDecision;
     private ChatMessageResponse response;
 
     public boolean isCompleted() {
