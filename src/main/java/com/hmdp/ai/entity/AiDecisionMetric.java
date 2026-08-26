@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 @Data
-@TableName("ai_decision_metric")
+@TableName("tbl_ai_decision_metric")
 public class AiDecisionMetric {
     @TableId(type = IdType.AUTO)
     private Long id;

@@ -8,7 +8,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("ai_agent_tool_call")
+@TableName("tbl_ai_agent_tool_call")
 public class AiAgentToolCall {
     @TableId(type = IdType.AUTO)
     private Long id;

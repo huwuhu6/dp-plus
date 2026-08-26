@@ -11,6 +11,9 @@ import java.util.List;
  */
 @Data
 public class ConversationWorkingMemory {
+    /** Internal recommendation-task references; chatId/traceId/eventId remain runtime identities. */
+    private Long activeDecisionSessionId;
+    private Long lastDecisionSessionId;
     /** Device-provided location. It must never be overwritten by a named search destination. */
     private ConversationLocationSlot location = new ConversationLocationSlot();
     /** Explicit destination used by the current recommendation task, such as "重庆" or "上街大学城". */

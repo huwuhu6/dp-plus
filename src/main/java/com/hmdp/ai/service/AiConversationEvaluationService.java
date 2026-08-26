@@ -16,10 +16,12 @@ import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
 import com.hmdp.ai.entity.AiAgentToolCall;
+import com.hmdp.ai.entity.AiConversationEvent;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseResultMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationRunMapper;
 import com.hmdp.ai.mapper.AiAgentToolCallMapper;
+import com.hmdp.ai.mapper.AiConversationEventMapper;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.utils.UserHolder;
@@ -46,6 +48,9 @@ public class AiConversationEvaluationService {
     @Resource private AiConversationEvaluationCaseMapper caseMapper;
     @Resource private AiConversationEvaluationRunMapper runMapper;
     @Resource private AiConversationEvaluationCaseResultMapper resultMapper;
+    @Resource private AiConversationEventMapper conversationEventMapper;
+    @Resource private ConversationEventService conversationEventService;
+    // Compatibility fallback for isolated tests and historical runs before V40.
     @Resource private AiAgentToolCallMapper toolCallMapper;
     @Resource private ShopMapper shopMapper;
     @Resource private ObjectMapper objectMapper;
@@ -400,8 +405,26 @@ public class AiConversationEvaluationService {
 
     private List<AiAgentToolCall> toolCalls(Set<Long> sessionIds) {
         if (sessionIds.isEmpty()) return Collections.emptyList();
-        return toolCallMapper.selectList(new QueryWrapper<AiAgentToolCall>()
-                .in("session_id", sessionIds).orderByAsc("id"));
+        if (conversationEventMapper == null) {
+            return toolCallMapper.selectList(new QueryWrapper<AiAgentToolCall>().in("session_id", sessionIds).orderByAsc("id"));
+        }
+        if (conversationEventService != null) conversationEventService.flushNow();
+        List<AiAgentToolCall> calls = new ArrayList<>();
+        List<AiConversationEvent> events = conversationEventMapper.selectList(new QueryWrapper<AiConversationEvent>()
+                .eq("event_type", "TOOL_CALL").orderByAsc("id"));
+        for (AiConversationEvent event : events) {
+            try {
+                Map<String, Object> payload = objectMapper.readValue(event.getEventResult(), new TypeReference<Map<String, Object>>() { });
+                Long sessionId = payload.get("decisionSessionId") == null ? null : Long.valueOf(String.valueOf(payload.get("decisionSessionId")));
+                if (!sessionIds.contains(sessionId)) continue;
+                AiAgentToolCall call = new AiAgentToolCall();
+                call.setId(event.getId()); call.setSessionId(sessionId);
+                call.setToolName(String.valueOf(payload.get("tool"))); call.setToolInputJson(String.valueOf(payload.get("arguments")));
+                call.setTurnNo(payload.get("turnNo") == null ? null : Integer.valueOf(String.valueOf(payload.get("turnNo"))));
+                call.setStatus(event.getStatus()); calls.add(call);
+            } catch (Exception ignored) { }
+        }
+        return calls;
     }
 
     private ToolCoverage evaluateToolCoverage(String expectedJson, List<String> actual) throws Exception {

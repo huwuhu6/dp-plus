@@ -17,15 +17,17 @@ import com.hmdp.ai.dto.DecisionTraceItem;
 import com.hmdp.ai.dto.RelaxationInfo;
 import com.hmdp.ai.dto.SemanticRecallResult;
 import com.hmdp.ai.entity.AiDecisionSession;
-import com.hmdp.ai.entity.AiDecisionStep;
 import com.hmdp.ai.entity.AiDecisionMetric;
-import com.hmdp.ai.entity.AiDecisionMessage;
+import com.hmdp.ai.entity.AiConversationEvent;
 import com.hmdp.ai.entity.AiReviewDocument;
 import com.hmdp.ai.entity.AiShopProfile;
 import com.hmdp.ai.mapper.AiDecisionSessionMapper;
 import com.hmdp.ai.mapper.AiDecisionStepMapper;
 import com.hmdp.ai.mapper.AiDecisionMetricMapper;
+import com.hmdp.ai.mapper.AiConversationEventMapper;
 import com.hmdp.ai.mapper.AiDecisionMessageMapper;
+import com.hmdp.ai.runtime.ConversationEventStatus;
+import com.hmdp.ai.runtime.ConversationEventType;
 import com.hmdp.ai.mapper.AiReviewDocumentMapper;
 import com.hmdp.ai.mapper.AiShopProfileMapper;
 import com.hmdp.entity.Shop;
@@ -63,9 +65,13 @@ public class ConsumptionDecisionService {
     @Resource private AiShopProfileMapper profileMapper;
     @Resource private AiReviewDocumentMapper reviewMapper;
     @Resource private AiDecisionSessionMapper sessionMapper;
-    @Resource private AiDecisionStepMapper stepMapper;
+    // Retained only to keep injected test fixtures and old extensions binary-compatible.
+    // Runtime writes are now emitted through tbl_ai_conversation_event.
+    @SuppressWarnings("unused") @Resource private AiDecisionStepMapper stepMapper;
     @Resource private AiDecisionMetricMapper metricMapper;
-    @Resource private AiDecisionMessageMapper messageMapper;
+    @Resource private AiConversationEventMapper conversationEventMapper;
+    @SuppressWarnings("unused") @Resource private AiDecisionMessageMapper messageMapper;
+    @Resource private ConversationEventService conversationEventService;
     @Resource private ResultEvaluationService resultEvaluationService;
     @Autowired(required = false) private SemanticShopRetriever semanticShopRetriever;
     @Value("${ai.retrieval.semantic-weight:18}") private double semanticWeight;
@@ -79,6 +85,11 @@ public class ConsumptionDecisionService {
      * already happened at the gateway, so the decision session receives a deterministic input.
      */
     public DecisionResponse decide(DecisionRequest request, DecisionConstraints mergedConstraints) {
+        return decide(request, mergedConstraints, null, null);
+    }
+
+    /** The recommendation task remains a business lifecycle, linked to but not replacing Runtime IDs. */
+    public DecisionResponse decide(DecisionRequest request, DecisionConstraints mergedConstraints, String chatId, String traceId) {
         if (request == null || request.getQuery() == null || request.getQuery().trim().isEmpty()) {
             throw new IllegalArgumentException("query 不能为空");
         }
@@ -86,6 +97,8 @@ public class ConsumptionDecisionService {
                 compact(request.getQuery()), request.getLatitude(), request.getLongitude(), request.getMaxCandidates());
         AiDecisionSession session = new AiDecisionSession();
         session.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
+        session.setChatId(chatId);
+        session.setTraceId(traceId);
         session.setQueryText(request.getQuery().trim());
         session.setStatus("CREATED");
         try {
@@ -495,12 +508,15 @@ public class ConsumptionDecisionService {
     }
 
     private void saveMessage(Long sessionId, String role, String messageType, String content) {
-        AiDecisionMessage message = new AiDecisionMessage();
-        message.setSessionId(sessionId);
-        message.setRole(role);
-        message.setMessageType(messageType);
-        message.setContent(content);
-        messageMapper.insert(message);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("decisionSessionId", sessionId);
+        result.put("role", role);
+        result.put("messageType", messageType);
+        result.put("content", content);
+        if (conversationEventService != null) {
+            conversationEventService.record("USER".equals(role) ? ConversationEventType.USER_INPUT : ConversationEventType.ASSISTANT_OUTPUT,
+                    ConversationEventStatus.SUCCESS, null, null, result, null);
+        }
     }
 
     private void populateModelUsage(DecisionResponse response, DecisionMetrics metrics) {
@@ -523,11 +539,18 @@ public class ConsumptionDecisionService {
                     ? new DecisionResponse() : objectMapper.readValue(session.getResultJson(), DecisionResponse.class);
             response.setSessionId(sessionId);
             response.setStatus(session.getStatus());
-            List<AiDecisionStep> steps = stepMapper.selectList(new QueryWrapper<AiDecisionStep>()
-                    .eq("session_id", sessionId).orderByAsc("id"));
             List<DecisionTraceItem> trace = new ArrayList<>();
-            for (AiDecisionStep step : steps) {
-                trace.add(new DecisionTraceItem(step.getState(), step.getSummary(), step.getDurationMs()));
+            if (hasText(session.getChatId()) && hasText(session.getTraceId())) {
+                List<AiConversationEvent> events = conversationEventMapper.selectList(new QueryWrapper<AiConversationEvent>()
+                        .eq("chat_id", session.getChatId()).eq("trace_id", session.getTraceId()).orderByAsc("sequence_no"));
+                for (AiConversationEvent event : events) {
+                    if (!hasText(event.getEventResult())) continue;
+                    Map<String, Object> eventResult = objectMapper.readValue(event.getEventResult(), Map.class);
+                    if (!sessionId.equals(asLong(eventResult.get("decisionSessionId"))) || eventResult.get("state") == null) continue;
+                    Number duration = (Number) eventResult.get("durationMs");
+                    trace.add(new DecisionTraceItem(String.valueOf(eventResult.get("state")),
+                            String.valueOf(eventResult.get("summary")), duration == null ? 0L : duration.longValue()));
+                }
             }
             response.setTrace(trace);
             return response;
@@ -810,23 +833,36 @@ public class ConsumptionDecisionService {
     private void recordStep(DecisionResponse response, Long sessionId, String state, String summary, long startedAt) {
         long duration = Math.max(0L, System.currentTimeMillis() - startedAt);
         response.getTrace().add(new DecisionTraceItem(state, summary, duration));
-        AiDecisionStep step = new AiDecisionStep();
-        step.setSessionId(sessionId);
-        step.setState(state);
-        step.setSummary(summary);
-        step.setDurationMs(duration);
-        stepMapper.insert(step);
+        recordRuntimeStep(sessionId, state, summary, duration);
     }
 
     private void recordCompletedStep(DecisionResponse response, Long sessionId, String state, String summary, Long durationMs) {
         long duration = durationMs == null ? 0L : durationMs;
         response.getTrace().add(new DecisionTraceItem(state, summary, duration));
-        AiDecisionStep step = new AiDecisionStep();
-        step.setSessionId(sessionId);
-        step.setState(state);
-        step.setSummary(summary);
-        step.setDurationMs(duration);
-        stepMapper.insert(step);
+        recordRuntimeStep(sessionId, state, summary, duration);
+    }
+
+    private void recordRuntimeStep(Long sessionId, String state, String summary, long duration) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("decisionSessionId", sessionId); result.put("state", state);
+        result.put("summary", summary); result.put("durationMs", duration);
+        if (conversationEventService != null) {
+            conversationEventService.record(eventTypeForStep(state), ConversationEventStatus.SUCCESS, null, null, result, null);
+        }
+    }
+
+    private ConversationEventType eventTypeForStep(String state) {
+        if ("RETRIEVING".equals(state) || "SEMANTIC_RETRIEVING".equals(state) || "RERANKING".equals(state)) return ConversationEventType.RETRIEVAL;
+        if ("RESULT_EVALUATING".equals(state)) return ConversationEventType.RESULT_EVALUATION;
+        if ("WAITING_RELAXATION".equals(state)) return ConversationEventType.AUTO_RELAXATION;
+        if ("CLARIFYING".equals(state)) return ConversationEventType.POLICY_DECISION;
+        return ConversationEventType.DECISION_STARTED;
+    }
+
+    private Long asLong(Object value) {
+        if (value instanceof Number) return ((Number) value).longValue();
+        if (value == null) return null;
+        try { return Long.valueOf(String.valueOf(value)); } catch (NumberFormatException ignored) { return null; }
     }
 
     private boolean contains(String source, String expected) {

@@ -8,15 +8,13 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("tbl_ai_chat_session_legacy")
-public class AiChatSession {
-    @TableId(type = IdType.INPUT)
+@TableName("tbl_ai_working_memory")
+public class AiWorkingMemory {
+    @TableId(type = IdType.ASSIGN_ID)
+    private Long id;
     private String chatId;
     private Long userId;
-    private Long activeDecisionSessionId;
-    private Long lastDecisionSessionId;
     private Integer version;
-    private String slotsJson;
-    private String workingMemoryJson;
-    private LocalDateTime updateTime;
+    private String memoryJson;
+    private LocalDateTime createdAt;
 }

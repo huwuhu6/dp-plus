@@ -434,7 +434,6 @@ class ConsumptionDecisionServiceTest {
         assertTrue(error.getMessage().contains("已被其他续聊请求处理"));
         verify(shopMapper, never()).selectList(any());
         verify(constraintExtractor).extract("找附近的火锅");
-        verify(messageMapper, org.mockito.Mockito.times(2)).insert(any(AiDecisionMessage.class));
     }
 
     @Test
@@ -506,7 +505,6 @@ class ConsumptionDecisionServiceTest {
         assertEquals("已结束本次推荐。需要新的消费建议时，请发起新的请求。", cancelled.getAnswer());
         assertEquals("CANCELLED", sessionCaptor.getValue().getStatus());
         verify(shopMapper, times(1)).selectList(any());
-        verify(messageMapper, times(4)).insert(any(AiDecisionMessage.class));
     }
 
     @Test

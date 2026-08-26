@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 @Data
-@TableName("ai_conversation_evaluation_case_result")
+@TableName("tbl_ai_conversation_evaluation_case_result")
 public class AiConversationEvaluationCaseResult {
     @TableId(type = IdType.AUTO)
     private Long id;

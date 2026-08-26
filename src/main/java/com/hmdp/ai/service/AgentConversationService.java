@@ -15,9 +15,13 @@ import com.hmdp.ai.dto.AgentToolTraceItem;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.entity.AiAgentToolCall;
+import com.hmdp.ai.entity.AiConversationEvent;
 import com.hmdp.ai.entity.AiDecisionMessage;
 import com.hmdp.ai.entity.AiDecisionSession;
 import com.hmdp.ai.mapper.AiAgentToolCallMapper;
+import com.hmdp.ai.mapper.AiConversationEventMapper;
+import com.hmdp.ai.runtime.ConversationEventStatus;
+import com.hmdp.ai.runtime.ConversationEventType;
 import com.hmdp.ai.mapper.AiDecisionMessageMapper;
 import com.hmdp.ai.mapper.AiDecisionSessionMapper;
 import com.hmdp.ai.tool.AgentToolRegistry;
@@ -43,6 +47,8 @@ public class AgentConversationService {
     @Resource private AiDecisionSessionMapper sessionMapper;
     @Resource private AiDecisionMessageMapper messageMapper;
     @Resource private AiAgentToolCallMapper toolCallMapper;
+    @Resource private AiConversationEventMapper conversationEventMapper;
+    @Resource private ConversationEventService conversationEventService;
     @Resource private AgentToolRegistry toolRegistry;
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private SpringAiTextClient springAiTextClient;
@@ -118,8 +124,23 @@ public class AgentConversationService {
         AiDecisionSession session = sessionMapper.selectById(sessionId);
         if (session == null) throw new IllegalArgumentException("决策记录不存在");
         ensureOwner(session);
-        return toolCallMapper.selectList(new QueryWrapper<AiAgentToolCall>()
-                .eq("session_id", sessionId).orderByAsc("turn_no").orderByAsc("id"));
+        if (!hasText(session.getChatId()) || !hasText(session.getTraceId())) return new ArrayList<AiAgentToolCall>();
+        List<AiAgentToolCall> calls = new ArrayList<AiAgentToolCall>();
+        List<AiConversationEvent> events = conversationEventMapper.selectList(new QueryWrapper<AiConversationEvent>()
+                .eq("chat_id", session.getChatId()).eq("trace_id", session.getTraceId())
+                .eq("event_type", ConversationEventType.TOOL_CALL.name()).orderByAsc("sequence_no"));
+        for (AiConversationEvent event : events) {
+            try {
+                Map<String, Object> value = objectMapper.readValue(event.getEventResult(), new TypeReference<Map<String, Object>>() { });
+                if (!sessionId.equals(asLong(value.get("decisionSessionId")))) continue;
+                AiAgentToolCall call = new AiAgentToolCall();
+                call.setId(event.getId()); call.setSessionId(sessionId);
+                call.setToolName(String.valueOf(value.get("tool"))); call.setToolInputJson(String.valueOf(value.get("arguments")));
+                call.setTurnNo(asInteger(value.get("turnNo"))); call.setStatus(event.getStatus());
+                calls.add(call);
+            } catch (Exception ignored) { }
+        }
+        return calls;
     }
 
     /**
@@ -204,6 +225,14 @@ public class AgentConversationService {
     }
 
     private void persistToolExecution(Long sessionId, Integer turnNo, ToolExecutionResult execution) {
+        Long callEventId = null;
+        if (conversationEventService != null) {
+            Map<String, Object> call = new LinkedHashMap<String, Object>();
+            call.put("tool", execution.getToolName()); call.put("arguments", execution.getEffectiveArguments());
+            call.put("decisionSessionId", sessionId); call.put("turnNo", turnNo);
+            callEventId = conversationEventService.record(ConversationEventType.TOOL_CALL, ConversationEventStatus.SUCCESS,
+                    null, null, call, null);
+        }
         AiAgentToolCall record = new AiAgentToolCall();
         record.setSessionId(sessionId); record.setTurnNo(turnNo); record.setToolName(execution.getToolName());
         record.setToolInputJson(execution.getEffectiveArguments());
@@ -212,7 +241,14 @@ public class AgentConversationService {
             try {
                 record.setStatus("SUCCESS");
                 record.setToolOutputJson(objectMapper.writeValueAsString(execution.getResult().getFacts()));
-                toolCallMapper.insert(record);
+                if (conversationEventService != null) {
+                    Map<String, Object> result = new LinkedHashMap<String, Object>();
+                    result.put("tool", execution.getToolName()); result.put("facts", execution.getResult().getFacts());
+                    result.put("decisionSessionId", sessionId);
+                    conversationEventService.record(ConversationEventType.TOOL_RESULT, ConversationEventStatus.SUCCESS,
+                            null, callEventId, result,
+                            java.util.Collections.<String, Object>singletonMap("durationMs", execution.getDurationMs()));
+                }
                 log.info("[AI][agent] event=TOOL_SUCCESS sessionId={} turnNo={} tool={} durationMs={} result={}", sessionId,
                         turnNo, execution.getToolName(), execution.getDurationMs(), compact(record.getToolOutputJson()));
             } catch (Exception e) {
@@ -222,7 +258,14 @@ public class AgentConversationService {
         } else {
             record.setStatus("FAILED");
             record.setToolOutputJson("{\"error\":\"工具执行失败\"}");
-            toolCallMapper.insert(record);
+            if (conversationEventService != null) {
+                Map<String, Object> result = new LinkedHashMap<String, Object>();
+                result.put("tool", execution.getToolName()); result.put("error", execution.getErrorMessage());
+                result.put("decisionSessionId", sessionId);
+                conversationEventService.record(ConversationEventType.TOOL_RESULT, ConversationEventStatus.FAILED,
+                        null, callEventId, result,
+                        java.util.Collections.<String, Object>singletonMap("durationMs", execution.getDurationMs()));
+            }
             log.warn("[AI][agent] event=TOOL_FAILURE sessionId={} turnNo={} tool={} durationMs={} detail={}", sessionId,
                     turnNo, execution.getToolName(), execution.getDurationMs(), compact(execution.getErrorMessage()));
         }
@@ -470,9 +513,8 @@ public class AgentConversationService {
     }
 
     private void saveMessage(Long sessionId, String role, String type, String content) {
-        AiDecisionMessage message = new AiDecisionMessage();
-        message.setSessionId(sessionId); message.setRole(role); message.setMessageType(type); message.setContent(content);
-        messageMapper.insert(message);
+        // The chat boundary emits USER_INPUT and ASSISTANT_OUTPUT once per turn.
+        // Do not duplicate the same content in a task-local message log.
     }
 
     private void ensureOwner(AiDecisionSession session) {
@@ -486,6 +528,18 @@ public class AgentConversationService {
         if (value == null) return "";
         String result = value.replaceAll("[\\r\\n\\t]+", " ");
         return result.length() > 1200 ? result.substring(0, 1200) + "..." : result;
+    }
+
+    private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
+
+    private Long asLong(Object value) {
+        try { return value == null ? null : Long.valueOf(String.valueOf(value)); }
+        catch (NumberFormatException ignored) { return null; }
+    }
+
+    private Integer asInteger(Object value) {
+        try { return value == null ? null : Integer.valueOf(String.valueOf(value)); }
+        catch (NumberFormatException ignored) { return null; }
     }
 
     private static class ToolPlanningResult {

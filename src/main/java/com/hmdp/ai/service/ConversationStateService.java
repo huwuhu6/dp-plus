@@ -1,6 +1,6 @@
 package com.hmdp.ai.service;
 
-import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ChatLocationInput;
@@ -14,7 +14,10 @@ import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
+import com.hmdp.ai.entity.AiWorkingMemory;
 import com.hmdp.ai.mapper.AiChatSessionMapper;
+import com.hmdp.ai.mapper.AiWorkingMemoryMapper;
+import com.hmdp.ai.runtime.ConversationEventType;
 import com.hmdp.utils.UserHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,20 +34,40 @@ public class ConversationStateService {
     private static final int LOCATION_TTL_MINUTES = 30;
 
     @Resource private AiChatSessionMapper chatSessionMapper;
+    @Resource private AiWorkingMemoryMapper workingMemoryMapper;
+    @Resource private WorkingMemoryVersionService workingMemoryVersionService;
     @Resource private ObjectMapper objectMapper;
 
     public AiChatSession getOrCreate(String chatId) {
-        AiChatSession state = chatSessionMapper.selectById(chatId);
-        if (state == null) {
-            state = new AiChatSession();
-            state.setChatId(chatId);
-            state.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
-            state.setVersion(1);
-            ConversationWorkingMemory memory = new ConversationWorkingMemory();
-            state.setSlotsJson(writeLegacySlots(memory));
-            state.setWorkingMemoryJson(writeWorkingMemory(memory));
-            chatSessionMapper.insert(state);
+        AiWorkingMemory latest = workingMemoryVersionService.latest(chatId);
+        AiChatSession state = new AiChatSession();
+        state.setChatId(chatId);
+        if (latest == null) {
+            // The legacy row is read once for in-place database upgrades, never updated again.
+            AiChatSession legacy = chatSessionMapper.selectById(chatId);
+            if (legacy != null) {
+                state = legacy;
+                ConversationWorkingMemory memory = workingMemory(legacy);
+                memory.setActiveDecisionSessionId(legacy.getActiveDecisionSessionId());
+                memory.setLastDecisionSessionId(legacy.getLastDecisionSessionId());
+                persistMemory(state, memory, ConversationEventType.STATE_REDUCED, "LEGACY_MEMORY_IMPORTED");
+            } else {
+                state.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
+                state.setVersion(0);
+                persistMemory(state, new ConversationWorkingMemory(), ConversationEventType.STATE_REDUCED, "INITIAL_MEMORY_CREATED");
+            }
+        } else {
+            state.setUserId(latest.getUserId());
+            state.setVersion(latest.getVersion());
+            state.setWorkingMemoryJson(latest.getMemoryJson());
+            ConversationWorkingMemory memory = workingMemory(state);
+            state.setActiveDecisionSessionId(memory.getActiveDecisionSessionId());
+            state.setLastDecisionSessionId(memory.getLastDecisionSessionId());
         }
+        /*
+         * ai_chat_session is retained as a legacy read-only migration source. The
+         * versioned memory table is now the single durable state source.
+         */
         ensureOwner(state);
         return state;
     }
@@ -150,10 +173,8 @@ public class ConversationStateService {
 
     public void recordPolicy(AiChatSession state, PolicyDecision decision) {
         if (decision == null) return;
-        ConversationWorkingMemory memory = workingMemory(state);
-        memory.setLastPolicyAction(decision.getAction());
-        memory.setLastPolicyReason(decision.getReason());
-        updateWorkingMemory(state, memory);
+        // Policy is runtime diagnostics, not durable business state. Do not create
+        // a meaningless Working Memory version merely to retain a log field.
     }
 
     public void declineLocation(AiChatSession state) {
@@ -166,7 +187,9 @@ public class ConversationStateService {
 
     public void activateDecision(AiChatSession state, Long decisionSessionId) {
         if (decisionSessionId == null) return;
-        state.setActiveDecisionSessionId(decisionSessionId); state.setLastDecisionSessionId(decisionSessionId); update(state);
+        ConversationWorkingMemory memory = workingMemory(state);
+        memory.setActiveDecisionSessionId(decisionSessionId); memory.setLastDecisionSessionId(decisionSessionId);
+        updateWorkingMemory(state, memory);
     }
 
     /** Applies the deterministic criteria delta before a new decision can reuse stale candidates. */
@@ -255,11 +278,20 @@ public class ConversationStateService {
         return agentContext(state);
     }
 
-    public void clearActiveDecision(AiChatSession state) { if (state.getActiveDecisionSessionId() != null) { state.setActiveDecisionSessionId(null); update(state); } }
-    public void rememberLastDecision(AiChatSession state, Long decisionSessionId) { if (decisionSessionId != null && !decisionSessionId.equals(state.getLastDecisionSessionId())) { state.setLastDecisionSessionId(decisionSessionId); update(state); } }
+    public void clearActiveDecision(AiChatSession state) { if (state.getActiveDecisionSessionId() != null) { ConversationWorkingMemory memory = workingMemory(state); memory.setActiveDecisionSessionId(null); updateWorkingMemory(state, memory); } }
+    public void rememberLastDecision(AiChatSession state, Long decisionSessionId) { if (decisionSessionId != null && !decisionSessionId.equals(state.getLastDecisionSessionId())) { ConversationWorkingMemory memory = workingMemory(state); memory.setLastDecisionSessionId(decisionSessionId); updateWorkingMemory(state, memory); } }
 
-    private void updateWorkingMemory(AiChatSession state, ConversationWorkingMemory memory) { normalize(memory); state.setWorkingMemoryJson(writeWorkingMemory(memory)); state.setSlotsJson(writeLegacySlots(memory)); update(state); }
-    private void update(AiChatSession state) { int version = state.getVersion() == null ? 0 : state.getVersion(); state.setVersion(version + 1); int updated = chatSessionMapper.update(state, new UpdateWrapper<AiChatSession>().eq("chat_id", state.getChatId()).eq("version", version)); if (updated != 1) throw new IllegalStateException("Conversation state changed concurrently"); }
+    private void updateWorkingMemory(AiChatSession state, ConversationWorkingMemory memory) { persistMemory(state, memory, ConversationEventType.STATE_REDUCED, "WORKING_MEMORY_UPDATED"); }
+    private void persistMemory(AiChatSession state, ConversationWorkingMemory memory, ConversationEventType eventType, String reason) {
+        normalize(memory);
+        String nextJson = writeWorkingMemory(memory);
+        if (nextJson.equals(state.getWorkingMemoryJson())) return;
+        int expectedVersion = state.getVersion() == null ? 0 : state.getVersion();
+        AiWorkingMemory committed = workingMemoryVersionService.append(state.getChatId(), state.getUserId(), expectedVersion, memory,
+                eventType, java.util.Collections.<String, Object>singletonMap("reason", reason), null);
+        state.setVersion(committed.getVersion()); state.setWorkingMemoryJson(committed.getMemoryJson());
+        state.setActiveDecisionSessionId(memory.getActiveDecisionSessionId()); state.setLastDecisionSessionId(memory.getLastDecisionSessionId());
+    }
     private String writeLegacySlots(ConversationWorkingMemory memory) { ConversationSlots slots = new ConversationSlots(); slots.setLocation(memory.getLocation()); slots.setPendingLocationCandidates(memory.getPendingLocationCandidates()); try { return objectMapper.writeValueAsString(slots); } catch (Exception e) { throw new IllegalStateException("Conversation location slots cannot be saved", e); } }
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
     private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getSearchLocation() == null) memory.setSearchLocation(new ConversationLocationSlot()); if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (memory.getActiveCriteria() == null) memory.setActiveCriteria(new DecisionConstraints()); if (memory.getCandidatePool() == null) memory.setCandidatePool(new ArrayList<DecisionRecommendation>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }

@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 @Data
-@TableName("ai_review_document")
+@TableName("tbl_ai_review_document")
 public class AiReviewDocument {
     @TableId(type = IdType.AUTO)
     private Long id;

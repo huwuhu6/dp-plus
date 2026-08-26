@@ -18,6 +18,8 @@ import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.entity.AiChatSession;
+import com.hmdp.ai.runtime.ConversationEventStatus;
+import com.hmdp.ai.runtime.ConversationEventType;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +48,7 @@ public class ChatOrchestrationService {
     @Resource private ConstraintExtractor constraintExtractor;
     @Resource private ConversationCriteriaMerger criteriaMerger;
     @Resource private PolicyDecisionEngine policyDecisionEngine;
+    @Resource private ConversationEventService conversationEventService;
     @Resource private ObjectMapper objectMapper;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
@@ -55,6 +58,14 @@ public class ChatOrchestrationService {
         String message = request.getMessage().trim();
         String chatId = chatMemoryService.resolveChatId(request.getChatId());
         List<Map<String, Object>> chatHistory = chatMemoryService.load(chatId);
+        if (conversationEventService != null) {
+            conversationEventService.begin(chatId, chatHistory.size() / 2 + 1);
+            Map<String, Object> input = new LinkedHashMap<String, Object>();
+            input.put("content", message);
+            input.put("decisionSessionId", request.getDecisionSessionId());
+            conversationEventService.record(ConversationEventType.USER_INPUT, ConversationEventStatus.SUCCESS,
+                    null, null, input, null);
+        }
         AiChatSession state = conversationStateService.getOrCreate(chatId);
         if (request.getLocation() != null) conversationStateService.acceptLocation(state, request.getLocation());
         Long activeSessionId = resolveActiveSessionId(state, request.getDecisionSessionId());
@@ -77,6 +88,13 @@ public class ChatOrchestrationService {
         }
         ContextRewriteResult contextRewrite = rewriteContext(message, chatHistory, state, activeSessionId);
         String effectiveMessage = contextRewrite.getRewrittenQuery();
+        if (conversationEventService != null) {
+            Map<String, Object> rewrite = new LinkedHashMap<String, Object>();
+            rewrite.put("original", message); rewrite.put("rewritten", effectiveMessage);
+            rewrite.put("applied", contextRewrite.getApplied()); rewrite.put("reason", contextRewrite.getReason());
+            conversationEventService.record(ConversationEventType.REWRITE, ConversationEventStatus.SUCCESS,
+                    null, null, rewrite, null);
+        }
         if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null && isNewRecommendationIntent(effectiveMessage)) {
             DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
             cancel.setSelectedOptionId("END_DECISION");
@@ -99,6 +117,10 @@ public class ChatOrchestrationService {
         String route = resolveContextualFollowUpRoute(chatId, effectiveMessage, state, activeSessionId, activeDecision,
                 contextRewrite);
         if (route == null) route = route(effectiveMessage, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
+        if (conversationEventService != null) {
+            conversationEventService.record(ConversationEventType.ROUTE_DECISION, ConversationEventStatus.SUCCESS,
+                    null, null, java.util.Collections.<String, Object>singletonMap("route", route), null);
+        }
         log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
         ChatMessageResponse response = new ChatMessageResponse();
         response.setChatId(chatId);
@@ -192,7 +214,15 @@ public class ChatOrchestrationService {
         PolicyDecision policy = policyDecisionEngine == null ? null : policyDecisionEngine.decideRecommendation(
                 decisionRequest, mergeResult.getConstraints(), memory, explicitLocationScope);
         recordPolicy(state, chatId, null, policy);
-        DecisionResponse decision = decisionService.decide(decisionRequest, mergeResult.getConstraints());
+        DecisionResponse decision = decisionService.decide(decisionRequest, mergeResult.getConstraints(), chatId,
+                conversationEventService == null || conversationEventService.currentTrace() == null ? null
+                        : conversationEventService.currentTrace().getTraceId());
+        if (conversationEventService != null) {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("decisionSessionId", decision.getSessionId()); result.put("status", decision.getStatus());
+            conversationEventService.record(ConversationEventType.DECISION_STARTED, ConversationEventStatus.SUCCESS,
+                    null, null, result, null);
+        }
         conversationStateService.activateDecision(state, decision.getSessionId());
         conversationStateService.snapshotDecision(state, decision);
         return buildDecisionResponse(chatId, originalMessage, state, usedModel, contextRewrite, explicitLocationScope, decision, policy);
@@ -497,6 +527,13 @@ public class ChatOrchestrationService {
     private void recordPolicy(AiChatSession state, String chatId, Long sessionId, PolicyDecision policy) {
         if (policy == null) return;
         conversationStateService.recordPolicy(state, policy);
+        if (conversationEventService != null) {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("action", policy.getAction()); result.put("reason", policy.getReason());
+            result.put("blocking", policy.isBlocking()); result.put("decisionSessionId", sessionId);
+            conversationEventService.record(ConversationEventType.POLICY_DECISION, ConversationEventStatus.SUCCESS,
+                    null, null, result, null);
+        }
         log.info("[AI][policy] event=POLICY_DECIDED chatId={} sessionId={} action={} blocking={} reason={} scope={}",
                 chatId, sessionId, policy.getAction(), policy.isBlocking(), compact(policy.getReason()),
                 compact(policy.getExplicitLocationScope()));
@@ -547,6 +584,14 @@ public class ChatOrchestrationService {
 
     private void recordTurn(String chatId, String userMessage, ChatMessageResponse response) {
         chatMemoryService.appendTurn(chatId, userMessage, response.getAnswer(), response.getRoute(), response.getDecisionSessionId());
+        if (conversationEventService != null) {
+            Map<String, Object> output = new LinkedHashMap<String, Object>();
+            output.put("content", response.getAnswer()); output.put("route", response.getRoute());
+            output.put("decisionSessionId", response.getDecisionSessionId());
+            conversationEventService.record(ConversationEventType.ASSISTANT_OUTPUT, ConversationEventStatus.SUCCESS,
+                    null, null, output, null);
+            conversationEventService.clearTrace();
+        }
         log.info("[AI][chat] event=MEMORY_SAVED chatId={} userChars={} assistantChars={}", chatId,
                 userMessage.length(), response.getAnswer() == null ? 0 : response.getAnswer().length());
     }

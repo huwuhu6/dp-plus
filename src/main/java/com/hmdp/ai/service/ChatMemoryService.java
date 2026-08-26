@@ -3,8 +3,8 @@ package com.hmdp.ai.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hmdp.ai.entity.AiChatMessage;
-import com.hmdp.ai.mapper.AiChatMessageMapper;
+import com.hmdp.ai.entity.AiConversationEvent;
+import com.hmdp.ai.mapper.AiConversationEventMapper;
 import com.hmdp.utils.UserHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,7 +28,7 @@ public class ChatMemoryService {
 
     @Resource private StringRedisTemplate stringRedisTemplate;
     @Resource private ObjectMapper objectMapper;
-    @Resource private AiChatMessageMapper chatMessageMapper;
+    @Resource private AiConversationEventMapper eventMapper;
 
     public String resolveChatId(String chatId) {
         if (chatId != null && chatId.matches("[A-Za-z0-9-]{1,64}")) return chatId;
@@ -51,8 +51,6 @@ public class ChatMemoryService {
     }
 
     public void appendTurn(String chatId, String userMessage, String assistantMessage, String route, Long decisionSessionId) {
-        saveMessage(chatId, "USER", userMessage, route, decisionSessionId);
-        saveMessage(chatId, "ASSISTANT", assistantMessage, route, decisionSessionId);
         try {
             List<Map<String, Object>> messages = load(chatId);
             messages.add(message("user", userMessage));
@@ -68,9 +66,13 @@ public class ChatMemoryService {
 
     public Long findLatestDecisionSessionId(String chatId) {
         try {
-            AiChatMessage record = chatMessageMapper.selectOne(new QueryWrapper<AiChatMessage>()
-                    .eq("chat_id", chatId).isNotNull("decision_session_id").orderByDesc("id").last("limit 1"));
-            return record == null ? null : record.getDecisionSessionId();
+            AiConversationEvent record = eventMapper.selectOne(new QueryWrapper<AiConversationEvent>()
+                    .eq("chat_id", chatId).eq("event_type", "ASSISTANT_OUTPUT")
+                    .apply("JSON_EXTRACT(event_result, '$.decisionSessionId') IS NOT NULL")
+                    .orderByDesc("id").last("limit 1"));
+            if (record == null || record.getEventResult() == null) return null;
+            return objectMapper.readTree(record.getEventResult()).path("decisionSessionId").isNumber()
+                    ? objectMapper.readTree(record.getEventResult()).path("decisionSessionId").asLong() : null;
         } catch (Exception e) {
             log.warn("[AI][chat] event=DECISION_CONTEXT_LOOKUP_FAILURE chatId={} errorType={}", chatId,
                     e.getClass().getSimpleName());
@@ -80,27 +82,22 @@ public class ChatMemoryService {
 
     private List<Map<String, Object>> restoreFromDatabase(String chatId) {
         try {
-            List<AiChatMessage> records = chatMessageMapper.selectList(new QueryWrapper<AiChatMessage>()
-                    .eq("chat_id", chatId).orderByDesc("id").last("limit " + MAX_MESSAGES));
+            List<AiConversationEvent> records = eventMapper.selectList(new QueryWrapper<AiConversationEvent>()
+                    .eq("chat_id", chatId).in("event_type", "USER_INPUT", "ASSISTANT_OUTPUT")
+                    .eq("status", "SUCCESS").orderByDesc("id").last("limit " + MAX_MESSAGES));
             List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-            for (int i = records.size() - 1; i >= 0; i--) result.add(message(records.get(i).getRole(), records.get(i).getContent()));
+            for (int i = records.size() - 1; i >= 0; i--) {
+                AiConversationEvent event = records.get(i);
+                String role = "USER_INPUT".equals(event.getEventType()) ? "user" : "assistant";
+                String content = objectMapper.readTree(event.getEventResult()).path("content").asText("");
+                result.add(message(role, content));
+            }
             if (!result.isEmpty()) log.info("[AI][chat] event=MEMORY_RESTORED chatId={} messages={}", chatId, result.size());
             return result;
         } catch (Exception e) {
             log.warn("[AI][chat] event=MEMORY_DATABASE_FAILURE chatId={} errorType={}", chatId, e.getClass().getSimpleName());
             return new ArrayList<Map<String, Object>>();
         }
-    }
-
-    private void saveMessage(String chatId, String role, String content, String route, Long decisionSessionId) {
-        AiChatMessage record = new AiChatMessage();
-        record.setChatId(chatId);
-        record.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
-        record.setDecisionSessionId(decisionSessionId);
-        record.setRole(normalizeRole(role));
-        record.setRoute(route);
-        record.setContent(content == null ? "" : content);
-        chatMessageMapper.insert(record);
     }
 
     private void cache(String chatId, List<Map<String, Object>> messages) throws Exception {

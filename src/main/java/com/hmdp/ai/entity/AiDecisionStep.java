@@ -8,7 +8,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("ai_decision_step")
+@TableName("tbl_ai_decision_step")
 public class AiDecisionStep {
     @TableId(type = IdType.AUTO)
     private Long id;

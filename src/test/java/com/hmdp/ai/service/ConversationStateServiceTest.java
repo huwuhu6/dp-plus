@@ -11,6 +11,7 @@ import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
+import com.hmdp.ai.entity.AiWorkingMemory;
 import com.hmdp.ai.mapper.AiChatSessionMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -20,17 +21,14 @@ import java.util.Arrays;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class ConversationStateServiceTest {
     @Test
     void clearsCandidatePoolWhenCuisineChanges() throws Exception {
-        ConversationStateService service = new ConversationStateService();
-        AiChatSessionMapper mapper = mock(AiChatSessionMapper.class);
-        when(mapper.update(any(), any())).thenReturn(1);
-        ReflectionTestUtils.setField(service, "chatSessionMapper", mapper);
-        ReflectionTestUtils.setField(service, "objectMapper", objectMapper());
+        ConversationStateService service = service();
 
         ConversationWorkingMemory memory = new ConversationWorkingMemory();
         DecisionConstraints previous = new DecisionConstraints();
@@ -179,6 +177,15 @@ class ConversationStateServiceTest {
         when(mapper.update(any(), any())).thenReturn(1);
         ReflectionTestUtils.setField(service, "chatSessionMapper", mapper);
         ReflectionTestUtils.setField(service, "objectMapper", objectMapper());
+        WorkingMemoryVersionService versionService = mock(WorkingMemoryVersionService.class);
+        when(versionService.append(any(), any(), anyInt(), any(), any(), any(), any())).thenAnswer(invocation -> {
+            AiWorkingMemory persisted = new AiWorkingMemory();
+            persisted.setId(1L);
+            persisted.setVersion(invocation.getArgument(2, Integer.class) + 1);
+            persisted.setMemoryJson(objectMapper().writeValueAsString(invocation.getArgument(3)));
+            return persisted;
+        });
+        ReflectionTestUtils.setField(service, "workingMemoryVersionService", versionService);
         return service;
     }
 

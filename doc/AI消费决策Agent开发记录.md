@@ -969,3 +969,13 @@ Query Rewrite 移除了从 `agentContextJson` 兜底读取候选池的逻辑：W
 真实复跑前确认高德 MCP 已在后端启动时完成协议握手。运行 #27 在 MCP 不可用时有 1 条“明确目的地覆盖设备定位”轨迹无法解析重庆；重新启用 `AI_LOCATION_MCP_ENABLED=true` 并启动 MCP 后，运行 #28 对 `conversation-v1` 的 15 条轨迹全部完成，路由 `15/15`、上下文改写 `1/1`、工具断言 `15/15`、必要工具覆盖 `10/10`、本地性 `15/15`、最终状态 `15/15`、目标商户 `15/15`，平均端到端耗时 `12129ms`。地点候选不存在时的异常文案同时修正为“候选不存在或已失效”，避免把地图服务不可用误导为候选过期。
 
 `AiConversationEvaluationServiceTest` 新增异步提交回归：使用内联执行器固定验证运行记录先创建、后台执行完成后状态收敛、提交响应不携带整套案例结果；原同步轨迹汇总、上下文改写和诊断测试继续通过。
+
+## 2026-08-26：AI Runtime 事件模型与版本化 Working Memory
+
+本轮只迁移 AI 领域的数据表，统一使用 `tbl_ai_*` 前缀；老业务 `tb_*` 表不在本次变更范围内，后续单独迁移。`V40__ai_runtime_table_prefix_and_event_model.sql` 将既有 AI 表改名为 `tbl_ai_*`，并新增两类运行时实体：`tbl_ai_working_memory` 表示“当前会话状态是什么”，`tbl_ai_conversation_event` 表示“一次 Agent Run 中发生了什么”。Benchmark 的用例、运行和结果表仍独立保留，仅同步物理表前缀，不混入 Runtime Event。
+
+Working Memory 不再覆盖式写入旧的 `ai_chat_session`。同一 `chat_id` 下按 `version` 追加快照，`(chat_id, version)` 唯一约束作为乐观并发控制；真正改变位置、筛选条件、候选池、焦点商户或会话阶段时，`WorkingMemoryVersionService` 在同一事务内写入新的 Memory Version 及其 `STATE_REDUCED` / `LOCATION_RESOLUTION` 事件。普通用户输入、改写、路由、策略、工具和最终输出仅写 Event，不产生无意义的状态版本。Memory 行保存 `user_id`，会话归属校验不再依赖已退役的旧会话表。
+
+Runtime Event 使用 `chat_id + trace_id + turn_no + sequence_no` 标识完整多轮链路，覆盖 `USER_INPUT`、`REWRITE`、`ROUTE_DECISION`、`POLICY_DECISION`、`DECISION_STARTED`、`RETRIEVAL`、`RESULT_EVALUATION`、`AUTO_RELAXATION`、`TOOL_CALL`、`TOOL_RESULT` 与 `ASSISTANT_OUTPUT`。非状态事件经内存缓冲后单条批量 SQL 异步插入，避免逐事件提交阻塞聊天；评测链路在断言工具覆盖率前显式 flush，消除异步写入导致的观测竞态。推荐任务 `tbl_ai_decision_session` 继续保留，因为澄清、恢复和取消依赖独立业务生命周期；其 `chat_id`、`trace_id` 用于关联 Runtime Event，而不再扩散为第二套聊天上下文。
+
+本轮代码回归：`WorkingMemoryVersionServiceTest` 覆盖版本追加、State Event 关联和乐观锁冲突；`ConversationStateServiceTest` 覆盖状态归约与候选池级联失效；`ChatOrchestrationServiceTest` 覆盖多轮路由。定向执行 `mvn -q -Dtest=WorkingMemoryVersionServiceTest,ConversationStateServiceTest,ChatOrchestrationServiceTest test` 通过，随后执行全量 `mvn -q test` 作为提交前验证。
