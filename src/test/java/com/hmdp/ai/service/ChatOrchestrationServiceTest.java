@@ -187,7 +187,7 @@ class ChatOrchestrationServiceTest {
         when(decisionService.decide(any(DecisionRequest.class), any(DecisionConstraints.class), any(), any())).thenReturn(next);
 
         ChatMessageRequest request = new ChatMessageRequest();
-        request.setMessage("换几家看看");
+        request.setMessage("多推荐几家不同的");
         ChatMessageResponse response = service.chat(request);
 
         ArgumentCaptor<DecisionRequest> decisionRequest = ArgumentCaptor.forClass(DecisionRequest.class);
@@ -195,6 +195,7 @@ class ChatOrchestrationServiceTest {
         verify(decisionService).decide(decisionRequest.capture(), mergedConstraints.capture(), any(), any());
         assertEquals("START_DECISION", response.getRoute());
         assertTrue(decisionRequest.getValue().getQuery() != null && !decisionRequest.getValue().getQuery().isBlank());
+        assertEquals(5, decisionRequest.getValue().getMaxCandidates());
         assertEquals(Arrays.asList(9L, 10L, 11L), decisionRequest.getValue().getExcludeShopIds());
         assertEquals(RewriteIntentType.SEARCH_REFINEMENT, response.getContextRewrite().getIntentType());
         verifyNoInteractions(queryRewriteClient);

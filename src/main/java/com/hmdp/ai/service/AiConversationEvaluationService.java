@@ -740,6 +740,11 @@ public class AiConversationEvaluationService {
             boolean actualEmpty = memory.getCandidatePool() == null || memory.getCandidatePool().isEmpty();
             if (expectedEmpty != actualEmpty) return false;
         }
+        if (expected.containsKey("candidatePoolSize")) {
+            Integer expectedSize = integerValue(expected.get("candidatePoolSize"));
+            int actualSize = memory.getCandidatePool() == null ? 0 : memory.getCandidatePool().size();
+            if (expectedSize != null && expectedSize != actualSize) return false;
+        }
         if (expected.containsKey("focusedShopIdNull")) {
             boolean expectedNull = Boolean.parseBoolean(String.valueOf(expected.get("focusedShopIdNull")));
             if (expectedNull != (memory.getFocusedShopId() == null)) return false;

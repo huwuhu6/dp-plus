@@ -47,6 +47,7 @@ import java.util.function.Consumer;
 @Service
 public class ChatOrchestrationService implements ChatPipelineOperations {
     private static final Logger log = LoggerFactory.getLogger(ChatOrchestrationService.class);
+    private final RecommendationCountResolver recommendationCountResolver = new RecommendationCountResolver();
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private SpringAiTextClient springAiTextClient;
     @Resource private AiProperties aiProperties;
@@ -243,7 +244,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private void prepareDecision(ChatProcessingContext context) {
         DecisionRequest request = new DecisionRequest();
-        request.setMaxCandidates(3);
+        request.setMaxCandidates(recommendationCountResolver.resolve(context.getOriginalMessage()));
         context.setDecisionRequest(request);
         if (context.getWorkingMemory() == null) {
             request.setQuery(context.getEffectiveMessage());
@@ -539,7 +540,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                                               AiChatSession state, boolean submittedDeviceLocation, boolean usedModel,
                                               ContextRewriteResult contextRewrite) {
         DecisionRequest decisionRequest = new DecisionRequest();
-        decisionRequest.setMaxCandidates(3);
+        decisionRequest.setMaxCandidates(recommendationCountResolver.resolve(originalMessage));
         com.hmdp.ai.dto.ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
         if (memory == null) {
             // Keeps isolated gateway tests compatible with the pre-working-memory state mock.
