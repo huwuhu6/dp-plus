@@ -156,6 +156,14 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
+    void acceptsCityNamesWithOrWithoutTheMunicipalitySuffix() {
+        assertEquals(Arrays.asList("福州", "福州市"),
+                ReflectionTestUtils.invokeMethod(service, "administrativeNameAliases", "福州"));
+        assertEquals(Arrays.asList("杭州市", "杭州"),
+                ReflectionTestUtils.invokeMethod(service, "administrativeNameAliases", "杭州市"));
+    }
+
+    @Test
     void recommendationEvidenceDoesNotExposeInternalSourceType() {
         Shop shop = new Shop();
         shop.setId(4L);

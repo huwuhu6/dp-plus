@@ -346,6 +346,8 @@ public class AiConversationEvaluationService {
             List<String> actualTools = actualToolCalls.stream().map(AiAgentToolCall::getToolName).collect(Collectors.toList());
             result.setActualToolNamesJson(objectMapper.writeValueAsString(actualTools));
             result.setActualToolCallsJson(objectMapper.writeValueAsString(compactToolCalls(actualToolCalls)));
+            result.setActualRecommendationSnapshotsJson(objectMapper.writeValueAsString(
+                    compactRecommendationSnapshots(recommendationSnapshots)));
             ToolCoverage toolCoverage = evaluateToolCoverage(evaluationCase.getExpectedToolNamesJson(), actualTools);
             result.setExpectedToolCount(toolCoverage.expectedCount);
             result.setCoveredToolCount(toolCoverage.coveredCount);
@@ -438,6 +440,7 @@ public class AiConversationEvaluationService {
         diagnostic.setActualContextRewritesJson(result.getActualContextRewritesJson());
         diagnostic.setActualToolNamesJson(result.getActualToolNamesJson());
         diagnostic.setActualToolCallsJson(result.getActualToolCallsJson());
+        diagnostic.setActualRecommendationSnapshotsJson(result.getActualRecommendationSnapshotsJson());
         diagnostic.setActualFinalStatus(result.getActualFinalStatus());
         diagnostic.setRecommendedShopIds(result.getRecommendedShopIds());
         diagnostic.setRouteMatched(result.getRouteMatched());
@@ -499,8 +502,19 @@ public class AiConversationEvaluationService {
                 || targetIndex >= recommendationSnapshots.size()) return false;
         Set<Long> sourceShopIds = recommendationSnapshots.get(sourceIndex).stream()
                 .map(DecisionRecommendation::getShopId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
-        return recommendationSnapshots.get(targetIndex).stream().map(DecisionRecommendation::getShopId)
-                .filter(java.util.Objects::nonNull).noneMatch(sourceShopIds::contains);
+        Set<Long> targetShopIds = recommendationSnapshots.get(targetIndex).stream()
+                .map(DecisionRecommendation::getShopId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        return !sourceShopIds.isEmpty() && !targetShopIds.isEmpty()
+                && targetShopIds.stream().noneMatch(sourceShopIds::contains);
+    }
+
+    private List<List<Long>> compactRecommendationSnapshots(List<List<DecisionRecommendation>> snapshots) {
+        List<List<Long>> values = new ArrayList<>();
+        for (List<DecisionRecommendation> snapshot : snapshots) {
+            values.add(snapshot.stream().map(DecisionRecommendation::getShopId)
+                    .filter(java.util.Objects::nonNull).collect(Collectors.toList()));
+        }
+        return values;
     }
 
     private List<AiAgentToolCall> toolCalls(Set<Long> sessionIds) {

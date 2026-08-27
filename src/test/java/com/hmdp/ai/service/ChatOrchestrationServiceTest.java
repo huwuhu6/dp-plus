@@ -170,7 +170,9 @@ class ChatOrchestrationServiceTest {
         second.setShopId(10L); second.setAvgPrice(80L);
         com.hmdp.ai.dto.DecisionRecommendation third = new com.hmdp.ai.dto.DecisionRecommendation();
         third.setShopId(11L); third.setAvgPrice(95L);
-        memory.setCandidatePool(Arrays.asList(first, second, third)); memory.setFocusedShopId(9L);
+        memory.setCandidatePool(Collections.singletonList(third));
+        memory.setShownShopIds(Arrays.asList(9L, 10L, 11L));
+        memory.setFocusedShopId(9L);
         when(stateService.workingMemory(state)).thenReturn(memory);
         com.hmdp.ai.dto.AgentSessionContext agentContext = new com.hmdp.ai.dto.AgentSessionContext();
         agentContext.setShownShops(Arrays.asList(first, second, third));

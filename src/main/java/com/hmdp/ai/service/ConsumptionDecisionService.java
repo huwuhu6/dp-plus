@@ -610,7 +610,7 @@ public class ConsumptionDecisionService {
         long retrievingStart = System.currentTimeMillis();
         QueryWrapper<Shop> shopQuery = new QueryWrapper<Shop>();
         if (hasText(request.getProvince())) shopQuery.eq("province", request.getProvince());
-        if (hasText(request.getCity())) shopQuery.eq("city", request.getCity());
+        if (hasText(request.getCity())) shopQuery.in("city", administrativeNameAliases(request.getCity()));
         if (hasText(request.getDistrict())) shopQuery.eq("district", request.getDistrict());
         if (request.getExcludeShopIds() != null && !request.getExcludeShopIds().isEmpty()) {
             shopQuery.notIn("id", request.getExcludeShopIds());
@@ -711,6 +711,20 @@ public class ConsumptionDecisionService {
 
     private boolean hasAdministrativeScope(DecisionRequest request) {
         return hasText(request.getProvince()) || hasText(request.getCity()) || hasText(request.getDistrict());
+    }
+
+    /** City suffixes are presentation variants, unlike districts which remain exact scopes. */
+    private List<String> administrativeNameAliases(String city) {
+        String normalized = city == null ? "" : city.trim();
+        if (normalized.isEmpty()) return Collections.emptyList();
+        List<String> aliases = new ArrayList<>();
+        aliases.add(normalized);
+        if (normalized.endsWith("市") && normalized.length() > 1) {
+            aliases.add(normalized.substring(0, normalized.length() - 1));
+        } else {
+            aliases.add(normalized + "市");
+        }
+        return aliases;
     }
 
     /** Geography is consumed by SQL filters and must not become a cuisine-style semantic signal. */

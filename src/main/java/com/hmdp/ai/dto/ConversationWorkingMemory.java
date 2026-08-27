@@ -21,6 +21,8 @@ public class ConversationWorkingMemory {
     private List<ResolvedLocationCandidate> pendingLocationCandidates = new ArrayList<ResolvedLocationCandidate>();
     private DecisionConstraints activeCriteria = new DecisionConstraints();
     private List<DecisionRecommendation> candidatePool = new ArrayList<DecisionRecommendation>();
+    /** Shop ids already presented in the current retrieval domain; used for explicit refresh requests. */
+    private List<Long> shownShopIds = new ArrayList<Long>();
     private Long focusedShopId;
     private String focusedShopName;
     private String dialogPhase = "IDLE";

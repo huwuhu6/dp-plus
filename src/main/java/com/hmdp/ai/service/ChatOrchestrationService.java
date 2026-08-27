@@ -581,7 +581,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                                             com.hmdp.ai.dto.ConversationWorkingMemory memory) {
         List<Long> excluded = new ArrayList<Long>();
         if (contextRewrite == null || contextRewrite.getIntentType() != RewriteIntentType.SEARCH_REFINEMENT
-                || memory == null || memory.getCandidatePool() == null) return excluded;
+                || memory == null) return excluded;
+        if (memory.getShownShopIds() != null && !memory.getShownShopIds().isEmpty()) {
+            excluded.addAll(memory.getShownShopIds());
+            return excluded;
+        }
+        if (memory.getCandidatePool() == null) return excluded;
         for (com.hmdp.ai.dto.DecisionRecommendation candidate : memory.getCandidatePool()) {
             if (candidate.getShopId() != null) excluded.add(candidate.getShopId());
         }

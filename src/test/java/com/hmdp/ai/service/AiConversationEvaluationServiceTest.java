@@ -141,6 +141,15 @@ class AiConversationEvaluationServiceTest {
     }
 
     @Test
+    void marksAlternativeRecommendationEvaluationAsFailedWhenNoReplacementIsReturned() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+
+        assertEquals(false, ReflectionTestUtils.invokeMethod(service, "matchesUnseenRecommendations", 1,
+                List.of(List.of(recommendation(74L)), Collections.emptyList())));
+    }
+
+    @Test
     void verifiesEachConfiguredAlternativeRecommendationTurnPair() {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());

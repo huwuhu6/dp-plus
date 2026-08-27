@@ -218,6 +218,7 @@ public class ConversationStateService {
         List<DecisionRecommendation> recommendations = decision.getRecommendations() == null
                 ? new ArrayList<DecisionRecommendation>() : decision.getRecommendations();
         memory.setCandidatePool(new ArrayList<DecisionRecommendation>(recommendations));
+        appendShownShopIds(memory, recommendations);
         if (!recommendations.isEmpty()) {
             DecisionRecommendation first = recommendations.get(0);
             memory.setFocusedShopId(first.getShopId()); memory.setFocusedShopName(first.getShopName());
@@ -328,7 +329,7 @@ public class ConversationStateService {
     }
     private String writeLegacySlots(ConversationWorkingMemory memory) { ConversationSlots slots = new ConversationSlots(); slots.setLocation(memory.getLocation()); slots.setPendingLocationCandidates(memory.getPendingLocationCandidates()); try { return objectMapper.writeValueAsString(slots); } catch (Exception e) { throw new IllegalStateException("Conversation location slots cannot be saved", e); } }
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
-    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getSearchLocation() == null) memory.setSearchLocation(new ConversationLocationSlot()); if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (memory.getActiveCriteria() == null) memory.setActiveCriteria(new DecisionConstraints()); if (memory.getCandidatePool() == null) memory.setCandidatePool(new ArrayList<DecisionRecommendation>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
+    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getSearchLocation() == null) memory.setSearchLocation(new ConversationLocationSlot()); if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (memory.getActiveCriteria() == null) memory.setActiveCriteria(new DecisionConstraints()); if (memory.getCandidatePool() == null) memory.setCandidatePool(new ArrayList<DecisionRecommendation>()); if (memory.getShownShopIds() == null) memory.setShownShopIds(new ArrayList<Long>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
     private boolean changesCandidateUniverse(CriteriaMergeResult reduction) {
         // A candidate pool is only valid for the exact retrieval domain that produced it.
         // Be deliberately conservative: preserving a stale reference is worse than asking
@@ -391,9 +392,22 @@ public class ConversationStateService {
     private int invalidateCandidatePool(ConversationWorkingMemory memory) {
         int previousCandidateCount = memory.getCandidatePool().size();
         memory.setCandidatePool(new ArrayList<DecisionRecommendation>());
+        memory.setShownShopIds(new ArrayList<Long>());
         memory.setFocusedShopId(null);
         memory.setFocusedShopName(null);
         return previousCandidateCount;
+    }
+
+    private void appendShownShopIds(ConversationWorkingMemory memory, List<DecisionRecommendation> recommendations) {
+        List<Long> shown = new ArrayList<Long>(memory.getShownShopIds() == null
+                ? new ArrayList<Long>() : memory.getShownShopIds());
+        for (DecisionRecommendation recommendation : recommendations) {
+            if (recommendation != null && recommendation.getShopId() != null
+                    && !shown.contains(recommendation.getShopId())) {
+                shown.add(recommendation.getShopId());
+            }
+        }
+        memory.setShownShopIds(shown);
     }
     private boolean materialLocationChange(ConversationLocationSlot current, ChatLocationInput next) {
         if (current == null || current.getLatitude() == null || current.getLongitude() == null) return false;

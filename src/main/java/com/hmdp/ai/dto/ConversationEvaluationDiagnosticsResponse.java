@@ -32,6 +32,7 @@ public class ConversationEvaluationDiagnosticsResponse {
         private String actualContextRewritesJson;
         private String actualToolNamesJson;
         private String actualToolCallsJson;
+        private String actualRecommendationSnapshotsJson;
         private String actualFinalStatus;
         private String recommendedShopIds;
         private Boolean routeMatched;

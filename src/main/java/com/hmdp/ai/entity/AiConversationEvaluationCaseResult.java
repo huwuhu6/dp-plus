@@ -17,6 +17,7 @@ public class AiConversationEvaluationCaseResult {
     private String actualContextRewritesJson;
     private String actualToolNamesJson;
     private String actualToolCallsJson;
+    private String actualRecommendationSnapshotsJson;
     private Integer expectedToolCount;
     private Integer coveredToolCount;
     private Integer unexpectedToolCount;
