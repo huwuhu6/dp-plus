@@ -1084,3 +1084,9 @@ V49 将评测口径改为：源轮和目标轮的推荐集合都必须非空，�
 此前两个对话入口均将 `DecisionRequest.maxCandidates` 固定为 3，尽管下游支持 1 至 5 家。因此用户说“多推荐几家”也只能收到默认 3 家。新增确定性 `RecommendationCountResolver`：显式阿拉伯/中文数字优先，未指定数量保持默认 3，“多推荐几家/再多来几家”解析为安全上限 5；解析使用用户原话，不依赖模型改写结果。
 
 留出集新增 `RECOMMENDATION_COUNT_MORE_SHOPS`，以 `candidatePoolSize=5` 校验最终 Working Memory，而非只检查请求参数。真实回放 #53（模型 `deepseek-v4-flash`）中该用例通过且不在失败诊断；该运行共 16 条轨迹、完成 `12/16`、错误率 `25%`，其余失败为既有路由/工具/状态断言。新增解析器及管道传递测试通过；完整套件在本机当前环境被既有 `AmapMcpLocationResolutionServiceTest` 的 Java 语言级别错误阻断，新增代码已采用 Java 8 兼容语法。
+
+## 2026-08-27：重新进入聊天的上下文恢复评测
+
+鲁棒集新增 `ROBUST_REOPEN_CHAT_RESTORES_CONTEXT`：首轮推荐福州附近日料，随后模拟客户端重新打开聊天后仅以相同 `chatId` 追问“刚才第一家评价如何？”。评测断言后续路由为 `BUSINESS_FOLLOW_UP`、实际执行 `search_shop_evidence`，并在最终 Working Memory 中保留命名地点、候选池和焦点商户。该用例覆盖持久化状态恢复，而非仅覆盖同一请求内的连续对话。
+
+真实鲁棒集回放 #54 共 6 条轨迹；新增恢复用例未出现在失败诊断，说明路由、工具调用及持久化上下文断言均通过。该运行整体完成 `1/6`，其余既有鲁棒用例仍有 Working Memory 等断言差异，不能用总完成率否定新增恢复链路的验证结果。
