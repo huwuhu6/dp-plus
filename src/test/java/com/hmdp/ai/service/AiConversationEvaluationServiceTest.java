@@ -125,6 +125,8 @@ class AiConversationEvaluationServiceTest {
 
         assertEquals("COMPLETED", response.getRun().getStatus());
         assertEquals(true, response.getCaseResults().get(0).getUnseenRecommendationsMatched());
+        assertEquals(1, response.getRun().getUnseenRecommendationExpectedCount());
+        assertEquals(1, response.getRun().getUnseenRecommendationMatchedCount());
     }
 
     @Test
@@ -279,6 +281,10 @@ class AiConversationEvaluationServiceTest {
         baseline.setContextRewriteMatchedCount(1);
         current.setContextRewriteExpectedCount(2);
         current.setContextRewriteMatchedCount(2);
+        baseline.setUnseenRecommendationExpectedCount(2);
+        baseline.setUnseenRecommendationMatchedCount(1);
+        current.setUnseenRecommendationExpectedCount(2);
+        current.setUnseenRecommendationMatchedCount(2);
         when(runMapper.selectById(1L)).thenReturn(baseline);
         when(runMapper.selectById(2L)).thenReturn(current);
         UserDTO user = new UserDTO();
@@ -288,6 +294,7 @@ class AiConversationEvaluationServiceTest {
             ConversationEvaluationRunComparisonResponse response = service.compareRuns(2L, 1L);
             assertEquals(0.1D, response.getMetricDeltas().get("routeMatchRate"));
             assertEquals(0.5D, response.getMetricDeltas().get("contextRewriteMatchRate"));
+            assertEquals(0.5D, response.getMetricDeltas().get("unseenRecommendationMatchRate"));
             assertEquals(-200D, response.getMetricDeltas().get("avgDurationMs"));
         } finally {
             UserHolder.removeUser();

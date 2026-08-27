@@ -23,6 +23,8 @@ public class AiConversationEvaluationRun {
     private Integer localityMatchedCount;
     private Integer finalStatusMatchedCount;
     private Integer shopMatchedCount;
+    private Integer unseenRecommendationExpectedCount;
+    private Integer unseenRecommendationMatchedCount;
     private Integer completedCount;
     private Long avgDurationMs;
     private Long p50DurationMs;

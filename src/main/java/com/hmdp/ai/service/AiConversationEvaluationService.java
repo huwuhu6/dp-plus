@@ -216,6 +216,8 @@ public class AiConversationEvaluationService {
                 - rate(baseline.getLocalityMatchedCount(), baseline.getCaseCount())));
         deltas.put("finalStatusMatchRate", round(rate(current.getFinalStatusMatchedCount(), current.getCaseCount())
                 - rate(baseline.getFinalStatusMatchedCount(), baseline.getCaseCount())));
+        deltas.put("unseenRecommendationMatchRate", round(rate(current.getUnseenRecommendationMatchedCount(), current.getUnseenRecommendationExpectedCount())
+                - rate(baseline.getUnseenRecommendationMatchedCount(), baseline.getUnseenRecommendationExpectedCount())));
         deltas.put("completionRate", round(rate(current.getCompletedCount(), current.getCaseCount())
                 - rate(baseline.getCompletedCount(), baseline.getCaseCount())));
         deltas.put("avgDurationMs", round(value(current.getAvgDurationMs()) - value(baseline.getAvgDurationMs())));
@@ -666,6 +668,10 @@ public class AiConversationEvaluationService {
         run.setLocalityMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getLocalityMatched())).count());
         run.setFinalStatusMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getFinalStatusMatched())).count());
         run.setShopMatchedCount((int) results.stream().filter(item -> Boolean.TRUE.equals(item.getShopMatched())).count());
+        run.setUnseenRecommendationExpectedCount((int) results.stream()
+                .filter(item -> item.getUnseenRecommendationsMatched() != null).count());
+        run.setUnseenRecommendationMatchedCount((int) results.stream()
+                .filter(item -> Boolean.TRUE.equals(item.getUnseenRecommendationsMatched())).count());
         run.setCompletedCount((int) (results.size() - failed));
         run.setAvgDurationMs(results.isEmpty() ? 0L : Math.round(results.stream().mapToLong(AiConversationEvaluationCaseResult::getDurationMs).average().orElse(0D)));
         List<Long> durations = results.stream().map(AiConversationEvaluationCaseResult::getDurationMs).sorted().collect(Collectors.toList());
