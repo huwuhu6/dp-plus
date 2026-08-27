@@ -79,6 +79,22 @@ class ConversationContextRewriterTest {
         assertEquals(RewriteIntentType.SEARCH_REFINEMENT, result.getIntentType());
     }
 
+    @Test
+    void classifiesAlternativeRecommendationWithoutDependingOnRewriteModel() {
+        ConversationContextRewriter rewriter = new ConversationContextRewriter();
+        QueryRewriteClient textClient = mock(QueryRewriteClient.class);
+        ReflectionTestUtils.setField(rewriter, "queryRewriteClient", textClient);
+
+        ContextRewriteResult result = rewriter.rewrite("换几家看看", Collections.emptyList(), workingMemory());
+
+        assertTrue(result.getApplied());
+        assertFalse(result.getUsedModel());
+        assertEquals("ALTERNATIVE_RECOMMENDATION", result.getReason());
+        assertEquals(RewriteIntentType.SEARCH_REFINEMENT, result.getIntentType());
+        assertEquals("在当前搜索条件下推荐尚未展示的其他餐饮商户", result.getRewrittenQuery());
+        verifyNoInteractions(textClient);
+    }
+
     private AgentSessionContext workingMemory() {
         DecisionRecommendation first = new DecisionRecommendation();
         first.setShopId(101L);

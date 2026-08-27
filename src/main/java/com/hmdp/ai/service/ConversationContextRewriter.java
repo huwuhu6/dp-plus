@@ -45,6 +45,16 @@ public class ConversationContextRewriter {
         if (!hasBusinessContext(context)) {
             return ContextRewriteResult.unchanged(query, "NO_WORKING_MEMORY");
         }
+        if (requestsAlternativeRecommendations(query)) {
+            ContextRewriteResult result = new ContextRewriteResult();
+            result.setOriginalQuery(query);
+            result.setRewrittenQuery("在当前搜索条件下推荐尚未展示的其他餐饮商户");
+            result.setApplied(true);
+            result.setUsedModel(false);
+            result.setReason("ALTERNATIVE_RECOMMENDATION");
+            result.setIntentType(RewriteIntentType.SEARCH_REFINEMENT);
+            return result;
+        }
         if (!needsRewrite(query)) return ContextRewriteResult.unchanged(query, "SELF_CONTAINED");
         if (!queryRewriteClient.isConfigured()) return ContextRewriteResult.unchanged(query, "MODEL_UNAVAILABLE");
         try {
@@ -81,6 +91,7 @@ public class ConversationContextRewriter {
      */
     private RewriteIntentType classifyIntent(String original, String rewritten, AgentSessionContext context) {
         String text = ((original == null ? "" : original) + " " + (rewritten == null ? "" : rewritten)).replaceAll("\\s+", "");
+        if (requestsAlternativeRecommendations(text)) return RewriteIntentType.SEARCH_REFINEMENT;
         if (containsAny(text, "太贵", "便宜点", "更便宜", "换一家", "换一批", "换个口味", "换商圈", "更近", "附近一点", "重新筛选", "重新推荐")) {
             return RewriteIntentType.SEARCH_REFINEMENT;
         }
@@ -96,9 +107,17 @@ public class ConversationContextRewriter {
     }
 
     private boolean needsRewrite(String query) {
+        if (requestsAlternativeRecommendations(query)) return true;
         String[] signals = {"第一家", "第二家", "第三家", "这家", "那家", "上一家", "刚才那家", "换个", "便宜点", "贵点", "走过去", "多远", "多久", "有包厢", "有优惠", "有券", "团购", "继续", "安静点", "附近呢"};
         for (String signal : signals) if (query.contains(signal)) return true;
         return false;
+    }
+
+    private boolean requestsAlternativeRecommendations(String query) {
+        String normalized = query == null ? "" : query.replaceAll("\\s+", "");
+        return normalized.matches(".*(?:再|重新)?换(?:几|一|多)?(?:家|个|批).*")
+                || normalized.matches(".*(?:再)?推荐(?:几|多)?(?:家|个).*" )
+                || normalized.matches(".*(?:还有|其他|别的).{0,3}(?:店|餐厅|选择).*" );
     }
 
     private boolean refersToCurrentDeviceLocation(String query) {
