@@ -2,6 +2,7 @@ package com.hmdp.ai.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
+import com.hmdp.ai.client.QueryRewriteClient;
 import com.hmdp.ai.client.SpringAiTextClient;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentConversationResponse;
@@ -138,12 +139,14 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
-    void routesSearchRefinementBackToDecisionAndExcludesPriorCandidates() {
+    void refreshesRecommendationsWithUnseenShopsWhenUserAsksToChangeSeveralShops() {
         ChatOrchestrationService service = new ChatOrchestrationService();
         ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
         ChatMemoryService memoryService = mock(ChatMemoryService.class);
         ConversationStateService stateService = mock(ConversationStateService.class);
-        ConversationContextRewriter rewriter = mock(ConversationContextRewriter.class);
+        ConversationContextRewriter rewriter = new ConversationContextRewriter();
+        QueryRewriteClient queryRewriteClient = mock(QueryRewriteClient.class);
+        ReflectionTestUtils.setField(rewriter, "queryRewriteClient", queryRewriteClient);
         ConstraintExtractor extractor = mock(ConstraintExtractor.class);
         ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
         ReflectionTestUtils.setField(service, "decisionService", decisionService);
@@ -159,30 +162,30 @@ class ChatOrchestrationServiceTest {
         AiChatSession state = new AiChatSession();
         state.setChatId("test-chat"); state.setActiveDecisionSessionId(36L);
         when(stateService.getOrCreate("test-chat")).thenReturn(state);
-        when(stateService.agentContext(state)).thenReturn(new com.hmdp.ai.dto.AgentSessionContext());
         when(stateService.slots(state)).thenReturn(new ConversationSlots());
         com.hmdp.ai.dto.ConversationWorkingMemory memory = new com.hmdp.ai.dto.ConversationWorkingMemory();
         com.hmdp.ai.dto.DecisionRecommendation first = new com.hmdp.ai.dto.DecisionRecommendation();
         first.setShopId(9L); first.setAvgPrice(120L);
         com.hmdp.ai.dto.DecisionRecommendation second = new com.hmdp.ai.dto.DecisionRecommendation();
         second.setShopId(10L); second.setAvgPrice(80L);
-        memory.setCandidatePool(Arrays.asList(first, second)); memory.setFocusedShopId(9L);
+        com.hmdp.ai.dto.DecisionRecommendation third = new com.hmdp.ai.dto.DecisionRecommendation();
+        third.setShopId(11L); third.setAvgPrice(95L);
+        memory.setCandidatePool(Arrays.asList(first, second, third)); memory.setFocusedShopId(9L);
         when(stateService.workingMemory(state)).thenReturn(memory);
+        com.hmdp.ai.dto.AgentSessionContext agentContext = new com.hmdp.ai.dto.AgentSessionContext();
+        agentContext.setShownShops(Arrays.asList(first, second, third));
+        agentContext.setFocusedShopId(9L);
+        when(stateService.agentContext(state)).thenReturn(agentContext);
         DecisionResponse previous = new DecisionResponse();
         previous.setSessionId(36L); previous.setStatus("COMPLETED");
         when(decisionService.getDecision(36L)).thenReturn(previous);
-        ContextRewriteResult rewrite = new ContextRewriteResult();
-        rewrite.setOriginalQuery("太贵了，换个便宜点的");
-        rewrite.setRewrittenQuery("在当前候选范围中寻找人均更低的备选商户");
-        rewrite.setApplied(true); rewrite.setIntentType(RewriteIntentType.SEARCH_REFINEMENT);
-        when(rewriter.rewrite(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(rewrite);
         when(extractor.extract(anyString())).thenReturn(new DecisionConstraints());
         DecisionResponse next = new DecisionResponse();
         next.setSessionId(37L); next.setStatus("COMPLETED"); next.setAnswer("新的推荐");
         when(decisionService.decide(any(DecisionRequest.class), any(DecisionConstraints.class), any(), any())).thenReturn(next);
 
         ChatMessageRequest request = new ChatMessageRequest();
-        request.setMessage("太贵了，换个便宜点的");
+        request.setMessage("换几家看看");
         ChatMessageResponse response = service.chat(request);
 
         ArgumentCaptor<DecisionRequest> decisionRequest = ArgumentCaptor.forClass(DecisionRequest.class);
@@ -190,8 +193,9 @@ class ChatOrchestrationServiceTest {
         verify(decisionService).decide(decisionRequest.capture(), mergedConstraints.capture(), any(), any());
         assertEquals("START_DECISION", response.getRoute());
         assertTrue(decisionRequest.getValue().getQuery() != null && !decisionRequest.getValue().getQuery().isBlank());
-        assertEquals(Arrays.asList(9L, 10L), decisionRequest.getValue().getExcludeShopIds());
-        assertEquals(119, mergedConstraints.getValue().getBudgetPerPerson());
+        assertEquals(Arrays.asList(9L, 10L, 11L), decisionRequest.getValue().getExcludeShopIds());
+        assertEquals(RewriteIntentType.SEARCH_REFINEMENT, response.getContextRewrite().getIntentType());
+        verifyNoInteractions(queryRewriteClient);
     }
 
     @Test
