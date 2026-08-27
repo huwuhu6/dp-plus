@@ -21,7 +21,7 @@ import java.time.LocalDateTime;
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("tb_voucher_order")
+@TableName("tbl_voucher_order")
 public class VoucherOrder implements Serializable {
 
     private static final long serialVersionUID = 1L;

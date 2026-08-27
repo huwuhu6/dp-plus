@@ -1090,3 +1090,9 @@ V49 将评测口径改为：源轮和目标轮的推荐集合都必须非空，�
 鲁棒集新增 `ROBUST_REOPEN_CHAT_RESTORES_CONTEXT`：首轮推荐福州附近日料，随后模拟客户端重新打开聊天后仅以相同 `chatId` 追问“刚才第一家评价如何？”。评测断言后续路由为 `BUSINESS_FOLLOW_UP`、实际执行 `search_shop_evidence`，并在最终 Working Memory 中保留命名地点、候选池和焦点商户。该用例覆盖持久化状态恢复，而非仅覆盖同一请求内的连续对话。
 
 真实鲁棒集回放 #54 共 6 条轨迹；新增恢复用例未出现在失败诊断，说明路由、工具调用及持久化上下文断言均通过。该运行整体完成 `1/6`，其余既有鲁棒用例仍有 Working Memory 等断言差异，不能用总完成率否定新增恢复链路的验证结果。
+
+## 2026-08-27：业务表前缀统一与福建本地模拟数据集
+
+`V52__rename_legacy_business_tables_to_tbl_prefix.sql` 将遗留业务表统一从 `tb_` 重命名为 `tbl_`：博客、评论、关注、商户、商户类型、签到、用户、用户资料、优惠券、秒杀券和订单均已迁移；Flyway 自身的 schema history 表不改名。所有对应实体注解和 `VoucherMapper.xml` 手写 SQL 已同步为 `tbl_`。初始化 `hmdp.sql` 保持原始导入内容，新环境导入后由 Flyway 顺序执行 V52 完成改名。本机迁移已成功执行到 V52，运行时编译及受影响的对话、数量和生成器测试通过。
+
+新增 `LocalDemoDatasetService` 和 `/ai/local-demo-dataset/generate`：使用固定随机种子、稳定商户名和稳定 `source_key` 幂等生成 `tbl_shop`、`tbl_ai_shop_profile` 与 `tbl_ai_review_document`。所有生成资料均标记 `LOCAL_DEMO`；城市、区县、坐标和每城市数量由请求参数决定。生成器会拒绝乱码城市名，并提供只作用于生成商户的按城市清理接口。真实生成采用种子 `20260827`，福建数据为福州 330 家（含原有 30 家）、厦门 300 家、泉州 300 家，新增 900 家商户、900 条画像、1800 条评价。随后向量索引重建成功，文档总量为 3180。

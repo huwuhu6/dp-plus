@@ -21,7 +21,7 @@ import java.time.LocalDateTime;
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("tb_follow")
+@TableName("tbl_follow")
 public class Follow implements Serializable {
 
     private static final long serialVersionUID = 1L;

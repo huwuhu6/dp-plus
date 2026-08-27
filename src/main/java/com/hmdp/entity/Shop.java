@@ -22,7 +22,7 @@ import java.time.LocalDateTime;
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("tb_shop")
+@TableName("tbl_shop")
 public class Shop implements Serializable {
 
     private static final long serialVersionUID = 1L;

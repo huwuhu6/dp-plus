@@ -12,6 +12,7 @@ public class AiReviewDocument {
     private Long id;
     private Long shopId;
     private String sourceType;
+    private String sourceKey;
     private String content;
     private String tags;
     private Integer sentiment;
