@@ -13,7 +13,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -29,7 +29,10 @@ class MilvusSemanticShopRetrieverTest {
         Document accepted = document(1L, 0.81D);
         Document lowScore = document(1L, 0.20D);
         Document outsideHardFilter = document(2L, 0.95D);
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(accepted, lowScore, outsideHardFilter));
+        when(vectorStore.similaritySearch(argThat((SearchRequest request) -> request != null
+                && request.hasFilterExpression()
+                && request.getFilterExpression().toString().contains("shopId"))))
+                .thenReturn(List.of(accepted, lowScore, outsideHardFilter));
 
         Shop allowed = new Shop();
         allowed.setId(1L);

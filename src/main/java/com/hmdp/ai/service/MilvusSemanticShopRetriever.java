@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -50,10 +51,12 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
         Set<Long> allowedShopIds = new HashSet<>();
         for (Shop shop : hardMatchedShops) allowedShopIds.add(shop.getId());
         try {
+            List<Object> filterShopIds = new ArrayList<Object>(allowedShopIds);
             List<Document> documents = vectorStore.similaritySearch(SearchRequest.builder()
                     .query(query)
                     .topK(Math.max(1, Math.min(semanticTopK, 200)))
                     .similarityThresholdAll()
+                    .filterExpression(new FilterExpressionBuilder().in("shopId", filterShopIds).build())
                     .build());
             Map<Long, Double> scoreByShopId = new HashMap<>();
             int discarded = 0;
