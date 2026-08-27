@@ -44,3 +44,23 @@ bash jmeter/run-voucher-package-aggregation-dual-instance.sh 券码A 券码B 测
 ```
 
 运行后必须核对两张券均为 `USED`，父套餐订单也为 `USED`。这验证的是跨 JVM 的聚合状态正确性，不能用两次 HTTP 200 替代数据库核验。
+
+## 套餐券原子计数器并发基线
+
+`voucher-package-order-lock-benchmark.jmx` 与 `run-voucher-package-lock-benchmark.sh` 复用套餐券接口、Redis 登录态和本机 MySQL。每个测试用户各创建一笔 **10 张同类券** 的套餐订单；每个线程只绑定一张不同券，因此不包含同券 CAS 竞争。脚本名称保留，便于与首次“订单锁 + 全量券锁”基线直接对比；当前运行时实现为单券 CAS 与订单原子计数器。
+
+默认依次运行 `5/10/20/50` 并发：`5`、`10` 使用 1 笔订单，`20` 使用 2 笔订单，`50` 使用 5 笔订单。每笔订单内最多有 10 个并发履约请求，避免构造单笔 50 张券的非典型数据。5 并发场景只核销其中 5 张，因此预期订单为 `PARTIALLY_USED`；其余场景每笔测试订单均应为 `USED`。
+
+先启动应用。默认使用 `8083` 单 JVM：
+
+```bash
+bash jmeter/run-voucher-package-lock-benchmark.sh
+```
+
+若已启动 `8083`、`8084` 两个实例，下面的方式会将线程轮流打到两个 JVM，用于补充验证结果不依赖单 JVM 内存锁：
+
+```bash
+BENCHMARK_PORTS=8083,8084 bash jmeter/run-voucher-package-lock-benchmark.sh
+```
+
+脚本在 `jmeter/results/` 下创建按时间戳隔离的结果目录，该目录受 `.gitignore` 保护。每一档都保存 JMeter `.jtl`、线程专属券/用户 CSV、订单预期、数据库校验和汇总 `metrics.csv`；若成功数、P95/P99 源数据，或 MySQL 的订单持久化计数、券状态、审计去重和订单状态不一致，脚本会失败退出。该基线用于比较有限券数、有限同订单并发下的并发控制开销，不用于宣称全局性能最优或系统容量上限。

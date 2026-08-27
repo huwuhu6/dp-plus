@@ -13,4 +13,11 @@ final class VoucherPackageStatus {
         if (used == quantity) return "USED";
         return used == 0 ? "PARTIALLY_REFUNDED" : "PARTIALLY_USED";
     }
+
+    static String resolveFromCounters(int quantity, long used, long refunded) {
+        if (used < 0 || refunded < 0 || used + refunded > quantity) {
+            throw new IllegalArgumentException("套餐券聚合计数不合法");
+        }
+        return resolve(quantity, quantity - used - refunded, used);
+    }
 }

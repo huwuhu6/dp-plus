@@ -18,6 +18,8 @@ public class VoucherPackageOrder {
     private Long voucherId;
     private Long shopId;
     private Integer quantity;
+    private Integer usedCount;
+    private Integer refundedCount;
     private Long paidAmount;
     private String status;
     private LocalDateTime createTime;
