@@ -1051,3 +1051,10 @@ Runtime Event 使用 `chat_id + trace_id + turn_no + sequence_no` 标识完整�
 将此前仅作为外壳的聊天 Pipeline 改为真实承载请求中间态的执行结构。`ChatProcessingContext` 现在收敛本轮原始/改写 Query、会话与 Working Memory 快照、活动决策、路由动作、归约结果、决策请求和策略结果；这些字段只在单次请求生命周期内存在，不替代持久化 Working Memory。
 
 `BootstrapNode` 负责加载会话、历史、Working Memory 和活动决策并写入用户输入事件；`ContextRewriteNode` 写入改写结果与 Runtime Event；`IntentRoutingNode` 只选择 `ChatProcessingAction`，覆盖澄清事件、挂起解释、新推荐、搜索微调、商户追问、退出和闲聊；`CriteriaReductionNode` 仅在推荐动作下归约条件、生成净化检索 Query、应用位置仲裁和候选排除；`PolicyGuardNode` 写入确定性策略结果；`ExecutionNode` 根据已确定动作分发到推荐、商户追问或闲聊执行器。全量 `mvn -q test` 通过，原有 `ChatOrchestrationServiceTest` 保持绿灯。
+## 2026-08-27：替代推荐回归评测扩展
+
+本轮修复“用户说换几家，仍返回原候选”的问题后，评测不再只断言第二轮是否进入 `START_DECISION`。`V46` 将“后续推荐不得复用首轮候选”写入 `expected_unseen_from_turn`；`V47` 进一步引入数据驱动的 `expected_unseen_pairs_json`，以一组一基的 `[sourceTurn,targetTurn]` 轮次对断言候选集不相交。评测执行器从每轮 `DecisionResponse.recommendations` 快照读取商户 ID，不依赖任何固定商户或 Java 硬编码轮次，因此连续换店可声明 `[[1,2],[1,3],[2,3]]`。
+
+新增 6 条启用轨迹：主集覆盖连续两次换店、换店叠加预算/安静条件、商户评价追问后的换店；留出集覆盖“再推荐几家不同的”“还有别的餐厅吗”“换一批”三种独立措辞。鲁棒集的城市切换用例也补充了首末轮候选隔离断言，避免旧城市候选泄漏到新城市。迁移后启用轨迹从 33 条/71 轮扩展为 39 条/85 轮。
+
+本次代码评测数据：`mvn -q test` 在本地完整运行，118 个 JUnit 测试全部通过；前端 SSE 工具事件回归 3/3 通过。评测执行前的数据库基线为主集运行 #35（15/15 完成，路由 15/15、工具 14/15、最终状态 15/15，错误率 0）和鲁棒集运行 #42（5/5 完成，错误率 0）。这两个真实运行早于本轮新增用例，不能作为 V47 的通过结论；V47 需在已登录环境执行新的主集与留出集运行后，记录运行 ID、模型、检索策略和失败诊断再做版本比较。

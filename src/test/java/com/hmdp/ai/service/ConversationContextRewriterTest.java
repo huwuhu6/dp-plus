@@ -95,6 +95,21 @@ class ConversationContextRewriterTest {
         verifyNoInteractions(textClient);
     }
 
+    @Test
+    void classifiesAlternativeRecommendationWordingWithoutDependingOnRewriteModel() {
+        ConversationContextRewriter rewriter = new ConversationContextRewriter();
+        QueryRewriteClient textClient = mock(QueryRewriteClient.class);
+        ReflectionTestUtils.setField(rewriter, "queryRewriteClient", textClient);
+
+        for (String query : Arrays.asList("给我再推荐几家不同的", "还有别的餐厅吗", "换一批吧")) {
+            ContextRewriteResult result = rewriter.rewrite(query, Collections.emptyList(), workingMemory());
+            assertTrue(result.getApplied(), query);
+            assertEquals("ALTERNATIVE_RECOMMENDATION", result.getReason(), query);
+            assertEquals(RewriteIntentType.SEARCH_REFINEMENT, result.getIntentType(), query);
+        }
+        verifyNoInteractions(textClient);
+    }
+
     private AgentSessionContext workingMemory() {
         DecisionRecommendation first = new DecisionRecommendation();
         first.setShopId(101L);

@@ -28,6 +28,8 @@ public class AiConversationEvaluationCase {
     private String expectedMemoryJson;
     /** One-based prior turn whose displayed candidates must not reappear in later recommendations. */
     private Integer expectedUnseenFromTurn;
+    /** One-based source/target turn pairs whose recommendation sets must be disjoint. */
+    private String expectedUnseenPairsJson;
     private Boolean active;
     private String notes;
 }

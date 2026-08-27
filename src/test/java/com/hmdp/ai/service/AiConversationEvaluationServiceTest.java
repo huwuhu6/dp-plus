@@ -130,11 +130,23 @@ class AiConversationEvaluationServiceTest {
     @Test
     void marksAlternativeRecommendationEvaluationAsFailedWhenAShopIsRepeated() {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         DecisionRecommendation first = recommendation(74L);
         DecisionRecommendation repeated = recommendation(74L);
 
         assertEquals(false, ReflectionTestUtils.invokeMethod(service, "matchesUnseenRecommendations", 1,
                 List.of(List.of(first), List.of(repeated))));
+    }
+
+    @Test
+    void verifiesEachConfiguredAlternativeRecommendationTurnPair() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        List<List<DecisionRecommendation>> snapshots = List.of(
+                List.of(recommendation(74L)), List.of(recommendation(85L)), List.of(recommendation(74L)));
+
+        assertEquals(false, ReflectionTestUtils.invokeMethod(service, "matchesUnseenRecommendations", null,
+                "[[1,2],[2,3],[1,3]]", snapshots));
     }
 
     @Test

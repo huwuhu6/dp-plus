@@ -334,7 +334,7 @@ public class AiConversationEvaluationService {
                     evaluationCase.getExpectedRecoveryRoutesJson(), recoveryRoutes));
             result.setMemoryMatched(matchesMemory(evaluationCase.getExpectedMemoryJson(), chatId));
             result.setUnseenRecommendationsMatched(matchesUnseenRecommendations(
-                    evaluationCase.getExpectedUnseenFromTurn(), recommendationSnapshots));
+                    evaluationCase.getExpectedUnseenFromTurn(), evaluationCase.getExpectedUnseenPairsJson(), recommendationSnapshots));
             ContextRewriteCoverage rewriteCoverage = evaluateContextRewriteCoverage(
                     evaluationCase.getExpectedContextRewritesJson(), contextRewrites, recommendationSnapshots);
             result.setContextRewriteMatched(rewriteCoverage.matched);
@@ -430,6 +430,7 @@ public class AiConversationEvaluationService {
             diagnostic.setExpectedRecoveryRoutesJson(evaluationCase.getExpectedRecoveryRoutesJson());
             diagnostic.setExpectedMemoryJson(evaluationCase.getExpectedMemoryJson());
             diagnostic.setExpectedUnseenFromTurn(evaluationCase.getExpectedUnseenFromTurn());
+            diagnostic.setExpectedUnseenPairsJson(evaluationCase.getExpectedUnseenPairsJson());
         }
         diagnostic.setActualRoutesJson(result.getActualRoutesJson());
         diagnostic.setActualContextRewritesJson(result.getActualContextRewritesJson());
@@ -460,19 +461,44 @@ public class AiConversationEvaluationService {
         return actual.stream().map(String::valueOf).anyMatch(expectedIds::contains);
     }
 
+    private Boolean matchesUnseenRecommendations(Integer expectedUnseenFromTurn, String expectedPairsJson,
+                                                  List<List<DecisionRecommendation>> recommendationSnapshots) throws Exception {
+        if (expectedPairsJson != null && !expectedPairsJson.trim().isEmpty()) {
+            List<List<Integer>> expectedPairs = objectMapper.readValue(expectedPairsJson,
+                    new TypeReference<List<List<Integer>>>() { });
+            if (expectedPairs.isEmpty()) return true;
+            for (List<Integer> pair : expectedPairs) {
+                if (pair == null || pair.size() != 2 || !matchesUnseenRecommendationPair(pair.get(0), pair.get(1), recommendationSnapshots)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return matchesUnseenRecommendations(expectedUnseenFromTurn, recommendationSnapshots);
+    }
+
     private Boolean matchesUnseenRecommendations(Integer expectedUnseenFromTurn,
                                                   List<List<DecisionRecommendation>> recommendationSnapshots) {
         if (expectedUnseenFromTurn == null) return null;
         int priorTurnIndex = expectedUnseenFromTurn - 1;
         if (priorTurnIndex < 0 || priorTurnIndex >= recommendationSnapshots.size()) return false;
-        Set<Long> shownShopIds = recommendationSnapshots.get(priorTurnIndex).stream()
-                .map(DecisionRecommendation::getShopId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
         for (int index = priorTurnIndex + 1; index < recommendationSnapshots.size(); index++) {
-            for (DecisionRecommendation recommendation : recommendationSnapshots.get(index)) {
-                if (recommendation.getShopId() != null && shownShopIds.contains(recommendation.getShopId())) return false;
-            }
+            if (!matchesUnseenRecommendationPair(expectedUnseenFromTurn, index + 1, recommendationSnapshots)) return false;
         }
         return true;
+    }
+
+    private boolean matchesUnseenRecommendationPair(Integer sourceTurn, Integer targetTurn,
+                                                     List<List<DecisionRecommendation>> recommendationSnapshots) {
+        if (sourceTurn == null || targetTurn == null) return false;
+        int sourceIndex = sourceTurn - 1;
+        int targetIndex = targetTurn - 1;
+        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex >= recommendationSnapshots.size()
+                || targetIndex >= recommendationSnapshots.size()) return false;
+        Set<Long> sourceShopIds = recommendationSnapshots.get(sourceIndex).stream()
+                .map(DecisionRecommendation::getShopId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        return recommendationSnapshots.get(targetIndex).stream().map(DecisionRecommendation::getShopId)
+                .filter(java.util.Objects::nonNull).noneMatch(sourceShopIds::contains);
     }
 
     private List<AiAgentToolCall> toolCalls(Set<Long> sessionIds) {

@@ -27,6 +27,7 @@ public class ConversationEvaluationDiagnosticsResponse {
         private String expectedRecoveryRoutesJson;
         private String expectedMemoryJson;
         private Integer expectedUnseenFromTurn;
+        private String expectedUnseenPairsJson;
         private String actualRoutesJson;
         private String actualContextRewritesJson;
         private String actualToolNamesJson;
