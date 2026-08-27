@@ -26,6 +26,8 @@ public class AiConversationEvaluationCase {
     private String expectedRecoveryRoutesJson;
     /** Minimal final Working Memory assertions, never a serialized memory snapshot. */
     private String expectedMemoryJson;
+    /** One-based prior turn whose displayed candidates must not reappear in later recommendations. */
+    private Integer expectedUnseenFromTurn;
     private Boolean active;
     private String notes;
 }

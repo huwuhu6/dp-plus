@@ -90,6 +90,54 @@ class AiConversationEvaluationServiceTest {
     }
 
     @Test
+    void verifiesAlternativeRecommendationsDoNotReusePreviouslyShownShops() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
+        AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
+        AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
+        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
+        ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
+        ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "runMapper", runMapper);
+        ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
+        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+
+        AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
+        evaluationCase.setId(5L);
+        evaluationCase.setCaseCode("ALTERNATIVE_RECOMMENDATIONS_ARE_UNSEEN");
+        evaluationCase.setTurnsJson("[{\"message\":\"推荐几家\"},{\"message\":\"换几家\"}]");
+        evaluationCase.setExpectedRoutesJson("[\"START_DECISION\",\"START_DECISION\"]");
+        evaluationCase.setExpectedToolNamesJson("[]");
+        evaluationCase.setExpectedFinalStatus("COMPLETED");
+        evaluationCase.setExpectedUnseenFromTurn(1);
+        when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
+        doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(16L); return 1; })
+                .when(runMapper).insert(any(AiConversationEvaluationRun.class));
+        when(chatService.chat(any())).thenReturn(
+                responseWithRecommendationIds("START_DECISION", "COMPLETED", 74L, 89L),
+                responseWithRecommendationIds("START_DECISION", "COMPLETED", 85L, 92L));
+        when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+
+        ConversationEvaluationRunResponse response = service.runActiveCases();
+
+        assertEquals("COMPLETED", response.getRun().getStatus());
+        assertEquals(true, response.getCaseResults().get(0).getUnseenRecommendationsMatched());
+    }
+
+    @Test
+    void marksAlternativeRecommendationEvaluationAsFailedWhenAShopIsRepeated() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        DecisionRecommendation first = recommendation(74L);
+        DecisionRecommendation repeated = recommendation(74L);
+
+        assertEquals(false, ReflectionTestUtils.invokeMethod(service, "matchesUnseenRecommendations", 1,
+                List.of(List.of(first), List.of(repeated))));
+    }
+
+    @Test
     void submitsConversationEvaluationWithoutHoldingTheRequestForAllTurns() {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
@@ -331,6 +379,22 @@ class AiConversationEvaluationServiceTest {
         }
         response.setDecision(decision);
         return response;
+    }
+
+    private ChatMessageResponse responseWithRecommendationIds(String route, String status, Long... shopIds) {
+        ChatMessageResponse response = response(route, status);
+        com.hmdp.ai.dto.DecisionResponse decision = new com.hmdp.ai.dto.DecisionResponse();
+        decision.setStatus(status);
+        for (Long shopId : shopIds) decision.getRecommendations().add(recommendation(shopId));
+        response.setDecision(decision);
+        return response;
+    }
+
+    private DecisionRecommendation recommendation(Long shopId) {
+        DecisionRecommendation recommendation = new DecisionRecommendation();
+        recommendation.setShopId(shopId);
+        recommendation.setShopName("shop-" + shopId);
+        return recommendation;
     }
 
     private AiConversationEvaluationCaseResult caseResult(Long caseId, boolean routeMatched, boolean toolMatched) {

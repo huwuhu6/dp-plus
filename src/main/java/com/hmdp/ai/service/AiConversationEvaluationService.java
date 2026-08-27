@@ -249,6 +249,8 @@ public class AiConversationEvaluationService {
         failureCounts.put("shop", (int) results.stream().filter(item -> !Boolean.TRUE.equals(item.getShopMatched())).count());
         failureCounts.put("recovery", (int) results.stream().filter(item -> Boolean.FALSE.equals(item.getRecoveryMatched())).count());
         failureCounts.put("workingMemory", (int) results.stream().filter(item -> Boolean.FALSE.equals(item.getMemoryMatched())).count());
+        failureCounts.put("unseenRecommendations", (int) results.stream()
+                .filter(item -> Boolean.FALSE.equals(item.getUnseenRecommendationsMatched())).count());
         failureCounts.put("execution", (int) results.stream().filter(this::unexpectedError).count());
         ConversationEvaluationDiagnosticsResponse response = new ConversationEvaluationDiagnosticsResponse();
         response.setRun(run);
@@ -331,6 +333,8 @@ public class AiConversationEvaluationService {
             result.setRecoveryMatched(matchesRecovery(evaluationCase.getExpectedErrorCount(), actualErrorCount,
                     evaluationCase.getExpectedRecoveryRoutesJson(), recoveryRoutes));
             result.setMemoryMatched(matchesMemory(evaluationCase.getExpectedMemoryJson(), chatId));
+            result.setUnseenRecommendationsMatched(matchesUnseenRecommendations(
+                    evaluationCase.getExpectedUnseenFromTurn(), recommendationSnapshots));
             ContextRewriteCoverage rewriteCoverage = evaluateContextRewriteCoverage(
                     evaluationCase.getExpectedContextRewritesJson(), contextRewrites, recommendationSnapshots);
             result.setContextRewriteMatched(rewriteCoverage.matched);
@@ -360,6 +364,7 @@ public class AiConversationEvaluationService {
             result.setShopMatched(false);
             result.setRecoveryMatched(false);
             result.setMemoryMatched(false);
+            result.setUnseenRecommendationsMatched(false);
             result.setErrorMessage(compact(e.getMessage()));
         }
         result.setDurationMs(System.currentTimeMillis() - startedAt);
@@ -399,6 +404,7 @@ public class AiConversationEvaluationService {
                 || !Boolean.TRUE.equals(result.getShopMatched())
                 || Boolean.FALSE.equals(result.getRecoveryMatched())
                 || Boolean.FALSE.equals(result.getMemoryMatched())
+                || Boolean.FALSE.equals(result.getUnseenRecommendationsMatched())
                 || unexpectedError(result);
     }
 
@@ -423,6 +429,7 @@ public class AiConversationEvaluationService {
             diagnostic.setExpectedErrorCount(evaluationCase.getExpectedErrorCount());
             diagnostic.setExpectedRecoveryRoutesJson(evaluationCase.getExpectedRecoveryRoutesJson());
             diagnostic.setExpectedMemoryJson(evaluationCase.getExpectedMemoryJson());
+            diagnostic.setExpectedUnseenFromTurn(evaluationCase.getExpectedUnseenFromTurn());
         }
         diagnostic.setActualRoutesJson(result.getActualRoutesJson());
         diagnostic.setActualContextRewritesJson(result.getActualContextRewritesJson());
@@ -440,6 +447,7 @@ public class AiConversationEvaluationService {
         diagnostic.setActualErrorCount(result.getActualErrorCount());
         diagnostic.setRecoveryMatched(result.getRecoveryMatched());
         diagnostic.setMemoryMatched(result.getMemoryMatched());
+        diagnostic.setUnseenRecommendationsMatched(result.getUnseenRecommendationsMatched());
         diagnostic.setDurationMs(result.getDurationMs());
         diagnostic.setErrorMessage(result.getErrorMessage());
         return diagnostic;
@@ -450,6 +458,21 @@ public class AiConversationEvaluationService {
         List<String> expectedIds = new ArrayList<>();
         Collections.addAll(expectedIds, expected.split(","));
         return actual.stream().map(String::valueOf).anyMatch(expectedIds::contains);
+    }
+
+    private Boolean matchesUnseenRecommendations(Integer expectedUnseenFromTurn,
+                                                  List<List<DecisionRecommendation>> recommendationSnapshots) {
+        if (expectedUnseenFromTurn == null) return null;
+        int priorTurnIndex = expectedUnseenFromTurn - 1;
+        if (priorTurnIndex < 0 || priorTurnIndex >= recommendationSnapshots.size()) return false;
+        Set<Long> shownShopIds = recommendationSnapshots.get(priorTurnIndex).stream()
+                .map(DecisionRecommendation::getShopId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+        for (int index = priorTurnIndex + 1; index < recommendationSnapshots.size(); index++) {
+            for (DecisionRecommendation recommendation : recommendationSnapshots.get(index)) {
+                if (recommendation.getShopId() != null && shownShopIds.contains(recommendation.getShopId())) return false;
+            }
+        }
+        return true;
     }
 
     private List<AiAgentToolCall> toolCalls(Set<Long> sessionIds) {

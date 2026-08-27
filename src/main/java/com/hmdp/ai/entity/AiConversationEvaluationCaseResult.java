@@ -40,6 +40,7 @@ public class AiConversationEvaluationCaseResult {
     private Integer actualErrorCount;
     private Boolean recoveryMatched;
     private Boolean memoryMatched;
+    private Boolean unseenRecommendationsMatched;
     private String turnOutputsJson;
     private String errorMessage;
 }

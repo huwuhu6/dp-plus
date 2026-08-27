@@ -17,6 +17,8 @@ public class ChatStreamEventData {
     private String delta;
     private String componentType;
     private String toolName;
+    /** Correlates the start and end frames for one tool invocation. */
+    private String toolCallId;
     private String arguments;
     private Long durationMs;
     private Object output;

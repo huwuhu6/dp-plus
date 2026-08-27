@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -78,6 +79,7 @@ public class ToolExecutionOrchestrator {
     public ToolExecutionResult executeOne(ToolExecutionRequest request, AgentSessionContext context,
                                           Consumer<ChatStreamEventData> eventConsumer) {
         long startedAt = System.currentTimeMillis();
+        String toolCallId = UUID.randomUUID().toString();
         ToolExecutionResult outcome = new ToolExecutionResult();
         outcome.setOrder(request.getOrder());
         outcome.setToolName(request.getToolName());
@@ -90,23 +92,24 @@ public class ToolExecutionOrchestrator {
             }
             enrichWithDeterministicContext(input, request.getToolName(), context);
             outcome.setEffectiveArguments(objectMapper.writeValueAsString(input));
-            publishToolEvent(eventConsumer, "start", outcome);
+            publishToolEvent(eventConsumer, "start", toolCallId, outcome);
             outcome.setResult(resultCompressor.compress(tool.execute(input)));
         } catch (Exception e) {
             outcome.setErrorMessage(e.getMessage() == null ? "工具执行失败" : e.getMessage());
         }
         outcome.setDurationMs(System.currentTimeMillis() - startedAt);
-        publishToolEvent(eventConsumer, "end", outcome);
+        publishToolEvent(eventConsumer, "end", toolCallId, outcome);
         return outcome;
     }
 
-    private void publishToolEvent(Consumer<ChatStreamEventData> eventConsumer, String stage,
+    private void publishToolEvent(Consumer<ChatStreamEventData> eventConsumer, String stage, String toolCallId,
                                   ToolExecutionResult outcome) {
         if (eventConsumer == null) return;
         ChatStreamEventData event = new ChatStreamEventData();
         event.setEventName("tool_event");
         event.setStage(stage);
         event.setToolName(outcome.getToolName());
+        event.setToolCallId(toolCallId);
         event.setArguments(outcome.getEffectiveArguments());
         event.setDurationMs(outcome.getDurationMs());
         if (outcome.getResult() != null) {

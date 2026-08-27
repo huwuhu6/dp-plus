@@ -137,8 +137,10 @@ class ToolExecutionOrchestratorTest {
         assertEquals(2, events.size());
         assertEquals("tool_event", events.get(0).getEventName());
         assertEquals("start", events.get(0).getStage());
+        assertTrue(events.get(0).getToolCallId() != null && !events.get(0).getToolCallId().isBlank());
         assertEquals("{\"shopId\":18}", events.get(0).getArguments());
         assertEquals("end", events.get(1).getStage());
+        assertEquals(events.get(0).getToolCallId(), events.get(1).getToolCallId());
         assertTrue(events.get(1).getDurationMs() >= 0L);
         assertEquals("shop detail", ((Map<?, ?>) events.get(1).getOutput()).get("summary"));
     }

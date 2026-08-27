@@ -26,6 +26,7 @@ public class ConversationEvaluationDiagnosticsResponse {
         private Integer expectedErrorCount;
         private String expectedRecoveryRoutesJson;
         private String expectedMemoryJson;
+        private Integer expectedUnseenFromTurn;
         private String actualRoutesJson;
         private String actualContextRewritesJson;
         private String actualToolNamesJson;
@@ -42,6 +43,7 @@ public class ConversationEvaluationDiagnosticsResponse {
         private Integer actualErrorCount;
         private Boolean recoveryMatched;
         private Boolean memoryMatched;
+        private Boolean unseenRecommendationsMatched;
         private Long durationMs;
         private String errorMessage;
     }

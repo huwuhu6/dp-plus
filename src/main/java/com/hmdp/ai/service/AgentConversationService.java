@@ -234,6 +234,7 @@ public class AgentConversationService {
                                         AgentSessionContext context, Long explicitlyReferencedShopId,
                                         Consumer<ChatStreamEventData> eventConsumer) {
         long startedAt = System.currentTimeMillis();
+        String toolCallId = java.util.UUID.randomUUID().toString();
         AiAgentToolCall record = new AiAgentToolCall();
         record.setSessionId(sessionId); record.setTurnNo(turnNo); record.setToolName(toolName);
         try {
@@ -241,7 +242,7 @@ public class AgentConversationService {
             materializeToolInput(input, toolName, context, explicitlyReferencedShopId);
             String effectiveArguments = objectMapper.writeValueAsString(input);
             record.setToolInputJson(effectiveArguments);
-            publishToolEvent(eventConsumer, "start", toolName, effectiveArguments, null, null, null);
+            publishToolEvent(eventConsumer, "start", toolCallId, toolName, effectiveArguments, null, null, null);
             log.info("[AI][agent] event=TOOL_START sessionId={} turnNo={} tool={} arguments={}", sessionId, turnNo,
                     toolName, compact(effectiveArguments));
             AgentToolResult result = toolResultCompressor.compress(toolRegistry.find(toolName).execute(input));
@@ -251,14 +252,14 @@ public class AgentConversationService {
             record.setToolOutputJson(objectMapper.writeValueAsString(result.getFacts()));
             record.setDurationMs(System.currentTimeMillis() - startedAt);
             toolCallMapper.insert(record);
-            publishToolEvent(eventConsumer, "end", toolName, effectiveArguments, result.getDurationMs(), result, null);
+            publishToolEvent(eventConsumer, "end", toolCallId, toolName, effectiveArguments, result.getDurationMs(), result, null);
             log.info("[AI][agent] event=TOOL_SUCCESS sessionId={} turnNo={} tool={} durationMs={} result={}", sessionId,
                     turnNo, toolName, result.getDurationMs(), compact(record.getToolOutputJson()));
             return result;
         } catch (Exception e) {
             record.setStatus("FAILED");
             record.setDurationMs(System.currentTimeMillis() - startedAt);
-            publishToolEvent(eventConsumer, "end", toolName, record.getToolInputJson(), record.getDurationMs(), null,
+            publishToolEvent(eventConsumer, "end", toolCallId, toolName, record.getToolInputJson(), record.getDurationMs(), null,
                     e.getMessage());
             record.setToolOutputJson("{\"error\":\"工具执行失败\"}");
             toolCallMapper.insert(record);
@@ -268,13 +269,14 @@ public class AgentConversationService {
         }
     }
 
-    private void publishToolEvent(Consumer<ChatStreamEventData> eventConsumer, String stage, String toolName,
+    private void publishToolEvent(Consumer<ChatStreamEventData> eventConsumer, String stage, String toolCallId, String toolName,
                                   String arguments, Long durationMs, AgentToolResult result, String errorMessage) {
         if (eventConsumer == null) return;
         ChatStreamEventData event = new ChatStreamEventData();
         event.setEventName("tool_event");
         event.setStage(stage);
         event.setToolName(toolName);
+        event.setToolCallId(toolCallId);
         event.setArguments(arguments);
         event.setDurationMs(durationMs);
         if (result != null) {
