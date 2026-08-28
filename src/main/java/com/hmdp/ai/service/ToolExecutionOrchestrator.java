@@ -168,7 +168,7 @@ public class ToolExecutionOrchestrator {
             input.put("shopId", context.getFocusedShopId());
         }
         if ("search_alternative_shops".equals(toolName)) {
-            input.put("shownShopIds", new ArrayList<Long>(context.getShownShopIds()));
+            input.put("shownShopIds", new ArrayList<Long>(context.getShownShopIdsSnapshot()));
             input.put("decisionRequest", context.getDecisionRequest());
             input.put("decisionConstraints", context.getDecisionConstraints());
         }

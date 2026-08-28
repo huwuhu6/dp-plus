@@ -10,8 +10,10 @@ public class AgentSessionContext {
     private Integer turnNo = 0;
     private Long focusedShopId;
     private String focusedShopName;
-    private List<Long> shownShopIds = new ArrayList<Long>();
-    private List<DecisionRecommendation> shownShops = new ArrayList<DecisionRecommendation>();
+    /** Snapshot of the durable candidate pool; it is not the historical shown set. */
+    private List<DecisionRecommendation> candidatePoolSnapshot = new ArrayList<DecisionRecommendation>();
+    /** Snapshot copied from Working Memory; never derive it from candidatePoolSnapshot. */
+    private List<Long> shownShopIdsSnapshot = new ArrayList<Long>();
     private DecisionRequest decisionRequest;
     private DecisionConstraints decisionConstraints;
 }

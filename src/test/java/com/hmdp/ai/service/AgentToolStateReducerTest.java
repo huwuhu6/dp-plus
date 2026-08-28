@@ -26,7 +26,7 @@ class AgentToolStateReducerTest {
 
         assertEquals(8L, context.getFocusedShopId());
         assertEquals("测试店", context.getFocusedShopName());
-        assertEquals(1, context.getShownShops().size());
-        assertEquals(9L, context.getShownShopIds().get(0));
+        assertEquals(1, context.getCandidatePoolSnapshot().size());
+        assertEquals(9L, context.getShownShopIdsSnapshot().get(0));
     }
 }

@@ -28,7 +28,6 @@ public class GetShopDetailTool extends BaseAgentTool {
                 + (shop.getScore() == null ? "暂无" : shop.getScore() / 10.0D) + "，营业时间 " + shop.getOpenHours()
                 + "，地址 " + shop.getAddress() + "。";
         AgentToolResult result = new AgentToolResult().summary("查询商户基础事实").displayText(text);
-        result.setFocusedShopId(shop.getId()); result.setFocusedShopName(shop.getName());
         ToolStateDelta delta = new ToolStateDelta();
         delta.setFocusedShopId(shop.getId()); delta.setFocusedShopName(shop.getName());
         result.setStateDelta(delta);

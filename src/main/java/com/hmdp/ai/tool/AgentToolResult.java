@@ -11,8 +11,6 @@ public class AgentToolResult {
     private String summary;
     private String displayText;
     private Long durationMs;
-    private Long focusedShopId;
-    private String focusedShopName;
     private ToolStateDelta stateDelta;
     private Map<String, Object> facts = new LinkedHashMap<String, Object>();
 

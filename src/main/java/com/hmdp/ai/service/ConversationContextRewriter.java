@@ -64,7 +64,7 @@ public class ConversationContextRewriter {
             result.setUsedModel(true);
             result.setReason("ELLIPSIS_RESOLVED");
             log.info("[AI][chat] event=CONTEXT_REWRITE original={} rewritten={} focusedShopId={} candidateCount={}",
-                    compact(query), compact(rewritten), context.getFocusedShopId(), context.getShownShops().size());
+                    compact(query), compact(rewritten), context.getFocusedShopId(), context.getCandidatePoolSnapshot().size());
             return result;
         } catch (RuntimeException e) {
             log.warn("[AI][chat] event=CONTEXT_REWRITE_FALLBACK query={} errorType={}", compact(query), e.getClass().getSimpleName());
@@ -87,8 +87,8 @@ public class ConversationContextRewriter {
 
     private String workingMemory(AgentSessionContext context) {
         List<String> candidates = new ArrayList<String>();
-        for (int index = 0; index < context.getShownShops().size(); index++) {
-            DecisionRecommendation item = context.getShownShops().get(index);
+        for (int index = 0; index < context.getCandidatePoolSnapshot().size(); index++) {
+            DecisionRecommendation item = context.getCandidatePoolSnapshot().get(index);
             candidates.add((index + 1) + ". " + item.getShopName() + "(id=" + item.getShopId() + ", 人均=" + item.getAvgPrice() + ")");
         }
         return "当前聚焦=" + context.getFocusedShopName() + "(id=" + context.getFocusedShopId() + ");活跃条件="
@@ -97,7 +97,7 @@ public class ConversationContextRewriter {
 
     private boolean hasBusinessContext(AgentSessionContext context) {
         if (context == null) return false;
-        if (context.getShownShops() != null && !context.getShownShops().isEmpty()) return true;
+        if (context.getCandidatePoolSnapshot() != null && !context.getCandidatePoolSnapshot().isEmpty()) return true;
         return context.getDecisionConstraints() != null
                 && (hasText(context.getDecisionConstraints().getCuisine())
                 || hasText(context.getDecisionConstraints().getTargetCity())

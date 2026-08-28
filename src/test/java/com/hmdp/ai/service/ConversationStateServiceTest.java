@@ -192,7 +192,7 @@ class ConversationStateServiceTest {
         initial.setShopId(7L); initial.setShopName("首选店");
         DecisionRecommendation alternative = new DecisionRecommendation();
         alternative.setShopId(8L); alternative.setShopName("备选店");
-        context.getShownShops().add(initial); context.getShownShops().add(alternative);
+        context.getCandidatePoolSnapshot().add(initial); context.getCandidatePoolSnapshot().add(alternative);
         context.setFocusedShopId(8L); context.setFocusedShopName("备选店");
 
         service.applyAgentContext(state, 88L, context);
@@ -202,6 +202,23 @@ class ConversationStateServiceTest {
         assertEquals(2, updated.getCandidatePool().size());
         assertEquals(8L, updated.getFocusedShopId());
         assertEquals("RECOMMENDING", updated.getDialogPhase());
+    }
+
+    @Test
+    void projectsCandidatePoolAndShownHistoryIndependently() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        DecisionRecommendation candidate = new DecisionRecommendation();
+        candidate.setShopId(7L); candidate.setShopName("当前候选");
+        memory.getCandidatePool().add(candidate);
+        memory.setShownShopIds(Arrays.asList(99L, 100L));
+        AiChatSession state = state(memory, "projection-test");
+
+        AgentSessionContext context = service.agentContext(state);
+
+        assertEquals(1, context.getCandidatePoolSnapshot().size());
+        assertEquals(Arrays.asList(99L, 100L), context.getShownShopIdsSnapshot());
+        assertEquals(Arrays.asList(99L, 100L), service.workingMemory(state).getShownShopIds());
     }
 
     @Test
@@ -223,8 +240,8 @@ class ConversationStateServiceTest {
 
         assertEquals(Long.valueOf(20L), service.workingMemory(state).getSourceDecisionSessionId());
         assertEquals(Long.valueOf(2L), context.getFocusedShopId());
-        assertEquals(1, context.getShownShops().size());
-        assertEquals("当前会话店铺", context.getShownShops().get(0).getShopName());
+        assertEquals(1, context.getCandidatePoolSnapshot().size());
+        assertEquals("当前会话店铺", context.getCandidatePoolSnapshot().get(0).getShopName());
     }
 
     private ConversationStateService service() {

@@ -17,9 +17,9 @@ public class AgentToolStateReducer {
         if (hasText(delta.getFocusedShopName())) context.setFocusedShopName(delta.getFocusedShopName());
         if (delta.getCandidatePoolAppend() == null) return;
         for (DecisionRecommendation candidate : delta.getCandidatePoolAppend()) {
-            if (candidate == null || candidate.getShopId() == null || context.getShownShopIds().contains(candidate.getShopId())) continue;
-            context.getShownShopIds().add(candidate.getShopId());
-            context.getShownShops().add(candidate);
+            if (candidate == null || candidate.getShopId() == null || context.getShownShopIdsSnapshot().contains(candidate.getShopId())) continue;
+            context.getShownShopIdsSnapshot().add(candidate.getShopId());
+            context.getCandidatePoolSnapshot().add(candidate);
         }
     }
 

@@ -108,8 +108,8 @@ class ChatOrchestrationServiceTest {
         com.hmdp.ai.dto.AgentSessionContext context = new com.hmdp.ai.dto.AgentSessionContext();
         com.hmdp.ai.dto.DecisionRecommendation candidate = new com.hmdp.ai.dto.DecisionRecommendation();
         candidate.setShopId(9L); candidate.setShopName("筑地日本料理（上街店）");
-        context.getShownShops().add(candidate);
-        context.getShownShopIds().add(9L);
+        context.getCandidatePoolSnapshot().add(candidate);
+        context.getShownShopIdsSnapshot().add(9L);
         when(stateService.agentContext(state)).thenReturn(context);
         com.hmdp.ai.dto.ContextRewriteResult rewrite = new com.hmdp.ai.dto.ContextRewriteResult();
         rewrite.setOriginalQuery("第二家怎么样？");
@@ -174,7 +174,7 @@ class ChatOrchestrationServiceTest {
         memory.setFocusedShopId(9L);
         when(stateService.workingMemory(state)).thenReturn(memory);
         com.hmdp.ai.dto.AgentSessionContext agentContext = new com.hmdp.ai.dto.AgentSessionContext();
-        agentContext.setShownShops(Arrays.asList(first, second, third));
+        agentContext.setCandidatePoolSnapshot(Arrays.asList(first, second, third));
         agentContext.setFocusedShopId(9L);
         when(stateService.agentContext(state)).thenReturn(agentContext);
         DecisionResponse previous = new DecisionResponse();

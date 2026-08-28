@@ -161,7 +161,7 @@ public class AgentConversationService {
      * from ConversationWorkingMemory; it deliberately does not read a decision-session cache.
      */
     public boolean hasCandidateReference(String message, AgentSessionContext context) {
-        if (context == null || context.getShownShops() == null || context.getShownShops().isEmpty()) return false;
+        if (context == null || context.getCandidatePoolSnapshot() == null || context.getCandidatePoolSnapshot().isEmpty()) return false;
         ReferenceResolution reference = resolveShopReference(message == null ? "" : message.trim(), context);
         return reference.shop != null || reference.isAmbiguous()
                 || !resolveCompoundFactTasks(message == null ? "" : message.trim(), context).isEmpty();
@@ -455,7 +455,7 @@ public class AgentConversationService {
 
     private String shownShopSummary(AgentSessionContext context) {
         StringBuilder value = new StringBuilder("[");
-        for (DecisionRecommendation item : context.getShownShops()) {
+        for (DecisionRecommendation item : context.getCandidatePoolSnapshot()) {
             if (value.length() > 1) value.append("; ");
             value.append(item.getShopId()).append(":").append(item.getShopName());
         }
@@ -471,14 +471,14 @@ public class AgentConversationService {
         if (ordinalShop != null) return new ReferenceResolution(ordinalShop, new ArrayList<String>());
 
         List<DecisionRecommendation> exactMatches = new ArrayList<DecisionRecommendation>();
-        for (DecisionRecommendation item : context.getShownShops()) {
+        for (DecisionRecommendation item : context.getCandidatePoolSnapshot()) {
             if (containsNormalizedShopName(message, item.getShopName())) exactMatches.add(item);
         }
         if (exactMatches.size() == 1) return new ReferenceResolution(exactMatches.get(0), new ArrayList<String>());
         if (exactMatches.size() > 1) return new ReferenceResolution(null, shopNames(exactMatches));
 
         List<DecisionRecommendation> matches = new ArrayList<DecisionRecommendation>();
-        for (DecisionRecommendation item : context.getShownShops()) {
+        for (DecisionRecommendation item : context.getCandidatePoolSnapshot()) {
             if (matchesShop(message, item.getShopName())) matches.add(item);
         }
         if (matches.size() == 1) return new ReferenceResolution(matches.get(0), new ArrayList<String>());
@@ -508,12 +508,12 @@ public class AgentConversationService {
 
     private List<ShopMention> explicitShopMentions(String message, AgentSessionContext context) {
         List<ShopMention> mentions = new ArrayList<ShopMention>();
-        if (message == null || context == null || context.getShownShops() == null) return mentions;
+        if (message == null || context == null || context.getCandidatePoolSnapshot() == null) return mentions;
         addOrdinalMention(mentions, message, "\u7b2c\u4e00\u5bb6", 0, context);
         addOrdinalMention(mentions, message, "\u9996\u9009", 0, context);
         addOrdinalMention(mentions, message, "\u7b2c\u4e8c\u5bb6", 1, context);
         addOrdinalMention(mentions, message, "\u7b2c\u4e09\u5bb6", 2, context);
-        for (DecisionRecommendation shop : context.getShownShops()) {
+        for (DecisionRecommendation shop : context.getCandidatePoolSnapshot()) {
             if (shop.getShopName() == null || shop.getShopName().trim().isEmpty()) continue;
             int position = message.indexOf(shop.getShopName());
             if (position >= 0) mentions.add(new ShopMention(position, shop));
@@ -530,9 +530,9 @@ public class AgentConversationService {
 
     private void addOrdinalMention(List<ShopMention> mentions, String message, String token, int candidateIndex,
                                    AgentSessionContext context) {
-        if (candidateIndex >= context.getShownShops().size()) return;
+        if (candidateIndex >= context.getCandidatePoolSnapshot().size()) return;
         int position = message.indexOf(token);
-        if (position >= 0) mentions.add(new ShopMention(position, context.getShownShops().get(candidateIndex)));
+        if (position >= 0) mentions.add(new ShopMention(position, context.getCandidatePoolSnapshot().get(candidateIndex)));
     }
 
     private boolean containsVoucherSignal(String text) {
@@ -562,8 +562,8 @@ public class AgentConversationService {
      * "另一家" means the only candidate other than the focused shop when that relation is unambiguous.
      */
     private DecisionRecommendation resolveOrdinalReference(String message, AgentSessionContext context) {
-        if (message == null || context.getShownShops() == null || context.getShownShops().isEmpty()) return null;
-        List<DecisionRecommendation> candidates = context.getShownShops();
+        if (message == null || context.getCandidatePoolSnapshot() == null || context.getCandidatePoolSnapshot().isEmpty()) return null;
+        List<DecisionRecommendation> candidates = context.getCandidatePoolSnapshot();
         if (message.contains("第一家") || message.contains("首选")) return candidates.get(0);
         if (message.contains("第三家") && candidates.size() >= 3) return candidates.get(2);
         if (message.contains("第二家")) return candidates.size() >= 2 ? candidates.get(1) : null;
@@ -582,8 +582,8 @@ public class AgentConversationService {
     }
 
     private DecisionRecommendation focusedShop(AgentSessionContext context) {
-        if (context.getFocusedShopId() == null || context.getShownShops() == null) return null;
-        for (DecisionRecommendation item : context.getShownShops()) {
+        if (context.getFocusedShopId() == null || context.getCandidatePoolSnapshot() == null) return null;
+        for (DecisionRecommendation item : context.getCandidatePoolSnapshot()) {
             if (context.getFocusedShopId().equals(item.getShopId())) return item;
         }
         return null;
@@ -637,7 +637,7 @@ public class AgentConversationService {
             input.put("shopId", context.getFocusedShopId());
         }
         if ("search_alternative_shops".equals(toolName)) {
-            input.put("shownShopIds", new ArrayList<Long>(context.getShownShopIds()));
+            input.put("shownShopIds", new ArrayList<Long>(context.getShownShopIdsSnapshot()));
             input.put("decisionRequest", context.getDecisionRequest());
             input.put("decisionConstraints", context.getDecisionConstraints());
         }

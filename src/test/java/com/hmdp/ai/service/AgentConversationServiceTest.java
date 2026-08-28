@@ -197,7 +197,7 @@ class AgentConversationServiceTest {
         DecisionRecommendation recommendation = new DecisionRecommendation();
         recommendation.setShopId(9L);
         recommendation.setShopName("筑地日本料理（上街店）");
-        context.getShownShops().add(recommendation);
+        context.getCandidatePoolSnapshot().add(recommendation);
 
         assertTrue(service.hasCandidateReference("这家日本料理评价如何", context));
         assertFalse(service.hasCandidateReference("这家日本料理评价如何", new com.hmdp.ai.dto.AgentSessionContext()));
@@ -251,8 +251,8 @@ class AgentConversationServiceTest {
         DecisionRecommendation recommendation = new DecisionRecommendation();
         recommendation.setShopId(8L);
         recommendation.setShopName("测试寿司店");
-        context.getShownShops().add(recommendation);
-        context.getShownShopIds().add(8L);
+        context.getCandidatePoolSnapshot().add(recommendation);
+        context.getShownShopIdsSnapshot().add(8L);
         context.setFocusedShopId(8L);
         context.setFocusedShopName("测试寿司店");
         return context;
@@ -265,8 +265,8 @@ class AgentConversationServiceTest {
             DecisionRecommendation recommendation = new DecisionRecommendation();
             recommendation.setShopId(8L + index);
             recommendation.setShopName(names[index]);
-            context.getShownShops().add(recommendation);
-            context.getShownShopIds().add(8L + index);
+            context.getCandidatePoolSnapshot().add(recommendation);
+            context.getShownShopIdsSnapshot().add(8L + index);
         }
         context.setFocusedShopId(8L);
         context.setFocusedShopName(names[0]);

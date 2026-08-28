@@ -244,8 +244,10 @@ public class ConversationStateService {
         if (context == null) return;
         ConversationWorkingMemory memory = workingMemory(state);
         memory.setSourceDecisionSessionId(sessionId);
-        memory.setCandidatePool(new ArrayList<DecisionRecommendation>(context.getShownShops() == null
-                ? new ArrayList<DecisionRecommendation>() : context.getShownShops()));
+        memory.setCandidatePool(new ArrayList<DecisionRecommendation>(context.getCandidatePoolSnapshot() == null
+                ? new ArrayList<DecisionRecommendation>() : context.getCandidatePoolSnapshot()));
+        memory.setShownShopIds(new ArrayList<Long>(context.getShownShopIdsSnapshot() == null
+                ? new ArrayList<Long>() : context.getShownShopIdsSnapshot()));
         memory.setFocusedShopId(context.getFocusedShopId());
         memory.setFocusedShopName(context.getFocusedShopName());
         memory.setDialogPhase("RECOMMENDING");
@@ -258,9 +260,9 @@ public class ConversationStateService {
         ConversationWorkingMemory memory = workingMemory(state);
         AgentSessionContext context = new AgentSessionContext();
         context.setFocusedShopId(memory.getFocusedShopId()); context.setFocusedShopName(memory.getFocusedShopName());
-        context.setShownShops(new ArrayList<DecisionRecommendation>(memory.getCandidatePool()));
-        List<Long> ids = new ArrayList<Long>(); for (DecisionRecommendation item : memory.getCandidatePool()) ids.add(item.getShopId());
-        context.setShownShopIds(ids); context.setDecisionConstraints(memory.getActiveCriteria());
+        context.setCandidatePoolSnapshot(new ArrayList<DecisionRecommendation>(memory.getCandidatePool()));
+        context.setShownShopIdsSnapshot(new ArrayList<Long>(memory.getShownShopIds()));
+        context.setDecisionConstraints(memory.getActiveCriteria());
         return context;
     }
 

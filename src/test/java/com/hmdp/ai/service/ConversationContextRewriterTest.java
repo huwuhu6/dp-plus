@@ -116,7 +116,7 @@ class ConversationContextRewriterTest {
         AgentSessionContext context = new AgentSessionContext();
         context.setFocusedShopId(101L);
         context.setFocusedShopName(first.getShopName());
-        context.setShownShops(Arrays.asList(first));
+        context.setCandidatePoolSnapshot(Arrays.asList(first));
         return context;
     }
 }

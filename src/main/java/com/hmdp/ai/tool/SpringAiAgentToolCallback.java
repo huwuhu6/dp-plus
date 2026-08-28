@@ -53,8 +53,6 @@ public class SpringAiAgentToolCallback implements ToolCallback {
             Map<String, Object> response = new LinkedHashMap<String, Object>();
             response.put("summary", result.getSummary());
             response.put("displayText", result.getDisplayText());
-            response.put("focusedShopId", result.getFocusedShopId());
-            response.put("focusedShopName", result.getFocusedShopName());
             response.put("facts", result.getFacts());
             return objectMapper.writeValueAsString(response);
         } catch (Exception e) {
