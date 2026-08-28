@@ -57,9 +57,11 @@ public class ChatStreamService {
                 sendModelTextDelta(emitter, chunk);
             };
             java.util.function.Consumer<ChatStreamEventData> eventConsumer = event -> sendPipelineEvent(emitter, event);
+            String chatId = idempotencyKey == null || idempotencyKey.trim().isEmpty() ? null
+                    : chatOrchestrationService.resolveChatId(request);
             ChatMessageResponse response = idempotencyService == null || idempotencyKey == null || idempotencyKey.trim().isEmpty()
                     ? chatOrchestrationService.chat(request, textConsumer, eventConsumer)
-                    : idempotencyService.execute(com.hmdp.ai.runtime.IdempotencyScope.CHAT_MESSAGE, idempotencyKey, request,
+                    : idempotencyService.execute(com.hmdp.ai.runtime.IdempotencyScope.CHAT_MESSAGE, chatId, idempotencyKey, request,
                     ChatMessageResponse.class, () -> chatOrchestrationService.chat(request, textConsumer, eventConsumer));
             sendStatus(emitter, "RESULT_READY", "已获得可展示的业务结果");
             if (!modelTextStreamed.get()) sendTextDeltas(emitter, response.getAnswer());

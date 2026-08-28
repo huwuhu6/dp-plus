@@ -14,6 +14,7 @@ public class AiIdempotencyRecord {
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private Long userId;
+    private String chatId;
     private String scope;
     private String idempotencyKey;
     private String requestHash;

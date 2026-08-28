@@ -67,6 +67,14 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return chat(request, null);
     }
 
+    /** Fixes the conversation scope before an idempotency record hashes the request. */
+    public String resolveChatId(ChatMessageRequest request) {
+        if (request == null) throw new IllegalArgumentException("request cannot be null");
+        String chatId = chatMemoryService.resolveChatId(request.getChatId());
+        request.setChatId(chatId);
+        return chatId;
+    }
+
     /**
      * Keeps state transitions synchronous and auditable while allowing the final safe
      * general-chat response to be emitted directly from the model stream.

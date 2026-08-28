@@ -29,7 +29,8 @@ public class AiChatController {
         if (idempotencyService == null || idempotencyKey == null || idempotencyKey.trim().isEmpty()) {
             return Result.ok(chatOrchestrationService.chat(request));
         }
-        return Result.ok(idempotencyService.execute(com.hmdp.ai.runtime.IdempotencyScope.CHAT_MESSAGE,
+        String chatId = chatOrchestrationService.resolveChatId(request);
+        return Result.ok(idempotencyService.execute(com.hmdp.ai.runtime.IdempotencyScope.CHAT_MESSAGE, chatId,
                 idempotencyKey, request, com.hmdp.ai.dto.ChatMessageResponse.class,
                 () -> chatOrchestrationService.chat(request)));
     }

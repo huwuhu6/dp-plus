@@ -34,7 +34,7 @@ public class AiDecisionController {
     @PostMapping
     public Result decide(@RequestBody DecisionRequest request,
                          @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        DecisionResponse response = execute(com.hmdp.ai.runtime.IdempotencyScope.DECISION_START, idempotencyKey,
+        DecisionResponse response = execute(com.hmdp.ai.runtime.IdempotencyScope.DECISION_START, null, idempotencyKey,
                 request, DecisionResponse.class, () -> consumptionDecisionService.decide(request));
         return Result.ok(response);
     }
@@ -49,7 +49,9 @@ public class AiDecisionController {
                                    @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         java.util.Map<String, Object> command = new java.util.LinkedHashMap<String, Object>();
         command.put("sessionId", sessionId); command.put("request", request);
-        return Result.ok(execute(com.hmdp.ai.runtime.IdempotencyScope.DECISION_FOLLOW_UP, idempotencyKey,
+        String chatId = idempotencyKey == null || idempotencyKey.trim().isEmpty() ? null
+                : consumptionDecisionService.decisionChatId(sessionId);
+        return Result.ok(execute(com.hmdp.ai.runtime.IdempotencyScope.DECISION_FOLLOW_UP, chatId, idempotencyKey,
                 command, DecisionResponse.class, () -> consumptionDecisionService.continueDecision(sessionId, request)));
     }
 
@@ -71,9 +73,9 @@ public class AiDecisionController {
         return Result.ok(agentConversationService.getToolCalls(sessionId));
     }
 
-    private <T> T execute(com.hmdp.ai.runtime.IdempotencyScope scope, String key, Object request, Class<T> type,
+    private <T> T execute(com.hmdp.ai.runtime.IdempotencyScope scope, String chatId, String key, Object request, Class<T> type,
                           java.util.function.Supplier<T> command) {
         if (idempotencyService == null || key == null || key.trim().isEmpty()) return command.get();
-        return idempotencyService.execute(scope, key, request, type, command);
+        return idempotencyService.execute(scope, chatId, key, request, type, command);
     }
 }

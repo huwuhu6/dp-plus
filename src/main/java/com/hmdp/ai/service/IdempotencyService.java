@@ -26,23 +26,26 @@ public class IdempotencyService {
     @Resource private ObjectMapper objectMapper;
 
     @Transactional
-    public <T> T execute(IdempotencyScope scope, String key, Object request, Class<T> resultType, Supplier<T> command) {
+    public <T> T execute(IdempotencyScope scope, String chatId, String key, Object request, Class<T> resultType,
+                         Supplier<T> command) {
         if (!hasText(key)) return command.get();
         String normalizedKey = key.trim();
         if (normalizedKey.length() > 128) throw new IllegalArgumentException("Idempotency-Key must not exceed 128 characters");
+        String normalizedChatId = normalizeChatId(scope, chatId);
         String hash = requestHash(request);
         Long userId = UserHolder.getUser() == null ? 0L : UserHolder.getUser().getId();
-        AiIdempotencyRecord existing = find(scope, normalizedKey, userId);
+        AiIdempotencyRecord existing = find(scope, normalizedChatId, normalizedKey, userId);
         if (existing != null) return replay(existing, scope, normalizedKey, hash, resultType);
 
         AiIdempotencyRecord created = new AiIdempotencyRecord();
-        created.setUserId(userId); created.setScope(scope.name()); created.setIdempotencyKey(normalizedKey);
+        created.setUserId(userId); created.setChatId(normalizedChatId); created.setScope(scope.name());
+        created.setIdempotencyKey(normalizedKey);
         created.setRequestHash(hash); created.setStatus("PROCESSING");
         created.setCreatedAt(LocalDateTime.now()); created.setUpdatedAt(created.getCreatedAt());
         try {
             recordMapper.insert(created);
         } catch (DuplicateKeyException duplicate) {
-            AiIdempotencyRecord winner = find(scope, normalizedKey, userId);
+            AiIdempotencyRecord winner = find(scope, normalizedChatId, normalizedKey, userId);
             if (winner == null) throw duplicate;
             return replay(winner, scope, normalizedKey, hash, resultType);
         }
@@ -58,11 +61,20 @@ public class IdempotencyService {
         }
     }
 
-    private AiIdempotencyRecord find(IdempotencyScope scope, String key, Long userId) {
+    private AiIdempotencyRecord find(IdempotencyScope scope, String chatId, String key, Long userId) {
         QueryWrapper<AiIdempotencyRecord> query = new QueryWrapper<AiIdempotencyRecord>()
-                .eq("scope", scope.name()).eq("idempotency_key", key);
+                .eq("scope", scope.name()).eq("chat_id", chatId).eq("idempotency_key", key);
         query.eq("user_id", userId == null ? 0L : userId);
         return recordMapper.selectOne(query);
+    }
+
+    private String normalizeChatId(IdempotencyScope scope, String chatId) {
+        String normalized = hasText(chatId) ? chatId.trim() : "";
+        if (scope.isChatScoped() && normalized.isEmpty()) {
+            throw new IllegalArgumentException(scope.name() + " idempotency requires chatId");
+        }
+        if (normalized.length() > 64) throw new IllegalArgumentException("chatId must not exceed 64 characters");
+        return normalized;
     }
 
     private <T> T replay(AiIdempotencyRecord record, IdempotencyScope scope, String key, String hash, Class<T> type) {

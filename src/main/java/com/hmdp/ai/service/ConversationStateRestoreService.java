@@ -24,7 +24,8 @@ public class ConversationStateRestoreService {
 
     public RestoreConversationStateResult restore(RestoreConversationStateCommand command) {
         if (idempotencyService == null) return restoreInternal(command);
-        return idempotencyService.execute(com.hmdp.ai.runtime.IdempotencyScope.RESTORE, command == null ? null : command.getCommandId(),
+        return idempotencyService.execute(com.hmdp.ai.runtime.IdempotencyScope.RESTORE, command == null ? null : command.getChatId(),
+                command == null ? null : command.getCommandId(),
                 command, RestoreConversationStateResult.class, () -> restoreInternal(command));
     }
 

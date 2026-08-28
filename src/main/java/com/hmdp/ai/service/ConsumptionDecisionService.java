@@ -202,6 +202,14 @@ public class ConsumptionDecisionService {
                 .eq("status", pausedStatus)) == 1;
     }
 
+    /** Returns the authoritative conversation scope for a session-level command. */
+    public String decisionChatId(Long sessionId) {
+        AiDecisionSession session = sessionMapper.selectById(sessionId);
+        if (session == null) throw new IllegalArgumentException("decision session does not exist");
+        ensureSessionOwner(session);
+        return session.getChatId();
+    }
+
     private void updateSessionIfStatus(AiDecisionSession session, String expectedStatus) {
         if (sessionMapper.update(session, new UpdateWrapper<AiDecisionSession>()
                 .eq("id", session.getId()).eq("status", expectedStatus)) != 1) {

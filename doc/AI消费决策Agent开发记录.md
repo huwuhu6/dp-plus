@@ -1231,3 +1231,13 @@ Routing Model 返回的 route 先经过 Java Action Contract 校验，非法或�
 验证：`mvn -q -DskipTests compile` 通过；`IdempotencyServiceTest`、`WorkingMemoryVersionServiceTest`、`ChatMemoryServiceTest`、`ConversationStateServiceTest`、`ConversationStateRestoreServiceTest`、`ConsumptionDecisionServiceTest`、`ChatStreamServiceTest`、`AiChatControllerTest`、`ChatOrchestrationServiceTest`、`AgentConversationServiceTest` 定向回归通过。覆盖同 key 重放、hash 冲突、处理中重复命令、结构化版本冲突、旧 runtime 拒绝、既有并发续聊 claim 与 Redis 原子追加路径。真实双端压力与 SSE 断开重试尚未在已登录运行环境执行，因此尚无 lost-update/conflict-rate/p95 的线上评测数据。
 
 测试迁移删除了对 `RewriteIntentType` 的业务断言，并新增了 Rewrite 不为业务细化和替代推荐调用模型的断言，同时保留“第一家”模型改写调用断言。`mvn -q -Dtest=ConversationContextRewriterTest,ChatOrchestrationServiceTest` 通过；完整相关回归使用同一组 AI 决策测试执行，结果以本次命令实际 Surefire 报告为准。未观察到既有路由、候选排除或上下文解析行为变化。
+
+## 2026-08-29：幂等键增加 Chat 作用域
+
+审查发现 `tbl_ai_idempotency_record` 原先只按 `scope + user_id + idempotency_key` 查询和唯一约束；同一用户在不同 `chatId` 复用同一个 `Idempotency-Key` 时，可能错误重放另一段会话的结果。新增 `V54__ai_idempotency_record_chat_scope.sql` 后，记录增加 `chat_id`，唯一键收敛为 `(user_id, chat_id, scope, idempotency_key)`，应用层 `find()` 与插入使用完全相同的四个维度。V53 前遗留记录统一保留空 `chat_id`，不会命中任何具名聊天，避免向新会话错误回放。
+
+`CHAT_MESSAGE`、`DECISION_FOLLOW_UP`、`RESTORE` 与保留给未来外部副作用工具的 `TOOL_INVOCATION` 均声明为 chat-scoped；带 key 时必须提供真实 `chatId`。同步/SSE 聊天会在计算 request hash 前固定由 `ChatMemoryService` 解析出的 chatId；会话内决策跟进从已校验归属的 `AiDecisionSession.chatId` 读取；恢复使用命令自身 chatId。直接 `POST /ai/decisions` 的 `DECISION_START` 没有聊天输入，仍是独立决策作用域，不能伪造 chatId；从聊天启动的 Decision 则受 `CHAT_MESSAGE` 作用域保护。当前没有 `TOOL_INVOCATION` 执行入口，未来写外部状态的 Tool 必须从 Agent runtime 传入所属 chatId。
+
+补充 `IdempotencyServiceTest`：同一 user/chat/key/request 重放、同 key 异请求冲突、不同 chat 重新执行、不同 user 不命中，以及缺失 chatId 的会话命令拒绝。定向回归 `mvn -q "-Dtest=IdempotencyServiceTest,ConversationStateRestoreServiceTest,AiChatControllerTest,ChatStreamServiceTest" test` 通过；`mvn -q -DskipTests compile` 通过。记录仍和业务 mutation 位于 `IdempotencyService.execute()` 的事务边界：聊天路径含 chat 内 START_DECISION，Decision Follow-up 调用 `continueDecision`，Restore 调用 `restoreInternal`；没有引入 Redis 幂等权威、自动 retry 或全 chat 锁。
+
+全量 `mvn -q test` 本轮执行 164 项，其中 163 项通过、1 项错误。错误来自未改动的 `AmapMcpLocationResolutionServiceTest.parsesCoordinatesReturnedByMapsGeo`：测试执行时将该类的 Type Pattern 视为低于 Java 16 的 source level，和本次幂等改动无调用关系；该环境/编译链问题未在本次定点修复中改动。
