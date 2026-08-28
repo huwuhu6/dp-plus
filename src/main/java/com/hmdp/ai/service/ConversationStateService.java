@@ -252,19 +252,23 @@ public class ConversationStateService {
     /** Commits the chat-path tool reducer output back into the single conversation memory. */
     public void applyAgentContext(AiChatSession state, Long sessionId, AgentSessionContext context) {
         if (context == null) return;
+        AiWorkingMemory latest = workingMemoryVersionService.latest(state.getChatId());
+        int latestVersion = latest == null || latest.getVersion() == null
+                ? (state.getVersion() == null ? 0 : state.getVersion()) : latest.getVersion();
         if (context.getBaseWorkingMemoryVersion() == null
-                || !context.getBaseWorkingMemoryVersion().equals(state.getVersion())) {
+                || !context.getBaseWorkingMemoryVersion().equals(latestVersion)) {
             Map<String, Object> metadata = new LinkedHashMap<String, Object>();
             metadata.put("baseWorkingMemoryVersion", context.getBaseWorkingMemoryVersion());
-            metadata.put("actualWorkingMemoryVersion", state.getVersion());
+            metadata.put("actualWorkingMemoryVersion", latestVersion);
             metadata.put("sessionId", sessionId);
             if (conversationEventService != null) {
                 conversationEventService.record(ConversationEventType.STALE_RUNTIME_RESULT,
                         com.hmdp.ai.runtime.ConversationEventStatus.SKIPPED, null, null, null, metadata);
             }
             log.warn("[AI][state] event=STALE_RUNTIME_RESULT chatId={} sessionId={} baseVersion={} actualVersion={}",
-                    state.getChatId(), sessionId, context.getBaseWorkingMemoryVersion(), state.getVersion());
-            throw new IllegalStateException("Agent runtime context is stale and cannot update working memory");
+                    state.getChatId(), sessionId, context.getBaseWorkingMemoryVersion(), latestVersion);
+            throw new StaleRuntimeResultException(state.getChatId(), context.getBaseWorkingMemoryVersion() == null ? -1
+                    : context.getBaseWorkingMemoryVersion(), latestVersion, sessionId);
         }
         ConversationWorkingMemory memory = workingMemory(state);
         memory.setSourceDecisionSessionId(sessionId);

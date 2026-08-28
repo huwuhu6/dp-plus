@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 import jakarta.annotation.Resource;
 
@@ -27,10 +28,14 @@ public class AiDecisionController {
     private AgentConversationService agentConversationService;
     @Resource
     private ConversationStateService conversationStateService;
+    @Resource
+    private com.hmdp.ai.service.IdempotencyService idempotencyService;
 
     @PostMapping
-    public Result decide(@RequestBody DecisionRequest request) {
-        DecisionResponse response = consumptionDecisionService.decide(request);
+    public Result decide(@RequestBody DecisionRequest request,
+                         @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        DecisionResponse response = execute(com.hmdp.ai.runtime.IdempotencyScope.DECISION_START, idempotencyKey,
+                request, DecisionResponse.class, () -> consumptionDecisionService.decide(request));
         return Result.ok(response);
     }
 
@@ -40,8 +45,12 @@ public class AiDecisionController {
     }
 
     @PostMapping("/{sessionId}/messages")
-    public Result continueDecision(@PathVariable Long sessionId, @RequestBody DecisionFollowUpRequest request) {
-        return Result.ok(consumptionDecisionService.continueDecision(sessionId, request));
+    public Result continueDecision(@PathVariable Long sessionId, @RequestBody DecisionFollowUpRequest request,
+                                   @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        java.util.Map<String, Object> command = new java.util.LinkedHashMap<String, Object>();
+        command.put("sessionId", sessionId); command.put("request", request);
+        return Result.ok(execute(com.hmdp.ai.runtime.IdempotencyScope.DECISION_FOLLOW_UP, idempotencyKey,
+                command, DecisionResponse.class, () -> consumptionDecisionService.continueDecision(sessionId, request)));
     }
 
     @PostMapping("/{sessionId}/conversations")
@@ -60,5 +69,11 @@ public class AiDecisionController {
     @GetMapping("/{sessionId}/tool-calls")
     public Result toolCalls(@PathVariable Long sessionId) {
         return Result.ok(agentConversationService.getToolCalls(sessionId));
+    }
+
+    private <T> T execute(com.hmdp.ai.runtime.IdempotencyScope scope, String key, Object request, Class<T> type,
+                          java.util.function.Supplier<T> command) {
+        if (idempotencyService == null || key == null || key.trim().isEmpty()) return command.get();
+        return idempotencyService.execute(scope, key, request, type, command);
     }
 }

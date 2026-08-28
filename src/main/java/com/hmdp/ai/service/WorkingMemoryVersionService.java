@@ -43,13 +43,27 @@ public class WorkingMemoryVersionService {
     @Transactional
     public AiWorkingMemory append(String chatId, Long userId, int expectedVersion, Object memory,
                                   ConversationEventType eventType, Object eventResult, Map<String, Object> metadata) {
+        return append(chatId, userId, expectedVersion, memory, eventType, eventResult, metadata, "WORKING_MEMORY_UPDATE");
+    }
+
+    @Transactional
+    public AiWorkingMemory append(String chatId, Long userId, int expectedVersion, Object memory,
+                                  ConversationEventType eventType, Object eventResult, Map<String, Object> metadata,
+                                  String operationType) {
+        AiWorkingMemory current = latest(chatId);
+        int actualVersion = current == null || current.getVersion() == null ? 0 : current.getVersion();
+        if (actualVersion != expectedVersion) {
+            throw new VersionConflictException(chatId, expectedVersion, actualVersion, operationType);
+        }
         AiWorkingMemory row = new AiWorkingMemory();
         row.setChatId(chatId); row.setUserId(userId); row.setVersion(expectedVersion + 1);
         row.setMemoryJson(write(memory)); row.setCreatedAt(LocalDateTime.now());
         try {
             workingMemoryMapper.insert(row);
         } catch (DuplicateKeyException e) {
-            throw new IllegalStateException("Conversation working memory changed concurrently", e);
+            AiWorkingMemory winner = latest(chatId);
+            int winnerVersion = winner == null || winner.getVersion() == null ? actualVersion : winner.getVersion();
+            throw new VersionConflictException(chatId, expectedVersion, winnerVersion, operationType);
         }
         AiConversationEvent event = eventService.newStateEvent(eventService.currentTrace(), eventType,
                 row.getId(), eventResult, metadata);

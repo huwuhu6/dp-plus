@@ -58,6 +58,22 @@ class WorkingMemoryVersionServiceTest {
     }
 
     @Test
+    void exposesExpectedActualVersionAndOperationForConflict() {
+        AiWorkingMemoryMapper memoryMapper = mock(AiWorkingMemoryMapper.class);
+        AiWorkingMemory current = new AiWorkingMemory(); current.setVersion(7);
+        when(memoryMapper.selectOne(any(QueryWrapper.class))).thenReturn(current);
+        WorkingMemoryVersionService service = service(memoryMapper, mock(AiConversationEventMapper.class), mock(ConversationEventService.class));
+
+        VersionConflictException error = assertThrows(VersionConflictException.class, () -> service.append("chat-1", 9L, 6,
+                new ConversationWorkingMemory(), ConversationEventType.STATE_REDUCED, "UPDATE", null, "AGENT_CONTEXT"));
+
+        assertEquals("chat-1", error.getChatId());
+        assertEquals(6, error.getExpectedVersion());
+        assertEquals(7, error.getActualVersion());
+        assertEquals("AGENT_CONTEXT", error.getOperationType());
+    }
+
+    @Test
     void loadsOnlyTheLatestVersion() {
         AiWorkingMemoryMapper memoryMapper = mock(AiWorkingMemoryMapper.class);
         AiWorkingMemory expected = new AiWorkingMemory(); expected.setVersion(4);

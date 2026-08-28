@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -20,15 +21,31 @@ import jakarta.servlet.http.HttpServletResponse;
 public class AiChatController {
     @Resource private ChatOrchestrationService chatOrchestrationService;
     @Resource private ChatStreamService chatStreamService;
+    @Resource private com.hmdp.ai.service.IdempotencyService idempotencyService;
 
     @PostMapping("/messages")
-    public Result message(@RequestBody ChatMessageRequest request) {
-        return Result.ok(chatOrchestrationService.chat(request));
+    public Result message(@RequestBody ChatMessageRequest request,
+                          @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        if (idempotencyService == null || idempotencyKey == null || idempotencyKey.trim().isEmpty()) {
+            return Result.ok(chatOrchestrationService.chat(request));
+        }
+        return Result.ok(idempotencyService.execute(com.hmdp.ai.runtime.IdempotencyScope.CHAT_MESSAGE,
+                idempotencyKey, request, com.hmdp.ai.dto.ChatMessageResponse.class,
+                () -> chatOrchestrationService.chat(request)));
     }
 
     @PostMapping(value = "/messages/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter streamMessage(@RequestBody ChatMessageRequest request, HttpServletResponse response) {
+    public SseEmitter streamMessage(@RequestBody ChatMessageRequest request,
+                                    @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+                                    HttpServletResponse response) {
         // Prevent reverse proxies from holding status frames until the request finishes.
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Cache-Control", "no-cache");
+        return chatStreamService.stream(request, UserHolder.getUser(), idempotencyKey);
+    }
+
+    /** Kept for direct controller tests and internal callers; HTTP uses the header-aware overload. */
+    public SseEmitter streamMessage(ChatMessageRequest request, HttpServletResponse response) {
         response.setHeader("X-Accel-Buffering", "no");
         response.setHeader("Cache-Control", "no-cache");
         return chatStreamService.stream(request, UserHolder.getUser());

@@ -20,8 +20,15 @@ public class ConversationStateRestoreService {
     @Resource private WorkingMemoryVersionService workingMemoryVersionService;
     @Resource private ConversationStateService conversationStateService;
     @Resource private AiDecisionSessionMapper decisionSessionMapper;
+    @Resource private IdempotencyService idempotencyService;
 
     public RestoreConversationStateResult restore(RestoreConversationStateCommand command) {
+        if (idempotencyService == null) return restoreInternal(command);
+        return idempotencyService.execute(com.hmdp.ai.runtime.IdempotencyScope.RESTORE, command == null ? null : command.getCommandId(),
+                command, RestoreConversationStateResult.class, () -> restoreInternal(command));
+    }
+
+    private RestoreConversationStateResult restoreInternal(RestoreConversationStateCommand command) {
         validate(command);
         String chatId = command.getChatId().trim();
         // Validate the requested immutable source before any operation can initialize state.

@@ -202,6 +202,13 @@ public class ConsumptionDecisionService {
                 .eq("status", pausedStatus)) == 1;
     }
 
+    private void updateSessionIfStatus(AiDecisionSession session, String expectedStatus) {
+        if (sessionMapper.update(session, new UpdateWrapper<AiDecisionSession>()
+                .eq("id", session.getId()).eq("status", expectedStatus)) != 1) {
+            throw new DecisionSessionConflictException(session.getId(), expectedStatus);
+        }
+    }
+
     private DecisionResponse execute(AiDecisionSession session, DecisionRequest request,
                                      DecisionConstraints existingConstraints, boolean extractConstraints,
                                      boolean resumedWithRelaxation) {
@@ -224,12 +231,13 @@ public class ConsumptionDecisionService {
             }
             response.setConstraints(constraints);
             session.setConstraintsJson(objectMapper.writeValueAsString(constraints));
+            String statusBeforeExecution = session.getStatus();
             if (extractConstraints) {
                 transitionService.transition(session, DecisionCommand.EXTRACT_CONSTRAINTS);
             } else {
                 transitionService.transition(session, DecisionCommand.EXECUTE);
             }
-            sessionMapper.updateById(session);
+            updateSessionIfStatus(session, statusBeforeExecution);
             if (extractConstraints) {
                 recordStep(response, session.getId(), "EXTRACTING", "已提取预算、距离、菜系和场景偏好", start);
                 log.info("[AI][session={}] state=EXTRACTING action=CONSTRAINTS_PARSED cuisine={} budget={} radius={} nearby={} quiet={} avoidQueue={}",
@@ -242,7 +250,7 @@ public class ConsumptionDecisionService {
             applyNearbyDefaultRadius(constraints, session.getId());
             // Keep the durable snapshot aligned with the constraints behind rendered options.
             session.setConstraintsJson(objectMapper.writeValueAsString(constraints));
-            sessionMapper.updateById(session);
+            updateSessionIfStatus(session, session.getStatus());
 
             List<DecisionRecommendation> candidates = retrieveAndRank(request, constraints, response, metrics);
             RelaxationInfo relaxation = resultEvaluationService.evaluateStrictResult(request, constraints, candidates.size());
@@ -267,7 +275,7 @@ public class ConsumptionDecisionService {
                 metrics.setResultEvaluationOutcome(relaxation.getOutcome());
                 response.setConstraints(constraints);
                 session.setConstraintsJson(objectMapper.writeValueAsString(constraints));
-                sessionMapper.updateById(session);
+                updateSessionIfStatus(session, session.getStatus());
                 recordStep(response, session.getId(), "RESULT_EVALUATING",
                         "默认附近范围未命中，已在保留硬约束下扩大至 " + round(constraints.getRadiusKm()) + " km 重搜",
                         retryStartedAt);
@@ -291,11 +299,12 @@ public class ConsumptionDecisionService {
             populateDurationMetrics(metrics, response.getTrace(), start);
             populateModelUsage(response, metrics);
             response.setStatus("COMPLETED");
+            String statusBeforeCompletion = session.getStatus();
             transitionService.transition(session, DecisionCommand.COMPLETE);
             session.setPendingType(null);
             session.setPendingOptionsJson(null);
             session.setResultJson(objectMapper.writeValueAsString(response));
-            sessionMapper.updateById(session);
+            updateSessionIfStatus(session, statusBeforeCompletion);
             persistMetrics(session.getId(), metrics);
             saveMessage(session.getId(), "ASSISTANT", "FINAL_ANSWER", response.getAnswer());
             log.info("[AI][session={}] state=COMPLETED action=DECISION_FINISHED candidates={} modelCalls={} modelSuccess={} totalMs={}",
@@ -303,8 +312,9 @@ public class ConsumptionDecisionService {
             logDecisionOutput(session.getId(), response);
             return response;
         } catch (Exception e) {
+            String statusBeforeFailure = session.getStatus();
             transitionService.transition(session, DecisionCommand.FAIL);
-            sessionMapper.updateById(session);
+            updateSessionIfStatus(session, statusBeforeFailure);
             throw new IllegalStateException("AI 决策执行失败: " + e.getMessage(), e);
         } finally {
             modelCallTracker.clear();
@@ -476,6 +486,7 @@ public class ConsumptionDecisionService {
                                                   long startedAt) throws Exception {
         populateDurationMetrics(metrics, response.getTrace(), startedAt);
         populateModelUsage(response, metrics);
+        String statusBeforePause = session.getStatus();
         transitionService.transition(session, command);
         String state = session.getStatus();
         if (!state.equals(response.getStatus())) {
@@ -485,7 +496,7 @@ public class ConsumptionDecisionService {
         session.setPendingOptionsJson(objectMapper.writeValueAsString(response.getOptions()));
         transitionService.validatePendingState(state, pendingType, response.getOptions(), response.getQuestion());
         session.setResultJson(objectMapper.writeValueAsString(response));
-        sessionMapper.updateById(session);
+        updateSessionIfStatus(session, statusBeforePause);
         persistMetrics(session.getId(), metrics);
         saveMessage(session.getId(), "ASSISTANT", pendingType + "_QUESTION", response.getQuestion());
         log.info("[AI][session={}] state={} action=WAITING_USER options={} modelCalls={} totalMs={}",
@@ -555,7 +566,7 @@ public class ConsumptionDecisionService {
         response.setStatus("CANCELLED");
         response.setAnswer("已结束本次推荐。需要新的消费建议时，请发起新的请求。");
         session.setResultJson(objectMapper.writeValueAsString(response));
-        sessionMapper.updateById(session);
+        updateSessionIfStatus(session, session.getStatus());
         saveMessage(session.getId(), "USER", "SESSION_ENDED", followUp.getMessage() == null ? "END_DECISION" : followUp.getMessage());
         saveMessage(session.getId(), "ASSISTANT", "SESSION_ENDED", response.getAnswer());
         log.info("[AI][session={}] state=CANCELLED action=USER_ENDED_SESSION", session.getId());

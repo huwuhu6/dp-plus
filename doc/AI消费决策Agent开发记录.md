@@ -1218,4 +1218,16 @@ Routing Model 返回的 route 先经过 Java Action Contract 校验，非法或�
 
 `ChatOrchestrationService` 收拢原有确定性业务判断：替代推荐/条件细化继续依据原始消息、有效改写消息、会话状态和 Working Memory 判断，并继续把 `shownShopIds` 作为排除集合；已完成决策下的“第一家/第二家/这家/那家”及评价、优惠、营业时间等追问由 Routing 判为 `BUSINESS_FOLLOW_UP`。只有这些规则无法判断时才调用 Routing Model，失败仍走 `fallbackRoute()`。因此“第一家有优惠券吗”仍为 Rewrite Model=1、Routing Model=0；“换一家/再推荐几家”均为 Rewrite Model=0、Routing Model=0；一般闲聊仍可进入 Routing Model。
 
+## 2026-08-29：多端 Chat 的乐观并发与业务幂等第一阶段
+
+同一 `chatId` 的多个请求继续允许并行进行 Rewrite、Routing、LLM 与只读 Tool 计算；不引入 JVM 全局锁、Redis 分布式锁、数据库悲观锁或 per-chat 全链路队列。真正受保护的边界是 Durable State Mutation：`WorkingMemoryVersionService.append` 在写入前核对 `expectedVersion`，并保留 `(chat_id, version)` 唯一约束作为最终竞争保护。冲突统一抛出 `VersionConflictException`，带 `chatId`、expected/actual version 和 operation type；不会自动 retry 或覆盖较新的状态。
+
+`AgentSessionContext` 仍从 Working Memory 快照取得 `baseWorkingMemoryVersion`。Tool/Agent 执行结束后，`applyAgentContext()` 会重新读取最新版本；若运行时基于 V20 而期间已提交 V21，则记录 `STALE_RUNTIME_RESULT` 并抛出 `StaleRuntimeResultException`，只读 Tool 的结果可用于当前回答，但候选池、已展示商户、focused shop 和条件不会回写。并行 Tool Delta 仍按既有 reducer 顺序在 runtime context 中归并，并且只进行一次 V20 -> V21 的 CAS 提交；失败时整体拒绝，不对旧 Delta 自动 rebase。
+
+新增 `tbl_ai_idempotency_record`，以 `scope + user_id + Idempotency-Key` 唯一键保存 request hash、状态、结果 JSON/引用和时间。`POST /ai/chat/messages`、`POST /ai/chat/messages/stream`、`POST /ai/decisions`、`POST /ai/decisions/{sessionId}/messages` 可选接收 `Idempotency-Key` 请求头；相同 key 与请求体 hash 重放首次结果，不同 hash 明确冲突。未传 header 时保持旧 API 行为，不能据此声称已解决客户端 retry；Restore 则复用既有必填 `commandId` 作为 key。记录和命令执行置于同一事务边界，当前先保留完成记录 7 天，清理任务待后续运维治理引入。
+
+`AiDecisionSession` 的执行、暂停、完成、失败、取消等关键写入改为 `WHERE id = ? AND status = ?` 条件更新；暂停态续聊继续使用现有 claim。Chat History 从 Redis `GET -> 本地 append -> SET` 改为 List `RPUSH + LTRIM + EXPIRE` 单 Lua 脚本，避免双端同时追加时缓存轮次丢失；Redis 缺失仍从持久事件恢复。
+
+验证：`mvn -q -DskipTests compile` 通过；`IdempotencyServiceTest`、`WorkingMemoryVersionServiceTest`、`ChatMemoryServiceTest`、`ConversationStateServiceTest`、`ConversationStateRestoreServiceTest`、`ConsumptionDecisionServiceTest`、`ChatStreamServiceTest`、`AiChatControllerTest`、`ChatOrchestrationServiceTest`、`AgentConversationServiceTest` 定向回归通过。覆盖同 key 重放、hash 冲突、处理中重复命令、结构化版本冲突、旧 runtime 拒绝、既有并发续聊 claim 与 Redis 原子追加路径。真实双端压力与 SSE 断开重试尚未在已登录运行环境执行，因此尚无 lost-update/conflict-rate/p95 的线上评测数据。
+
 测试迁移删除了对 `RewriteIntentType` 的业务断言，并新增了 Rewrite 不为业务细化和替代推荐调用模型的断言，同时保留“第一家”模型改写调用断言。`mvn -q -Dtest=ConversationContextRewriterTest,ChatOrchestrationServiceTest` 通过；完整相关回归使用同一组 AI 决策测试执行，结果以本次命令实际 Surefire 报告为准。未观察到既有路由、候选排除或上下文解析行为变化。

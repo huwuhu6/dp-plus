@@ -34,23 +34,33 @@ public class ChatStreamService {
     private final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     @Resource private ChatOrchestrationService chatOrchestrationService;
+    @Resource private IdempotencyService idempotencyService;
 
     public SseEmitter stream(ChatMessageRequest request, UserDTO user) {
+        return stream(request, user, null);
+    }
+
+    public SseEmitter stream(ChatMessageRequest request, UserDTO user, String idempotencyKey) {
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
-        streamExecutor.execute(() -> runStream(emitter, request, user));
+        streamExecutor.execute(() -> runStream(emitter, request, user, idempotencyKey));
         return emitter;
     }
 
-    private void runStream(SseEmitter emitter, ChatMessageRequest request, UserDTO user) {
+    private void runStream(SseEmitter emitter, ChatMessageRequest request, UserDTO user, String idempotencyKey) {
         try {
             if (user != null) UserHolder.saveUser(user);
             sendStatus(emitter, "REQUEST_ACCEPTED", "已收到消息，正在整理本轮对话上下文");
             sendStatus(emitter, "ORCHESTRATING", "正在执行餐饮决策与业务工具查询");
             AtomicBoolean modelTextStreamed = new AtomicBoolean(false);
-            ChatMessageResponse response = chatOrchestrationService.chat(request, chunk -> {
+            java.util.function.Consumer<String> textConsumer = chunk -> {
                 modelTextStreamed.set(true);
                 sendModelTextDelta(emitter, chunk);
-            }, event -> sendPipelineEvent(emitter, event));
+            };
+            java.util.function.Consumer<ChatStreamEventData> eventConsumer = event -> sendPipelineEvent(emitter, event);
+            ChatMessageResponse response = idempotencyService == null || idempotencyKey == null || idempotencyKey.trim().isEmpty()
+                    ? chatOrchestrationService.chat(request, textConsumer, eventConsumer)
+                    : idempotencyService.execute(com.hmdp.ai.runtime.IdempotencyScope.CHAT_MESSAGE, idempotencyKey, request,
+                    ChatMessageResponse.class, () -> chatOrchestrationService.chat(request, textConsumer, eventConsumer));
             sendStatus(emitter, "RESULT_READY", "已获得可展示的业务结果");
             if (!modelTextStreamed.get()) sendTextDeltas(emitter, response.getAnswer());
             sendRecommendationComponent(emitter, response);

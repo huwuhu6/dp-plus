@@ -9,6 +9,7 @@ import com.hmdp.utils.UserHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
@@ -17,12 +18,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+import java.util.Collections;
 
 @Service
 public class ChatMemoryService {
     private static final Logger log = LoggerFactory.getLogger(ChatMemoryService.class);
-    private static final String KEY_PREFIX = "ai:chat:memory:";
+    private static final String KEY_PREFIX = "ai:chat:memory:v2:";
     private static final int MAX_MESSAGES = 8;
     private static final long TTL_MINUTES = 30L;
 
@@ -37,13 +38,9 @@ public class ChatMemoryService {
 
     public List<Map<String, Object>> load(String chatId) {
         try {
-            String value = stringRedisTemplate.opsForValue().get(key(chatId));
-            if (value != null && !value.trim().isEmpty()) {
-                return normalizeMessages(objectMapper.readValue(value, new TypeReference<List<Map<String, Object>>>() { }));
-            }
-            List<Map<String, Object>> restored = restoreFromDatabase(chatId);
-            if (!restored.isEmpty()) cache(chatId, restored);
-            return restored;
+            List<String> values = stringRedisTemplate.opsForList().range(key(chatId), 0, -1);
+            if (values != null && !values.isEmpty()) return decodeMessages(values);
+            return restoreFromDatabase(chatId);
         } catch (Exception e) {
             log.warn("[AI][chat] event=MEMORY_LOAD_FAILURE chatId={} errorType={}", chatId, e.getClass().getSimpleName());
             return restoreFromDatabase(chatId);
@@ -52,13 +49,10 @@ public class ChatMemoryService {
 
     public void appendTurn(String chatId, String userMessage, String assistantMessage, String route, Long decisionSessionId) {
         try {
-            List<Map<String, Object>> messages = load(chatId);
-            messages.add(message("user", userMessage));
-            messages.add(message("assistant", assistantMessage));
-            if (messages.size() > MAX_MESSAGES) {
-                messages = new ArrayList<Map<String, Object>>(messages.subList(messages.size() - MAX_MESSAGES, messages.size()));
-            }
-            cache(chatId, messages);
+            String user = objectMapper.writeValueAsString(message("user", userMessage));
+            String assistant = objectMapper.writeValueAsString(message("assistant", assistantMessage));
+            stringRedisTemplate.execute(appendScript(), Collections.singletonList(key(chatId)), user, assistant,
+                    String.valueOf(MAX_MESSAGES), String.valueOf(TTL_MINUTES * 60));
         } catch (Exception e) {
             log.warn("[AI][chat] event=MEMORY_CACHE_FAILURE chatId={} errorType={}", chatId, e.getClass().getSimpleName());
         }
@@ -100,8 +94,10 @@ public class ChatMemoryService {
         }
     }
 
-    private void cache(String chatId, List<Map<String, Object>> messages) throws Exception {
-        stringRedisTemplate.opsForValue().set(key(chatId), objectMapper.writeValueAsString(messages), TTL_MINUTES, TimeUnit.MINUTES);
+    private List<Map<String, Object>> decodeMessages(List<String> values) throws Exception {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (String value : values) result.add(messageMap(objectMapper.readValue(value, new TypeReference<Map<String, Object>>() { })));
+        return result;
     }
 
     private Map<String, Object> message(String role, String content) {
@@ -116,12 +112,8 @@ public class ChatMemoryService {
         return KEY_PREFIX + chatId;
     }
 
-    private List<Map<String, Object>> normalizeMessages(List<Map<String, Object>> messages) {
-        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-        for (Map<String, Object> item : messages) {
-            result.add(message(String.valueOf(item.get("role")), String.valueOf(item.get("content"))));
-        }
-        return result;
+    private Map<String, Object> messageMap(Map<String, Object> item) {
+        return message(String.valueOf(item.get("role")), String.valueOf(item.get("content")));
     }
 
     private String normalizeRole(String role) {
@@ -129,5 +121,12 @@ public class ChatMemoryService {
         if ("USER".equalsIgnoreCase(role)) return "user";
         if ("ASSISTANT".equalsIgnoreCase(role)) return "assistant";
         return role.toLowerCase();
+    }
+
+    private DefaultRedisScript<Long> appendScript() {
+        return new DefaultRedisScript<Long>(
+                "redis.call('RPUSH', KEYS[1], ARGV[1], ARGV[2]); "
+                        + "redis.call('LTRIM', KEYS[1], -tonumber(ARGV[3]), -1); "
+                        + "redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4])); return 1;", Long.class);
     }
 }
