@@ -3,6 +3,7 @@ package com.hmdp.ai.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.service.AiModelCallTracker;
+import com.hmdp.ai.service.AiModelCallObservationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
@@ -26,6 +27,7 @@ public class QueryRewriteClient {
 
     @Resource private AiProperties aiProperties;
     @Resource private AiModelCallTracker modelCallTracker;
+    @Resource private AiModelCallObservationService modelCallObservationService;
 
     public boolean isConfigured() {
         return aiProperties.getQueryRewrite() != null && aiProperties.getQueryRewrite().isConfigured();
@@ -52,16 +54,21 @@ public class QueryRewriteClient {
             if (!response.getStatusCode().is2xxSuccessful() || content.trim().isEmpty()) throw new IllegalStateException("Query rewrite model returned no content");
             modelCallTracker.recordSuccess(payload.path("usage").path("prompt_tokens").isNumber() ? payload.path("usage").path("prompt_tokens").asInt() : null,
                     payload.path("usage").path("completion_tokens").isNumber() ? payload.path("usage").path("completion_tokens").asInt() : null);
+            modelCallObservationService.record("REWRITE", true, System.currentTimeMillis() - startedAt,
+                    payload.path("usage").path("prompt_tokens").isNumber() ? payload.path("usage").path("prompt_tokens").asInt() : null,
+                    payload.path("usage").path("completion_tokens").isNumber() ? payload.path("usage").path("completion_tokens").asInt() : null);
             log.info("[AI][query-rewrite] provider={} model={} event=SUCCESS durationMs={} chars={}",
                     properties.getProvider(), properties.getModel(), System.currentTimeMillis() - startedAt, content.length());
             return content;
         } catch (HttpStatusCodeException e) {
             modelCallTracker.recordFailure();
+            modelCallObservationService.record("REWRITE", false, System.currentTimeMillis() - startedAt, null, null);
             log.warn("[AI][query-rewrite] provider={} model={} event=FAILURE durationMs={} status={}",
                     properties.getProvider(), properties.getModel(), System.currentTimeMillis() - startedAt, e.getRawStatusCode());
             throw e;
         } catch (RuntimeException e) {
             modelCallTracker.recordFailure();
+            modelCallObservationService.record("REWRITE", false, System.currentTimeMillis() - startedAt, null, null);
             log.warn("[AI][query-rewrite] provider={} model={} event=FAILURE durationMs={} errorType={}",
                     properties.getProvider(), properties.getModel(), System.currentTimeMillis() - startedAt, e.getClass().getSimpleName());
             throw e;

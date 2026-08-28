@@ -7,6 +7,7 @@ import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.ChatLocationInput;
 import com.hmdp.ai.dto.ChatMessageRequest;
 import com.hmdp.ai.dto.ChatMessageResponse;
+import com.hmdp.ai.dto.ChatStreamEventData;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.ConversationEvaluationRunResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunComparisonResponse;
@@ -60,6 +61,7 @@ public class AiConversationEvaluationService {
     @Resource private ShopMapper shopMapper;
     @Resource private ObjectMapper objectMapper;
     @Resource private AiProperties aiProperties;
+    @Resource private AiModelCallObservationService modelCallObservationService;
     private Executor evaluationExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public ConversationEvaluationRunResponse runActiveCases() {
@@ -289,8 +291,12 @@ public class AiConversationEvaluationService {
                 if (turn.get("selectedOptionId") != null) request.setSelectedOptionId(String.valueOf(turn.get("selectedOptionId")));
                 applyLocation(turn.get("location"), request);
                 ChatMessageResponse response;
+                beginModelObservation();
+                final Map<String, Long> stageStartedAt = new LinkedHashMap<>();
+                final List<Map<String, Object>> stageTrace = new ArrayList<>();
                 try {
-                    response = chatOrchestrationService.chat(request);
+                    response = chatOrchestrationService.chat(request, null,
+                            event -> collectStageTrace(event, stageStartedAt, stageTrace));
                 } catch (Exception turnError) {
                     actualErrorCount++;
                     afterError = true;
@@ -300,7 +306,10 @@ public class AiConversationEvaluationService {
                     Map<String, Object> output = new LinkedHashMap<>();
                     output.put("route", "ERROR");
                     output.put("error", compact(turnError.getMessage()));
+                    output.put("stages", stageTrace);
+                    output.put("modelCalls", modelCallObservationSnapshot());
                     outputs.add(output);
+                    clearModelObservation();
                     continue;
                 }
                 routes.add(response.getRoute());
@@ -323,7 +332,10 @@ public class AiConversationEvaluationService {
                 output.put("decisionStatus", response.getDecisionStatus());
                 output.put("answer", compact(response.getAnswer()));
                 output.put("contextRewrite", compactContextRewrite(response.getContextRewrite()));
+                output.put("stages", stageTrace);
+                output.put("modelCalls", modelCallObservationSnapshot());
                 outputs.add(output);
+                clearModelObservation();
             }
             List<String> expectedRoutes = objectMapper.readValue(evaluationCase.getExpectedRoutesJson(), new TypeReference<List<String>>() { });
             result.setActualRoutesJson(objectMapper.writeValueAsString(routes));
@@ -373,6 +385,36 @@ public class AiConversationEvaluationService {
         }
         result.setDurationMs(System.currentTimeMillis() - startedAt);
         return result;
+    }
+
+    private void collectStageTrace(ChatStreamEventData event, Map<String, Long> startedAt,
+                                   List<Map<String, Object>> trace) {
+        if (event == null || !"node_status".equals(event.getEventName())) return;
+        String node = event.getMetadata() == null ? null : String.valueOf(event.getMetadata().get("node"));
+        if (node == null || "null".equals(node)) return;
+        long now = System.currentTimeMillis();
+        if ("running".equals(event.getStatus())) {
+            startedAt.put(node, now);
+            return;
+        }
+        if (!"success".equals(event.getStatus())) return;
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("node", node);
+        item.put("stageLatencyMs", Math.max(0L, now - startedAt.getOrDefault(node, now)));
+        item.put("metadata", event.getMetadata());
+        trace.add(item);
+    }
+
+    private void beginModelObservation() {
+        if (modelCallObservationService != null) modelCallObservationService.begin();
+    }
+
+    private List<Map<String, Object>> modelCallObservationSnapshot() {
+        return modelCallObservationService == null ? Collections.emptyList() : modelCallObservationService.snapshot();
+    }
+
+    private void clearModelObservation() {
+        if (modelCallObservationService != null) modelCallObservationService.clear();
     }
 
     private void applyLocation(Object rawLocation, ChatMessageRequest request) {

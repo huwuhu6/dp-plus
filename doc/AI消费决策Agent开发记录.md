@@ -1186,6 +1186,28 @@ V49 将评测口径改为：源轮和目标轮的推荐集合都必须非空，�
 
 ## 2026-08-28：Conditional Routing Decision Boundary
 
+## 2026-08-28：Conditional Routing A/B 回放（单次方向性结果）
+
+实验基线为 `d3f5963`，实验组为 `72842bb`。两组均使用 41 条持久化对话轨迹、`deepseek-v4-flash`、同一检索数据和本地运行配置；基线运行 ID 为 `62/63/64`，实验运行 ID 为 `61/65/66`。为避免把“模型已配置”误记为真实调用，本轮新增评测专用 `AiModelCallObservationService`，仅在评测线程显式开启时从 Rewrite 与 OpenAI-compatible 客户端记录实际请求、目的、成功状态、耗时和 provider usage token；逐轮 trace 写入既有 `turnOutputsJson`，不改表、不改 API、不改变业务分支。
+
+完整性检查：六个运行均含完整 case result 和 turn trace。实验组 trace 含 `modelCalls`、节点 metadata、`stageLatencyMs` 与最终 routing assessment；基线 assessment 按实验协议记为 `N/A`，不伪造同构字段。当前 trace 没有持久化的场景 bucket，不能可靠回填 `deterministic-only` 等分类，相关分桶结果必须记为 `UNKNOWN/N/A`。每组只运行一次，95% 置信区间同样为 `N/A`，以下结果不能表述为统计显著的架构收益。
+
+| 指标 | Baseline | Experiment | 差异 |
+| --- | --- | --- | --- |
+| E2E 完整通过 | 18/41 (43.9%) | 21/41 (51.2%) | +3 |
+| Action Routing | 36/41 | 37/41 | +1 |
+| Reference Resolution | 3/11 | 3/11 | 0 |
+| Location | 41/41 | 40/41 | -1 |
+| Merchant | 41/41 | 41/41 | 0 |
+| Alternative Recommendation | 8/8 | 8/8 | 0 |
+| 总 LLM 调用 | 50 | 49 | -1 |
+| 输入 / 输出 Token | 3809 / 5137 | 3657 / 4774 | -152 / -363 |
+| 加权平均轨迹耗时 | 16.57s | 16.71s | +0.14s |
+
+调用形态按 88 个实际 turn 统计：Baseline 为 `0/0=57`、`1/0=11`、`0/1=19`、`1/1=1`；Experiment 为 `0/0=58`、`1/0=11`、`0/1=19`、`1/1=0`。因此实验组的双调用有效率为 `N/A`，而不是 `0%`；没有实际 `rewrite=1+routing=1` 样本时，不得把理论可达条件计为实际样本。实验组最终路由来源为 `RULE=54`、`MODEL=22`、`CONTEXT=8`、`COMMAND=4`；5 个 `contextRequired` turn 均已解析，未观察到 Context Resolution 后再进入 Routing Model。
+
+结论：单次回放未显示 Conditional Routing 的明确质量退化，且 token 与总调用数略低；但 Location 少 1 条、鲁棒集路由少 1 条、平均耗时未降低，并且没有重复运行或可靠场景分桶。当前只应记录为方向性结果，不能据此宣布架构收益，也没有足够证据推动 Structured Understanding。后续优先补充重复 paired A/B 回放与持久化场景 bucket，再评估调用与质量差异是否稳定。
+
 本轮新增瞬态 `RoutingDecisionAssessment`，把路由裁决拆为候选 Action、上下文完整性和状态合法性三个维度。Chat 编排在 Rewrite 前先生成 assessment；仅当需要指代/省略解析且上下文未解决时调用 Rewrite。明确的新推荐、替代推荐、位置澄清和已完成商户追问优先走 Java 规则，混合语义或无法唯一裁决的请求才升级 Routing Model。
 
 Routing Model 返回的 route 先经过 Java Action Contract 校验，非法或与当前 Decision 状态不匹配时使用现有 `fallbackRoute()`。assessment 只存在于当前 `ChatProcessingContext`，通过 `node_status` 元数据输出；本轮未引入 embedding router、Structured Understanding 或新的持久化字段。

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.service.AiModelCallTracker;
+import com.hmdp.ai.service.AiModelCallObservationService;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -29,6 +30,8 @@ public class OpenAiCompatibleClient {
     private ObjectMapper objectMapper;
     @Resource
     private AiModelCallTracker modelCallTracker;
+    @Resource
+    private AiModelCallObservationService modelCallObservationService;
 
     public JsonNode chatCompletion(List<Map<String, Object>> messages, List<Map<String, Object>> tools,
                                    Map<String, Object> toolChoice) {
@@ -74,18 +77,23 @@ public class OpenAiCompatibleClient {
                             ? response.getBody().path("usage").path("prompt_tokens").asInt() : null,
                     response.getBody().path("usage").path("completion_tokens").isNumber()
                             ? response.getBody().path("usage").path("completion_tokens").asInt() : null);
+            modelCallObservationService.record(observationPurpose(action), true, System.currentTimeMillis() - startedAt,
+                    response.getBody().path("usage").path("prompt_tokens").isNumber() ? response.getBody().path("usage").path("prompt_tokens").asInt() : null,
+                    response.getBody().path("usage").path("completion_tokens").isNumber() ? response.getBody().path("usage").path("completion_tokens").asInt() : null);
             log.info("[AI][model] action={} model={} event=SUCCESS durationMs={} toolCalls={}", action,
                     aiProperties.getModel(), System.currentTimeMillis() - startedAt,
                     compact(response.getBody().path("choices").path(0).path("message").path("tool_calls").toString()));
             return response.getBody();
         } catch (HttpStatusCodeException e) {
             modelCallTracker.recordFailure();
+            modelCallObservationService.record(observationPurpose(action), false, System.currentTimeMillis() - startedAt, null, null);
             log.warn("[AI][model] action={} model={} event=FAILURE durationMs={} status={} detail={}", action,
                     aiProperties.getModel(), System.currentTimeMillis() - startedAt, e.getRawStatusCode(),
                     compactError(e.getResponseBodyAsString()));
             throw e;
         } catch (RuntimeException e) {
             modelCallTracker.recordFailure();
+            modelCallObservationService.record(observationPurpose(action), false, System.currentTimeMillis() - startedAt, null, null);
             log.warn("[AI][model] action={} model={} event=FAILURE durationMs={} errorType={} detail={}", action,
                     aiProperties.getModel(), System.currentTimeMillis() - startedAt, e.getClass().getSimpleName(),
                     compactError(e.getMessage()));
@@ -131,17 +139,22 @@ public class OpenAiCompatibleClient {
                             ? response.getBody().path("usage").path("prompt_tokens").asInt() : null,
                     response.getBody().path("usage").path("completion_tokens").isNumber()
                             ? response.getBody().path("usage").path("completion_tokens").asInt() : null);
+            modelCallObservationService.record(observationPurpose(action), true, System.currentTimeMillis() - startedAt,
+                    response.getBody().path("usage").path("prompt_tokens").isNumber() ? response.getBody().path("usage").path("prompt_tokens").asInt() : null,
+                    response.getBody().path("usage").path("completion_tokens").isNumber() ? response.getBody().path("usage").path("completion_tokens").asInt() : null);
             log.info("[AI][model] action={} model={} event=SUCCESS durationMs={} toolCalls={}", action,
                     model, System.currentTimeMillis() - startedAt,
                     compact(response.getBody().path("choices").path(0).path("message").path("tool_calls").toString()));
             return response.getBody();
         } catch (HttpStatusCodeException e) {
             modelCallTracker.recordFailure();
+            modelCallObservationService.record(observationPurpose(action), false, System.currentTimeMillis() - startedAt, null, null);
             log.warn("[AI][model] action={} model={} event=FAILURE durationMs={} status={} detail={}", action,
                     model, System.currentTimeMillis() - startedAt, e.getRawStatusCode(), compactError(e.getResponseBodyAsString()));
             throw e;
         } catch (RuntimeException e) {
             modelCallTracker.recordFailure();
+            modelCallObservationService.record(observationPurpose(action), false, System.currentTimeMillis() - startedAt, null, null);
             log.warn("[AI][model] action={} model={} event=FAILURE durationMs={} errorType={} detail={}", action,
                     model, System.currentTimeMillis() - startedAt, e.getClass().getSimpleName(), compactError(e.getMessage()));
             throw e;
@@ -169,6 +182,10 @@ public class OpenAiCompatibleClient {
 
     private String trimTrailingSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private String observationPurpose(String action) {
+        return "CHAT_ROUTING".equals(action) ? "ROUTING" : "OTHER";
     }
 
     private RestTemplate restTemplate(Integer requestedTimeoutMs) {

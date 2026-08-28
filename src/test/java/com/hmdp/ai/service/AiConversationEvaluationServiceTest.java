@@ -29,6 +29,7 @@ import java.util.concurrent.Executor;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -72,7 +73,7 @@ class AiConversationEvaluationServiceTest {
         when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(12L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
-        when(chatService.chat(any())).thenReturn(response("START_DECISION", "COMPLETED"), response("BUSINESS_FOLLOW_UP", "COMPLETED"));
+        when(chatService.chat(any(), isNull(), any())).thenReturn(response("START_DECISION", "COMPLETED"), response("BUSINESS_FOLLOW_UP", "COMPLETED"));
         AiAgentToolCall toolCall = new AiAgentToolCall();
         toolCall.setToolName("search_shop_evidence");
         when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(toolCall));
@@ -116,7 +117,7 @@ class AiConversationEvaluationServiceTest {
         when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(16L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
-        when(chatService.chat(any())).thenReturn(
+        when(chatService.chat(any(), isNull(), any())).thenReturn(
                 responseWithRecommendationIds("START_DECISION", "COMPLETED", 74L, 89L),
                 responseWithRecommendationIds("START_DECISION", "COMPLETED", 85L, 92L));
         when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
@@ -188,7 +189,7 @@ class AiConversationEvaluationServiceTest {
         when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(14L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
-        when(chatService.chat(any())).thenReturn(response("START_DECISION", "COMPLETED"));
+        when(chatService.chat(any(), isNull(), any())).thenReturn(response("START_DECISION", "COMPLETED"));
         when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
 
         ConversationEvaluationRunResponse response = service.submitActiveCases();
@@ -225,7 +226,7 @@ class AiConversationEvaluationServiceTest {
         when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(13L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
-        when(chatService.chat(any())).thenReturn(responseWithCandidates("START_DECISION", "COMPLETED", "第一家", "筑地日本料理（上街店）"),
+        when(chatService.chat(any(), isNull(), any())).thenReturn(responseWithCandidates("START_DECISION", "COMPLETED", "第一家", "筑地日本料理（上街店）"),
                 responseWithRewrite("BUSINESS_FOLLOW_UP", "COMPLETED", "第二家怎么样？", "查询筑地日本料理（上街店）怎么样？"));
         when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
 
@@ -267,7 +268,7 @@ class AiConversationEvaluationServiceTest {
         when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(15L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
-        when(chatService.chat(any())).thenThrow(new IllegalArgumentException("invalid option"))
+        when(chatService.chat(any(), isNull(), any())).thenThrow(new IllegalArgumentException("invalid option"))
                 .thenReturn(response("START_DECISION", "COMPLETED"));
         when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
 
