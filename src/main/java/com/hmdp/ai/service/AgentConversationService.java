@@ -424,6 +424,7 @@ public class AgentConversationService {
         for (AgentToolResult result : results) {
             if (answer.length() > 0) answer.append("\n\n");
             answer.append(result.getDisplayText());
+            agentToolStateReducer.markShown(context, result);
             response.getToolTrace().add(new AgentToolTraceItem(result.getToolName(), result.getSummary(), result.getDurationMs()));
         }
         response.setAnswer(answer.toString());
