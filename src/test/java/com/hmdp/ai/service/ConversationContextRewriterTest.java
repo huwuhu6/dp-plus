@@ -4,7 +4,6 @@ import com.hmdp.ai.client.QueryRewriteClient;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
-import com.hmdp.ai.dto.RewriteIntentType;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -34,7 +33,6 @@ class ConversationContextRewriterTest {
 
         assertTrue(result.getApplied());
         assertTrue(result.getUsedModel());
-        assertEquals(RewriteIntentType.SHOP_INQUIRY, result.getIntentType());
         assertEquals("第一家有优惠券吗？", result.getOriginalQuery());
         assertEquals("查询闽师东北菜（上街大学城店）当前可用的团购和优惠券", result.getRewrittenQuery());
         verify(textClient).rewrite(any());
@@ -67,7 +65,7 @@ class ConversationContextRewriterTest {
     }
 
     @Test
-    void classifiesCheaperAlternativeAsSearchRefinement() {
+    void leavesBusinessRefinementClassificationToRouting() {
         ConversationContextRewriter rewriter = new ConversationContextRewriter();
         QueryRewriteClient textClient = mock(QueryRewriteClient.class);
         ReflectionTestUtils.setField(rewriter, "queryRewriteClient", textClient);
@@ -76,36 +74,36 @@ class ConversationContextRewriterTest {
 
         ContextRewriteResult result = rewriter.rewrite("太贵了，有没有便宜点的", Collections.emptyList(), workingMemory());
 
-        assertEquals(RewriteIntentType.SEARCH_REFINEMENT, result.getIntentType());
+        assertFalse(result.getApplied());
+        assertEquals("SELF_CONTAINED", result.getReason());
+        verifyNoInteractions(textClient);
     }
 
     @Test
-    void classifiesAlternativeRecommendationWithoutDependingOnRewriteModel() {
+    void leavesAlternativeRecommendationToRoutingWithoutRewriteModel() {
         ConversationContextRewriter rewriter = new ConversationContextRewriter();
         QueryRewriteClient textClient = mock(QueryRewriteClient.class);
         ReflectionTestUtils.setField(rewriter, "queryRewriteClient", textClient);
 
         ContextRewriteResult result = rewriter.rewrite("换几家看看", Collections.emptyList(), workingMemory());
 
-        assertTrue(result.getApplied());
+        assertFalse(result.getApplied());
         assertFalse(result.getUsedModel());
-        assertEquals("ALTERNATIVE_RECOMMENDATION", result.getReason());
-        assertEquals(RewriteIntentType.SEARCH_REFINEMENT, result.getIntentType());
-        assertEquals("在当前搜索条件下推荐尚未展示的其他餐饮商户", result.getRewrittenQuery());
+        assertEquals("SELF_CONTAINED", result.getReason());
+        assertEquals("换几家看看", result.getRewrittenQuery());
         verifyNoInteractions(textClient);
     }
 
     @Test
-    void classifiesAlternativeRecommendationWordingWithoutDependingOnRewriteModel() {
+    void leavesAlternativeRecommendationWordingToRouting() {
         ConversationContextRewriter rewriter = new ConversationContextRewriter();
         QueryRewriteClient textClient = mock(QueryRewriteClient.class);
         ReflectionTestUtils.setField(rewriter, "queryRewriteClient", textClient);
 
         for (String query : Arrays.asList("给我再推荐几家不同的", "还有别的餐厅吗", "换一批吧")) {
             ContextRewriteResult result = rewriter.rewrite(query, Collections.emptyList(), workingMemory());
-            assertTrue(result.getApplied(), query);
-            assertEquals("ALTERNATIVE_RECOMMENDATION", result.getReason(), query);
-            assertEquals(RewriteIntentType.SEARCH_REFINEMENT, result.getIntentType(), query);
+            assertFalse(result.getApplied(), query);
+            assertEquals("SELF_CONTAINED", result.getReason(), query);
         }
         verifyNoInteractions(textClient);
     }

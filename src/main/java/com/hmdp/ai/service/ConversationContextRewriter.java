@@ -4,7 +4,6 @@ import com.hmdp.ai.client.QueryRewriteClient;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
-import com.hmdp.ai.dto.RewriteIntentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -39,27 +38,16 @@ public class ConversationContextRewriter {
             result.setApplied(true);
             result.setUsedModel(false);
             result.setReason("CURRENT_DEVICE_LOCATION_CONTINUATION");
-            result.setIntentType(RewriteIntentType.SEARCH_REFINEMENT);
             return result;
         }
         if (!hasBusinessContext(context)) {
             return ContextRewriteResult.unchanged(query, "NO_WORKING_MEMORY");
         }
-        if (requestsAlternativeRecommendations(query)) {
-            ContextRewriteResult result = new ContextRewriteResult();
-            result.setOriginalQuery(query);
-            result.setRewrittenQuery("在当前搜索条件下推荐尚未展示的其他餐饮商户");
-            result.setApplied(true);
-            result.setUsedModel(false);
-            result.setReason("ALTERNATIVE_RECOMMENDATION");
-            result.setIntentType(RewriteIntentType.SEARCH_REFINEMENT);
-            return result;
-        }
         if (!needsRewrite(query)) return ContextRewriteResult.unchanged(query, "SELF_CONTAINED");
         if (!queryRewriteClient.isConfigured()) return ContextRewriteResult.unchanged(query, "MODEL_UNAVAILABLE");
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
-            messages.add(message("system", "你是餐饮 Agent 的上下文改写器。根据工作记忆把用户的省略句改写成一条自包含的中文业务查询。只输出改写后的查询，不回答问题、不编造商户或事实。若问第一家/第二家，必须使用候选列表对应名称；若说这家/那家，使用当前聚焦商户；若说换个便宜点的，明确为在当前候选范围寻找更低人均的备选。"));
+            messages.add(message("system", "你是餐饮 Agent 的上下文与指代解析器。只根据工作记忆补全省略、指代、地点和继承条件，输出一条下游可执行的自包含中文查询。若问第一家/第二家，展开为候选列表对应商户；若说这家/那家，展开为当前聚焦商户。只输出改写后的查询，不判断业务意图、不选择 Chat Action、不决定 Decision 状态、不回答问题、不编造商户或事实。"));
             messages.add(message("system", "工作记忆：" + workingMemory(context)));
             if (history != null && !history.isEmpty()) {
                 messages.add(message("system", "最近对话：" + compactHistory(history)));
@@ -75,7 +63,6 @@ public class ConversationContextRewriter {
             result.setApplied(!query.equals(rewritten));
             result.setUsedModel(true);
             result.setReason("ELLIPSIS_RESOLVED");
-            result.setIntentType(classifyIntent(query, rewritten, context));
             log.info("[AI][chat] event=CONTEXT_REWRITE original={} rewritten={} focusedShopId={} candidateCount={}",
                     compact(query), compact(rewritten), context.getFocusedShopId(), context.getShownShops().size());
             return result;
@@ -85,39 +72,10 @@ public class ConversationContextRewriter {
         }
     }
 
-    /**
-     * The rewrite model resolves entities, while this guard makes the downstream state transition
-     * deterministic. It deliberately classifies only unambiguous operation families.
-     */
-    private RewriteIntentType classifyIntent(String original, String rewritten, AgentSessionContext context) {
-        String text = ((original == null ? "" : original) + " " + (rewritten == null ? "" : rewritten)).replaceAll("\\s+", "");
-        if (requestsAlternativeRecommendations(text)) return RewriteIntentType.SEARCH_REFINEMENT;
-        if (containsAny(text, "太贵", "便宜点", "更便宜", "换一家", "换一批", "换个口味", "换商圈", "更近", "附近一点", "重新筛选", "重新推荐")) {
-            return RewriteIntentType.SEARCH_REFINEMENT;
-        }
-        if (containsAny(text, "评价", "评论", "口碑", "优惠", "券", "团购", "营业时间", "排队", "地址", "订座", "第一家", "第二家", "第三家", "这家", "那家")) {
-            return RewriteIntentType.SHOP_INQUIRY;
-        }
-        return RewriteIntentType.GENERAL_CHAT;
-    }
-
-    private boolean containsAny(String text, String... values) {
-        for (String value : values) if (text.contains(value)) return true;
-        return false;
-    }
-
     private boolean needsRewrite(String query) {
-        if (requestsAlternativeRecommendations(query)) return true;
-        String[] signals = {"第一家", "第二家", "第三家", "这家", "那家", "上一家", "刚才那家", "换个", "便宜点", "贵点", "走过去", "多远", "多久", "有包厢", "有优惠", "有券", "团购", "继续", "安静点", "附近呢"};
+        String[] signals = {"第一家", "第二家", "第三家", "这家", "那家", "上一家", "刚才那家", "走过去", "多远", "多久", "有包厢", "有优惠", "有券", "团购", "营业", "排队", "地址", "预约", "附近呢"};
         for (String signal : signals) if (query.contains(signal)) return true;
         return false;
-    }
-
-    private boolean requestsAlternativeRecommendations(String query) {
-        String normalized = query == null ? "" : query.replaceAll("\\s+", "");
-        return normalized.matches(".*(?:再|重新)?换(?:几|一|多)?(?:家|个|批).*")
-                || normalized.matches(".*(?:再)?推荐(?:几|多)?(?:家|个).*" )
-                || normalized.matches(".*(?:还有|其他|别的).{0,3}(?:店|餐厅|选择).*" );
     }
 
     private boolean refersToCurrentDeviceLocation(String query) {

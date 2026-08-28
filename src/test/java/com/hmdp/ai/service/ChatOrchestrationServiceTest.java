@@ -17,7 +17,6 @@ import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
-import com.hmdp.ai.dto.RewriteIntentType;
 import com.hmdp.ai.entity.AiChatSession;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -197,7 +196,6 @@ class ChatOrchestrationServiceTest {
         assertTrue(decisionRequest.getValue().getQuery() != null && !decisionRequest.getValue().getQuery().isBlank());
         assertEquals(5, decisionRequest.getValue().getMaxCandidates());
         assertEquals(Arrays.asList(9L, 10L, 11L), decisionRequest.getValue().getExcludeShopIds());
-        assertEquals(RewriteIntentType.SEARCH_REFINEMENT, response.getContextRewrite().getIntentType());
         verifyNoInteractions(queryRewriteClient);
     }
 

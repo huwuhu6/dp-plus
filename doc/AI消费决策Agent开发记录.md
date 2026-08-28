@@ -1181,3 +1181,11 @@ V49 将评测口径改为：源轮和目标轮的推荐集合都必须非空，�
 `selectedOptionId` 先限制在用户可选 option 集合，再解析为 `DecisionCommand`，随后校验当前状态和会话持久化 pending options；状态终态拒绝所有继续命令。`PROVIDE_LOCATION` 只有经纬度非空时才能从 `CLARIFYING` 进入 `RESUMING`。`SWITCH_CITY` 按真实调用链保留 `ZERO_RESULT_NO_DATA`，只声明 `REQUEST_NEW_SEARCH` 业务副作用，不改变原 Decision 生命周期。
 
 新增完整合法命令矩阵、终态拒绝、未展示 option、位置命令边界和切城语义测试。定向执行 `mvn -q -Dtest=DecisionTransitionServiceTest,ConsumptionDecisionServiceTest,ChatOrchestrationServiceTest,ConversationStateServiceTest,AiEvaluationServiceTest,AiConversationEvaluationServiceTest test`：81 个测试发现、80 个执行通过、1 个既有跳过、0 失败、0 错误。
+
+## 2026-08-28：改写与意图路由职责收敛（方案 B）
+
+本轮只迁移职责边界，未修改 Decision Transition、Working Memory、Tool Loop、RAG、API 或数据库。`ConversationContextRewriter` 不再执行 `classifyIntent`，也不再为“换一家/再推荐几家”等业务操作生成改写结果；其生产输出仅用于省略、指代、候选商户、地点和继承条件的上下文解析。改写 Prompt 明确禁止输出业务 Intent、`ChatProcessingAction` 或 Decision 状态。`ContextRewriteResult.intentType` 与 `RewriteIntentType` 暂保留为兼容字段，但生产逻辑和路由已无消费点，后续迁移完快照后再删除。
+
+`ChatOrchestrationService` 收拢原有确定性业务判断：替代推荐/条件细化继续依据原始消息、有效改写消息、会话状态和 Working Memory 判断，并继续把 `shownShopIds` 作为排除集合；已完成决策下的“第一家/第二家/这家/那家”及评价、优惠、营业时间等追问由 Routing 判为 `BUSINESS_FOLLOW_UP`。只有这些规则无法判断时才调用 Routing Model，失败仍走 `fallbackRoute()`。因此“第一家有优惠券吗”仍为 Rewrite Model=1、Routing Model=0；“换一家/再推荐几家”均为 Rewrite Model=0、Routing Model=0；一般闲聊仍可进入 Routing Model。
+
+测试迁移删除了对 `RewriteIntentType` 的业务断言，并新增了 Rewrite 不为业务细化和替代推荐调用模型的断言，同时保留“第一家”模型改写调用断言。`mvn -q -Dtest=ConversationContextRewriterTest,ChatOrchestrationServiceTest` 通过；完整相关回归使用同一组 AI 决策测试执行，结果以本次命令实际 Surefire 报告为准。未观察到既有路由、候选排除或上下文解析行为变化。

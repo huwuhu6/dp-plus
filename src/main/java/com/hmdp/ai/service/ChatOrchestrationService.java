@@ -18,7 +18,6 @@ import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.PolicyDecision;
-import com.hmdp.ai.dto.RewriteIntentType;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.runtime.ConversationEventStatus;
 import com.hmdp.ai.runtime.ConversationEventType;
@@ -176,7 +175,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             return;
         }
         boolean replacesPausedDecision = isPausedDecision(activeDecision) && request.getSelectedOptionId() == null
-                && (context.getContextRewrite().getIntentType() == RewriteIntentType.SEARCH_REFINEMENT
+                && (isSearchRefinement(context.getOriginalMessage(), context.getEffectiveMessage())
                 || isNewRecommendationIntent(context.getEffectiveMessage())
                 || isContinuationRefinement(context.getEffectiveMessage(), context.getChatSession()));
         if (replacesPausedDecision) {
@@ -187,7 +186,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             return;
         }
         if (isNewRecommendationIntent(message)
-                || context.getContextRewrite().getIntentType() == RewriteIntentType.SEARCH_REFINEMENT) {
+                || isSearchRefinement(context.getOriginalMessage(), context.getEffectiveMessage())) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
             context.setRoutingReason("new_recommendation_intent");
             context.setUsedModel(aiProperties.isConfigured());
@@ -440,7 +439,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                     null, null, rewrite, null);
         }
         if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null
-                && (contextRewrite.getIntentType() == RewriteIntentType.SEARCH_REFINEMENT
+                && (isSearchRefinement(message, effectiveMessage)
                 || isNewRecommendationIntent(effectiveMessage) || isContinuationRefinement(effectiveMessage, state))) {
             DecisionFollowUpRequest cancel = new DecisionFollowUpRequest();
             cancel.setSelectedOptionId("END_DECISION");
@@ -460,7 +459,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                     chatId, activeSessionId, compact(message));
             return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null, aiProperties.isConfigured(), contextRewrite);
         }
-        if (contextRewrite.getIntentType() == RewriteIntentType.SEARCH_REFINEMENT) {
+        if (isSearchRefinement(message, effectiveMessage)) {
             log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} activeSessionId={} route=START_DECISION source=CONTEXT_REWRITE_REFINEMENT query={}",
                     chatId, activeSessionId, compact(effectiveMessage));
             return startDecision(chatId, message, effectiveMessage, state, request.getLocation() != null, aiProperties.isConfigured(), contextRewrite);
@@ -581,8 +580,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private List<Long> refinementExclusions(ContextRewriteResult contextRewrite,
                                             com.hmdp.ai.dto.ConversationWorkingMemory memory) {
         List<Long> excluded = new ArrayList<Long>();
-        if (contextRewrite == null || contextRewrite.getIntentType() != RewriteIntentType.SEARCH_REFINEMENT
-                || memory == null) return excluded;
+        if (!isSearchRefinement(contextRewrite == null ? null : contextRewrite.getOriginalQuery(),
+                contextRewrite == null ? null : contextRewrite.getRewrittenQuery()) || memory == null) return excluded;
         if (memory.getShownShopIds() != null && !memory.getShownShopIds().isEmpty()) {
             excluded.addAll(memory.getShownShopIds());
             return excluded;
@@ -711,7 +710,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         DecisionResponse decision = activeDecision;
         if (decision == null || !sessionId.equals(activeSessionId)) decision = decisionService.getDecision(sessionId);
         if (decision == null || !"COMPLETED".equals(decision.getStatus())) return null;
-        if (contextRewrite.getIntentType() == RewriteIntentType.SHOP_INQUIRY) {
+        if (isShopInquiry(message) || (contextRewrite != null && isShopInquiry(contextRewrite.getOriginalQuery()))) {
             log.info("[AI][chat] event=ROUTE_GUARD_MATCHED chatId={} sessionId={} route=BUSINESS_FOLLOW_UP source=CONTEXT_REWRITE query={}",
                     chatId, sessionId, compact(message));
             return "BUSINESS_FOLLOW_UP";
@@ -729,6 +728,40 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return message.contains("我想吃") || message.contains("想找") || message.contains("帮我找")
                 || message.contains("给我推荐") || message.contains("重新推荐") || message.contains("再推荐")
                 || message.contains("换个餐厅") || message.contains("换一家餐厅");
+    }
+
+    /** Routing-owned business intent checks. Rewrite only resolves references and query context. */
+    private boolean isAlternativeRecommendation(String originalMessage, String effectiveMessage) {
+        return isAlternativeRecommendationPhrase(originalMessage) || isAlternativeRecommendationPhrase(effectiveMessage);
+    }
+
+    private boolean isAlternativeRecommendationPhrase(String message) {
+        if (message == null) return false;
+        String normalized = message.replaceAll("\\s+", "");
+        return normalized.contains("换几家") || normalized.contains("换一家") || normalized.contains("换一批")
+                || normalized.contains("再推荐几家") || normalized.contains("多推荐几家") || normalized.contains("再来几家")
+                || normalized.contains("还有别的")
+                || normalized.contains("还有其他") || normalized.contains("换个条件");
+    }
+
+    private boolean isSearchRefinement(String originalMessage, String effectiveMessage) {
+        if (isAlternativeRecommendation(originalMessage, effectiveMessage)) return true;
+        String text = ((originalMessage == null ? "" : originalMessage) + " "
+                + (effectiveMessage == null ? "" : effectiveMessage)).replaceAll("\\s+", "");
+        return text.contains("太贵") || text.contains("便宜点") || text.contains("更便宜")
+                || text.contains("换个条件") || text.contains("换个口味") || text.contains("换个商圈")
+                || text.contains("更近") || text.contains("附近一点") || text.contains("重新筛选")
+                || text.contains("重新推荐") || text.contains("当前设备附近搜索") || text.contains("我附近")
+                || text.contains("当前位置") || text.contains("当前定位");
+    }
+
+    private boolean isShopInquiry(String message) {
+        if (message == null) return false;
+        return message.contains("评价") || message.contains("评论") || message.contains("口碑")
+                || message.contains("优惠") || message.contains("代金券") || message.contains("团购")
+                || message.contains("营业时间") || message.contains("排队") || message.contains("地址")
+                || message.contains("预约") || message.contains("第一家") || message.contains("第二家")
+                || message.contains("第三家") || message.contains("这家") || message.contains("那家");
     }
 
     private boolean isNewRecommendationIntent(String message) {
