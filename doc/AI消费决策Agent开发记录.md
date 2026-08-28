@@ -1155,3 +1155,13 @@ V49 将评测口径改为：源轮和目标轮的推荐集合都必须非空，�
 | 鲁棒集 | #60 vs #57 | 1/6 -> 1/6 | 5/6 -> 5/6 | 工具匹配 6/6 -> 5/6，覆盖 1/1 不变 | 6/6、6/6 -> 不变 | 6/6 -> 不变 | 1/1 -> 1/1 | -947ms（17496ms） |
 
 三次真实回放均无 Milvus filter 解析异常或 `RECALL_FALLBACK`。主、留出集的所有质量指标保持不变；鲁棒集的工具匹配从 6/6 降为 5/6，是模型在一次真实回放中将同一事实追问选择为不同工具，既有诊断口径下不属于检索白名单导致的商户、城市、状态或替代推荐回归。主集的 +409ms 同样不能归因于过滤改造或用于性能结论，因为一次轨迹含真实模型调用；留出与鲁棒集分别减少 646ms、947ms。当前可确认的结论仅为：向量检索已经受 MySQL 合规白名单约束，且该改造未改变主、留出集的业务质量指标。后续应使用固定模型输出或增加重复回放次数，按检索阶段耗时、Recall@K、MRR、证据命中率评估阈值 `0.35`、Top K 和语义权重 `18`，不能仅以三次端到端平均耗时调参。
+
+## 2026-08-28：决策任务状态转移层收拢
+
+审计确认 `ChatProcessingAction` 仍只负责聊天编排路由，`DecisionSession.status` 才表示推荐任务生命周期，`selectedOptionId` 只是用户命令来源，三者不再混作同一状态。新增 `DecisionTransitionService` 作为唯一的任务状态写入入口，以显式规则表达 `当前状态 + DecisionCommand -> 下一状态 + Side Effect`；保留既有数据库状态字符串和接口协议，不引入新的工作流框架或表迁移。
+
+已收拢的生命周期包括：新建任务 `NEW -> CREATED -> EXTRACTING`，缺位置进入 `CLARIFYING`，补充或拒绝位置进入 `RESUMING`，严格无结果进入 `WAITING_RELAXATION`，无入库数据进入 `ZERO_RESULT_NO_DATA`，放宽后重试、成功完成、失败和用户结束。`END_DECISION`、位置提供/拒绝、全部既有放宽项以及切换城市均映射为 `DecisionCommand`。自动放宽保持原有执行语义，仅通过命令合法性校验，不额外切换任务状态。
+
+显式 `selectedOptionId` 现在同时校验状态-命令组合与会话持久化待选项，拒绝完成/取消任务的续聊、跨状态复用及未展示 option；聊天编排在确认位置、拒绝位置和切换城市前先校验，避免非法命令先修改 Working Memory。纯坐标续聊继续兼容为 `PROVIDE_LOCATION` 命令来源。状态不变量包括：`CLARIFYING` 必须保留位置问题与选项，`WAITING_RELAXATION` 必须保留至少一个合法放宽选项，`RESUMING` 不得保留待处理选项。
+
+新增 `DecisionTransitionServiceTest` 覆盖新建、补/拒位置、严格无结果、用户放宽、结束、终态非法命令、未展示 option、状态不变量和 Side Effect；并回归聊天编排、消费决策、Working Memory 和两类评测服务。定向命令 `mvn -q -Dtest=DecisionTransitionServiceTest,ConsumptionDecisionServiceTest,ChatOrchestrationServiceTest,ConversationStateServiceTest,AiEvaluationServiceTest,AiConversationEvaluationServiceTest test` 结果为 76 个测试执行、75 通过、0 失败、0 错误、1 个既有跳过。此为代码级状态转移回归，不是使用真实模型的对话评测运行，因此不与 #58/#59/#60 的质量指标混用。

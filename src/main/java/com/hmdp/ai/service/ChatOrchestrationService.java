@@ -1008,6 +1008,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                                                     ChatMessageResponse response) {
         String optionId = request.getSelectedOptionId();
         if ("SWITCH_CITY".equals(optionId)) {
+            decisionService.validateSelectedOption(activeSessionId, optionId);
             DecisionResponse decision = decisionService.getDecision(activeSessionId);
             response.setRoute("SWITCH_CITY");
             response.setDecision(decision);
@@ -1019,13 +1020,18 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             return response;
         }
         if (optionId.startsWith("CONFIRM_RESOLVED_LOCATION_")) {
+            // Confirm legality before accepting a candidate into durable Working Memory.
+            decisionService.validateSelectedOption(activeSessionId, "PROVIDE_LOCATION");
             int index = Integer.parseInt(optionId.substring("CONFIRM_RESOLVED_LOCATION_".length()));
             ResolvedLocationCandidate candidate = conversationStateService.acceptPendingSearchLocation(state, index);
             optionId = "PROVIDE_LOCATION";
             log.info("[AI][chat] event=LOCATION_RESOLUTION_CONFIRMED chatId={} sessionId={} label={} latitude={} longitude={}",
                     chatId, activeSessionId, candidate.getLabel(), candidate.getLatitude(), candidate.getLongitude());
         }
-        if ("DECLINE_LOCATION".equals(optionId)) conversationStateService.declineLocation(state);
+        if ("DECLINE_LOCATION".equals(optionId)) {
+            decisionService.validateSelectedOption(activeSessionId, optionId);
+            conversationStateService.declineLocation(state);
+        }
         DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
         followUp.setSelectedOptionId(optionId);
         followUp.setMessage(message);

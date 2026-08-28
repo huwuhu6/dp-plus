@@ -2,6 +2,7 @@ package com.hmdp.ai.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.client.SpringAiTextClient;
@@ -28,6 +29,7 @@ import com.hmdp.ai.mapper.AiConversationEventMapper;
 import com.hmdp.ai.mapper.AiDecisionMessageMapper;
 import com.hmdp.ai.runtime.ConversationEventStatus;
 import com.hmdp.ai.runtime.ConversationEventType;
+import com.hmdp.ai.runtime.DecisionCommand;
 import com.hmdp.ai.mapper.AiReviewDocumentMapper;
 import com.hmdp.ai.mapper.AiShopProfileMapper;
 import com.hmdp.entity.Shop;
@@ -75,6 +77,9 @@ public class ConsumptionDecisionService {
     @Resource private ResultEvaluationService resultEvaluationService;
     @Autowired(required = false) private SemanticShopRetriever semanticShopRetriever;
     @Value("${ai.retrieval.semantic-weight:18}") private double semanticWeight;
+    // Spring injects the domain component in production; the default keeps isolated
+    // unit fixtures compatible without changing their construction pattern.
+    @Resource private DecisionTransitionService transitionService = new DecisionTransitionService();
 
     public DecisionResponse decide(DecisionRequest request) {
         return decide(request, null);
@@ -100,7 +105,7 @@ public class ConsumptionDecisionService {
         session.setChatId(chatId);
         session.setTraceId(traceId);
         session.setQueryText(request.getQuery().trim());
-        session.setStatus("CREATED");
+        transitionService.transition(session, DecisionCommand.START_DECISION);
         try {
             session.setRequestContextJson(objectMapper.writeValueAsString(request));
         } catch (Exception e) {
@@ -116,22 +121,26 @@ public class ConsumptionDecisionService {
         AiDecisionSession session = sessionMapper.selectById(sessionId);
         if (session == null) throw new IllegalArgumentException("决策记录不存在");
         ensureSessionOwner(session);
-        if (!"CLARIFYING".equals(session.getStatus()) && !"WAITING_RELAXATION".equals(session.getStatus())
-                && !"ZERO_RESULT_NO_DATA".equals(session.getStatus())) {
-            throw new IllegalArgumentException("当前决策不需要补充信息或放宽条件");
-        }
         log.info("[AI][session={}] state={} action=FOLLOW_UP_RECEIVED selectedOptionId={} hasLatitude={} hasLongitude={} message={}",
                 sessionId, session.getStatus(), followUp == null ? null : followUp.getSelectedOptionId(),
                 followUp != null && followUp.getLatitude() != null, followUp != null && followUp.getLongitude() != null,
                 followUp == null ? "" : compact(followUp.getMessage()));
         try {
-            if (isEndRequest(followUp)) return cancelPausedDecision(session, followUp);
+            DecisionCommand command = resolveFollowUpCommand(followUp);
+            String pausedStatus = session.getStatus();
+            validateSelectedOption(session, followUp, command);
+            if (command == DecisionCommand.END_DECISION) return cancelPausedDecision(session, followUp, pausedStatus);
+            if (command == DecisionCommand.SWITCH_CITY) {
+                transitionService.resolve(pausedStatus, command);
+                return switchCityResponse(session);
+            }
+            // Validate state/command before mutating request constraints or durable Working Memory upstream.
+            transitionService.resolve(pausedStatus, command);
             DecisionRequest request = objectMapper.readValue(session.getRequestContextJson(), DecisionRequest.class);
             DecisionConstraints constraints = objectMapper.readValue(session.getConstraintsJson(), DecisionConstraints.class);
-            String pausedStatus = session.getStatus();
             boolean resumedWithRelaxation = "WAITING_RELAXATION".equals(pausedStatus);
             if ("CLARIFYING".equals(pausedStatus)) {
-                if ("DECLINE_LOCATION".equals(followUp == null ? null : followUp.getSelectedOptionId())) {
+                if (command == DecisionCommand.DECLINE_LOCATION) {
                     log.info("[AI][session={}] state=CLARIFYING action=LOCATION_DECLINED searchScope=CITYWIDE", sessionId);
                     request.setLocationStatus("DECLINED");
                     constraints.setNearby(false);
@@ -152,10 +161,7 @@ public class ConsumptionDecisionService {
                             sessionId, request.getLatitude(), request.getLongitude());
                 }
             } else if ("WAITING_RELAXATION".equals(pausedStatus)) {
-                if (followUp == null || followUp.getSelectedOptionId() == null) {
-                    throw new IllegalArgumentException("请使用 selectedOptionId 选择一个放宽方案");
-                }
-                applyRelaxation(constraints, followUp.getSelectedOptionId());
+                applyRelaxation(constraints, command);
                 log.info("[AI][session={}] state=WAITING_RELAXATION action=RELAXATION_SELECTED option={}",
                         sessionId, followUp.getSelectedOptionId());
             } else {
@@ -164,17 +170,18 @@ public class ConsumptionDecisionService {
             session.setRequestContextJson(objectMapper.writeValueAsString(request));
             session.setPendingType(null);
             session.setPendingOptionsJson(null);
-            session.setStatus("RESUMING");
+            transitionService.transition(session, command);
+            transitionService.validatePendingState(session.getStatus(), session.getPendingType(), Collections.emptyList(), null);
             if (!claimResume(session, pausedStatus)) {
                 throw new IllegalArgumentException("当前决策已被其他续聊请求处理，请刷新后查看最新结果");
             }
             if ("CLARIFYING".equals(pausedStatus)) {
-                String message = "DECLINE_LOCATION".equals(followUp.getSelectedOptionId())
+                String message = command == DecisionCommand.DECLINE_LOCATION
                         ? "未提供位置，按全城搜索"
                         : (hasText(followUp.getMessage()) ? followUp.getMessage() : "已提供当前位置坐标");
                 saveMessage(sessionId, "USER", "LOCATION", message);
             } else {
-                saveMessage(sessionId, "USER", "RELAXATION_SELECTION", followUp.getSelectedOptionId());
+                saveMessage(sessionId, "USER", "RELAXATION_SELECTION", command.name());
             }
             log.info("[AI][session={}] state=RESUMING action=USER_FOLLOW_UP", sessionId);
             return execute(session, request, constraints, false, resumedWithRelaxation);
@@ -213,7 +220,11 @@ public class ConsumptionDecisionService {
             }
             response.setConstraints(constraints);
             session.setConstraintsJson(objectMapper.writeValueAsString(constraints));
-            session.setStatus(extractConstraints ? "EXTRACTING" : "RESUMING");
+            if (extractConstraints) {
+                transitionService.transition(session, DecisionCommand.EXTRACT_CONSTRAINTS);
+            } else {
+                transitionService.transition(session, DecisionCommand.EXECUTE);
+            }
             sessionMapper.updateById(session);
             if (extractConstraints) {
                 recordStep(response, session.getId(), "EXTRACTING", "已提取预算、距离、菜系和场景偏好", start);
@@ -235,6 +246,7 @@ public class ConsumptionDecisionService {
             metrics.setStrictCandidateCount(candidates.size());
             metrics.setResultEvaluationOutcome(relaxation.getOutcome());
             if (resultEvaluationService.applySafeAutomaticRelaxation(request, constraints, relaxation)) {
+                transitionService.resolve(session.getStatus(), DecisionCommand.AUTO_RELAXATION);
                 long strictRetrievingMs = durationOrZero(metrics.getRetrievingDurationMs());
                 long strictRerankingMs = durationOrZero(metrics.getRerankingDurationMs());
                 long strictSemanticRetrievingMs = durationOrZero(metrics.getSemanticRetrievingDurationMs());
@@ -275,7 +287,7 @@ public class ConsumptionDecisionService {
             populateDurationMetrics(metrics, response.getTrace(), start);
             populateModelUsage(response, metrics);
             response.setStatus("COMPLETED");
-            session.setStatus("COMPLETED");
+            transitionService.transition(session, DecisionCommand.COMPLETE);
             session.setPendingType(null);
             session.setPendingOptionsJson(null);
             session.setResultJson(objectMapper.writeValueAsString(response));
@@ -287,7 +299,7 @@ public class ConsumptionDecisionService {
             logDecisionOutput(session.getId(), response);
             return response;
         } catch (Exception e) {
-            session.setStatus("FAILED");
+            transitionService.transition(session, DecisionCommand.FAIL);
             sessionMapper.updateById(session);
             throw new IllegalStateException("AI 决策执行失败: " + e.getMessage(), e);
         } finally {
@@ -391,7 +403,7 @@ public class ConsumptionDecisionService {
         response.getOptions().add(new DecisionOption("DECLINE_LOCATION", "不提供位置，按全城搜索"));
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
         recordStep(response, session.getId(), "CLARIFYING", "默认需要位置，等待用户授权或补充", startedAt);
-        return finishPausedDecision(session, response, metrics, "CLARIFYING", "LOCATION", startedAt);
+        return finishPausedDecision(session, response, metrics, DecisionCommand.PROVIDE_LOCATION, "LOCATION", startedAt);
     }
 
     private DecisionResponse pauseForRelaxation(AiDecisionSession session, DecisionResponse response,
@@ -430,7 +442,7 @@ public class ConsumptionDecisionService {
         }
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
         recordStep(response, session.getId(), "WAITING_RELAXATION", "候选为空，等待用户明确选择放宽项", startedAt);
-        return finishPausedDecision(session, response, metrics, "WAITING_RELAXATION", "RELAXATION", startedAt);
+        return finishPausedDecision(session, response, metrics, DecisionCommand.STRICT_SEARCH_EMPTY, "RELAXATION", startedAt);
     }
 
     /** A named city without user-relaxable filters is a data-coverage outcome, not a relaxation task. */
@@ -445,7 +457,7 @@ public class ConsumptionDecisionService {
         recordStep(response, session.getId(), "ZERO_RESULT_NO_DATA", "指定地理范围内暂无入库商户，不提供虚假的放宽选项", startedAt);
         log.info("[AI][session={}] state=ZERO_RESULT_NO_DATA action=NO_DATA_SCOPE scope={} relaxable=false",
                 session.getId(), scope);
-        return finishPausedDecision(session, response, metrics, "ZERO_RESULT_NO_DATA", "NO_DATA", startedAt);
+        return finishPausedDecision(session, response, metrics, DecisionCommand.NO_DATA_FOUND, "NO_DATA", startedAt);
     }
 
     private boolean hasRelaxableConstraints(DecisionConstraints constraints) {
@@ -456,13 +468,18 @@ public class ConsumptionDecisionService {
     }
 
     private DecisionResponse finishPausedDecision(AiDecisionSession session, DecisionResponse response,
-                                                  DecisionMetrics metrics, String state, String pendingType,
+                                                  DecisionMetrics metrics, DecisionCommand command, String pendingType,
                                                   long startedAt) throws Exception {
         populateDurationMetrics(metrics, response.getTrace(), startedAt);
         populateModelUsage(response, metrics);
-        session.setStatus(state);
+        transitionService.transition(session, command);
+        String state = session.getStatus();
+        if (!state.equals(response.getStatus())) {
+            throw new IllegalStateException("响应状态与决策状态转移不一致");
+        }
         session.setPendingType(pendingType);
         session.setPendingOptionsJson(objectMapper.writeValueAsString(response.getOptions()));
+        transitionService.validatePendingState(state, pendingType, response.getOptions(), response.getQuestion());
         session.setResultJson(objectMapper.writeValueAsString(response));
         sessionMapper.updateById(session);
         persistMetrics(session.getId(), metrics);
@@ -473,27 +490,27 @@ public class ConsumptionDecisionService {
         return response;
     }
 
-    private void applyRelaxation(DecisionConstraints constraints, String optionId) {
-        if ("EXPAND_RADIUS".equals(optionId) && constraints.getRadiusKm() > 0) {
+    private void applyRelaxation(DecisionConstraints constraints, DecisionCommand command) {
+        if (command == DecisionCommand.EXPAND_RADIUS && constraints.getRadiusKm() > 0) {
             constraints.setRadiusKm(round(constraints.getRadiusKm() + 2D));
-        } else if ("INCREASE_BUDGET".equals(optionId) && constraints.getBudgetPerPerson() > 0
+        } else if (command == DecisionCommand.INCREASE_BUDGET && constraints.getBudgetPerPerson() > 0
                 && !isLocked(constraints, "budgetPerPerson")) {
             log.info("[AI][decision] action=BUDGET_RELAXATION previousBudget={} nextBudget={}",
                     constraints.getBudgetPerPerson(), constraints.getBudgetPerPerson() + 50);
             constraints.setBudgetPerPerson(constraints.getBudgetPerPerson() + 50);
-        } else if ("RELAX_CUISINE".equals(optionId) && !constraints.getCuisine().isEmpty()) {
+        } else if (command == DecisionCommand.RELAX_CUISINE && !constraints.getCuisine().isEmpty()) {
             constraints.setCuisine("");
-        } else if ("RELAX_QUIET".equals(optionId) && Boolean.TRUE.equals(constraints.getQuiet())) {
+        } else if (command == DecisionCommand.RELAX_QUIET && Boolean.TRUE.equals(constraints.getQuiet())) {
             constraints.setQuiet(false);
-        } else if ("ALLOW_QUEUE".equals(optionId) && Boolean.TRUE.equals(constraints.getAvoidQueue())) {
+        } else if (command == DecisionCommand.ALLOW_QUEUE && Boolean.TRUE.equals(constraints.getAvoidQueue())) {
             constraints.setAvoidQueue(false);
-        } else if ("RELAX_LIGHT_TASTE".equals(optionId) && requiresLightTasteEvidence(constraints)) {
+        } else if (command == DecisionCommand.RELAX_LIGHT_TASTE && requiresLightTasteEvidence(constraints)) {
             constraints.getSoftPreferences().remove("口味清淡");
-        } else if ("RELAX_HARD_CONSTRAINTS".equals(optionId)
+        } else if (command == DecisionCommand.RELAX_HARD_CONSTRAINTS
                 && constraints.getHardConstraints() != null && !constraints.getHardConstraints().isEmpty()) {
             constraints.setHardConstraints(new ArrayList<>());
         } else {
-            throw new IllegalArgumentException("selectedOptionId 无效或不适用于当前约束");
+            throw new IllegalArgumentException("Decision Command 无效或不适用于当前约束: " + command);
         }
     }
 
@@ -501,11 +518,18 @@ public class ConsumptionDecisionService {
         return constraints.getLockedConstraints() != null && constraints.getLockedConstraints().contains(field);
     }
 
-    private boolean isEndRequest(DecisionFollowUpRequest followUp) {
-        if (followUp == null) return false;
-        if ("END_DECISION".equals(followUp.getSelectedOptionId())) return true;
-        String message = followUp.getMessage() == null ? "" : followUp.getMessage().trim();
-        return message.contains("算了") || message.contains("不找了") || message.contains("结束") || message.contains("没你事了");
+    private DecisionCommand resolveFollowUpCommand(DecisionFollowUpRequest followUp) {
+        if (followUp != null && hasText(followUp.getSelectedOptionId())) {
+            return transitionService.commandForOption(followUp.getSelectedOptionId());
+        }
+        if (followUp != null && followUp.getLatitude() != null && followUp.getLongitude() != null) {
+            return DecisionCommand.PROVIDE_LOCATION;
+        }
+        String message = followUp == null || followUp.getMessage() == null ? "" : followUp.getMessage().trim();
+        if (message.contains("算了") || message.contains("不找了") || message.contains("结束") || message.contains("没你事了")) {
+            return DecisionCommand.END_DECISION;
+        }
+        throw new IllegalArgumentException("当前决策需要 selectedOptionId 指定下一步操作");
     }
 
     private String compact(String value) {
@@ -514,9 +538,9 @@ public class ConsumptionDecisionService {
         return result.length() > 800 ? result.substring(0, 800) + "..." : result;
     }
 
-    private DecisionResponse cancelPausedDecision(AiDecisionSession session, DecisionFollowUpRequest followUp) throws Exception {
-        String pausedStatus = session.getStatus();
-        session.setStatus("CANCELLED");
+    private DecisionResponse cancelPausedDecision(AiDecisionSession session, DecisionFollowUpRequest followUp,
+                                                   String pausedStatus) throws Exception {
+        transitionService.transition(session, DecisionCommand.END_DECISION);
         session.setPendingType(null);
         session.setPendingOptionsJson(null);
         if (!claimResume(session, pausedStatus)) {
@@ -533,6 +557,48 @@ public class ConsumptionDecisionService {
         log.info("[AI][session={}] state=CANCELLED action=USER_ENDED_SESSION", session.getId());
         logDecisionOutput(session.getId(), response);
         return response;
+    }
+
+    private DecisionResponse switchCityResponse(AiDecisionSession session) {
+        DecisionResponse response = new DecisionResponse();
+        response.setSessionId(session.getId());
+        response.setStatus(session.getStatus());
+        response.setAnswer("请直接告诉我想切换到哪个城市，例如“帮我看看福州有什么好吃的”。");
+        return response;
+    }
+
+    /** Used by chat adapters before they mutate location-related Working Memory. */
+    public DecisionCommand validateSelectedOption(Long sessionId, String optionId) {
+        AiDecisionSession session = sessionMapper.selectById(sessionId);
+        if (session == null) throw new IllegalArgumentException("决策记录不存在");
+        ensureSessionOwner(session);
+        return transitionService.validateSelectedOption(session.getStatus(), optionId, pendingOptions(session));
+    }
+
+    private void validateSelectedOption(AiDecisionSession session, DecisionFollowUpRequest followUp,
+                                        DecisionCommand command) throws Exception {
+        if (followUp == null || !hasText(followUp.getSelectedOptionId())) return;
+        DecisionCommand selectedCommand = transitionService.validateSelectedOption(
+                session.getStatus(), followUp.getSelectedOptionId(), pendingOptions(session));
+        if (selectedCommand != command) {
+            throw new IllegalArgumentException("selectedOptionId 与决策命令不一致");
+        }
+    }
+
+    private List<String> pendingOptions(AiDecisionSession session) {
+        if (!hasText(session.getPendingOptionsJson())) return Collections.emptyList();
+        try {
+            JsonNode options = objectMapper.readTree(session.getPendingOptionsJson());
+            if (options == null || !options.isArray()) return Collections.emptyList();
+            List<String> ids = new ArrayList<String>();
+            for (JsonNode option : options) {
+                JsonNode id = option.get("id");
+                if (id != null && hasText(id.asText())) ids.add(id.asText());
+            }
+            return ids;
+        } catch (Exception e) {
+            throw new IllegalStateException("决策待选项无法解析", e);
+        }
     }
 
     private boolean hasText(String value) {
