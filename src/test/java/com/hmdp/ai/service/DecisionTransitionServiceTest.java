@@ -4,6 +4,7 @@ import com.hmdp.ai.dto.DecisionOption;
 import com.hmdp.ai.entity.AiDecisionSession;
 import com.hmdp.ai.runtime.DecisionCommand;
 import com.hmdp.ai.runtime.DecisionSideEffect;
+import com.hmdp.ai.runtime.DecisionTransition;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -33,10 +34,10 @@ class DecisionTransitionServiceTest {
     void pausesForMissingLocationThenResumesWhenLocationProvided() {
         AiDecisionSession session = extractingSession();
 
-        transitions.transition(session, DecisionCommand.PROVIDE_LOCATION);
+        transitions.transition(session, DecisionCommand.REQUIRE_LOCATION);
         transitions.validatePendingState(session.getStatus(), "LOCATION",
                 List.of(new DecisionOption("PROVIDE_LOCATION", "提供位置")), "请提供位置");
-        transitions.transition(session, DecisionCommand.PROVIDE_LOCATION);
+        transitions.transitionWithLocation(session, DecisionCommand.PROVIDE_LOCATION, 26.1D, 119.3D);
         transitions.transition(session, DecisionCommand.COMPLETE);
 
         assertEquals("COMPLETED", session.getStatus());
@@ -108,6 +109,30 @@ class DecisionTransitionServiceTest {
     }
 
     @Test
+    void locationCommandsHaveDistinctSemanticsAndRequireCoordinatesToResume() {
+        AiDecisionSession session = extractingSession();
+        assertEquals("CLARIFYING", transitions.transition(session, DecisionCommand.REQUIRE_LOCATION).getNextState());
+        assertThrows(IllegalArgumentException.class,
+                () -> transitions.transition(session, DecisionCommand.PROVIDE_LOCATION));
+        assertEquals("CLARIFYING", session.getStatus());
+
+        transitions.transitionWithLocation(session, DecisionCommand.PROVIDE_LOCATION, 26.1D, 119.3D);
+        assertEquals("RESUMING", session.getStatus());
+    }
+
+    @Test
+    void switchingCityKeepsNoDataTaskPausedAndRequestsNewSearch() {
+        AiDecisionSession session = extractingSession();
+        transitions.transition(session, DecisionCommand.NO_DATA_FOUND);
+
+        DecisionTransition transition = transitions.transition(session, DecisionCommand.SWITCH_CITY);
+
+        assertEquals("ZERO_RESULT_NO_DATA", session.getStatus());
+        assertEquals("ZERO_RESULT_NO_DATA", transition.getNextState());
+        assertTrue(transition.getSideEffects().contains(DecisionSideEffect.REQUEST_NEW_SEARCH));
+    }
+
+    @Test
     void rejectsOptionThatWasNotOfferedWithoutChangingState() {
         AiDecisionSession session = extractingSession();
         transitions.transition(session, DecisionCommand.STRICT_SEARCH_EMPTY);
@@ -134,6 +159,8 @@ class DecisionTransitionServiceTest {
     void exposesNamedSideEffectsForDecisionCommands() {
         assertTrue(transitions.resolve("WAITING_RELAXATION", DecisionCommand.EXPAND_RADIUS)
                 .getSideEffects().contains(DecisionSideEffect.APPLY_RELAXATION));
+        assertTrue(transitions.resolve("EXTRACTING", DecisionCommand.REQUIRE_LOCATION)
+                .getSideEffects().contains(DecisionSideEffect.REQUIRE_LOCATION));
         assertTrue(transitions.resolve("CLARIFYING", DecisionCommand.PROVIDE_LOCATION)
                 .getSideEffects().contains(DecisionSideEffect.APPLY_LOCATION));
         assertFalse(transitions.isTerminal("RESUMING"));
@@ -148,7 +175,7 @@ class DecisionTransitionServiceTest {
 
     private AiDecisionSession clarifyingSession() {
         AiDecisionSession session = extractingSession();
-        transitions.transition(session, DecisionCommand.PROVIDE_LOCATION);
+        transitions.transition(session, DecisionCommand.REQUIRE_LOCATION);
         return session;
     }
 }

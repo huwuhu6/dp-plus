@@ -38,9 +38,9 @@ public class DecisionTransitionService {
         // provide extracted constraints while the task is still newly created.
         register(CREATED, DecisionCommand.EXECUTE, RESUMING, DecisionSideEffect.RETRY_SEARCH);
         register(RESUMING, DecisionCommand.EXECUTE, RESUMING, DecisionSideEffect.RETRY_SEARCH);
-        register(EXTRACTING, DecisionCommand.PROVIDE_LOCATION, CLARIFYING,
+        register(EXTRACTING, DecisionCommand.REQUIRE_LOCATION, CLARIFYING,
                 DecisionSideEffect.REQUIRE_LOCATION, DecisionSideEffect.PERSIST_PENDING_OPTIONS);
-        register(RESUMING, DecisionCommand.PROVIDE_LOCATION, CLARIFYING,
+        register(RESUMING, DecisionCommand.REQUIRE_LOCATION, CLARIFYING,
                 DecisionSideEffect.REQUIRE_LOCATION, DecisionSideEffect.PERSIST_PENDING_OPTIONS);
         register(CLARIFYING, DecisionCommand.PROVIDE_LOCATION, RESUMING,
                 DecisionSideEffect.APPLY_LOCATION, DecisionSideEffect.CLEAR_PENDING_OPTIONS, DecisionSideEffect.RETRY_SEARCH);
@@ -100,6 +100,21 @@ public class DecisionTransitionService {
     }
 
     public DecisionTransition transition(AiDecisionSession session, DecisionCommand command) {
+        if (command == DecisionCommand.PROVIDE_LOCATION && CLARIFYING.equals(session == null ? null : session.getStatus())) {
+            throw new IllegalArgumentException("PROVIDE_LOCATION 必须携带用户提交的坐标");
+        }
+        return transitionInternal(session, command);
+    }
+
+    public DecisionTransition transitionWithLocation(AiDecisionSession session, DecisionCommand command,
+                                                      Double latitude, Double longitude) {
+        if (command != DecisionCommand.PROVIDE_LOCATION || latitude == null || longitude == null) {
+            throw new IllegalArgumentException("PROVIDE_LOCATION 必须携带用户提交的坐标");
+        }
+        return transitionInternal(session, command);
+    }
+
+    private DecisionTransition transitionInternal(AiDecisionSession session, DecisionCommand command) {
         if (session == null) throw new IllegalArgumentException("决策会话不能为空");
         DecisionTransition transition = resolve(session.getStatus(), command);
         session.setStatus(transition.getNextState());

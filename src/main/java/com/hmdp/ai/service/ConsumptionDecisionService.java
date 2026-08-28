@@ -170,7 +170,11 @@ public class ConsumptionDecisionService {
             session.setRequestContextJson(objectMapper.writeValueAsString(request));
             session.setPendingType(null);
             session.setPendingOptionsJson(null);
-            transitionService.transition(session, command);
+            if (command == DecisionCommand.PROVIDE_LOCATION) {
+                transitionService.transitionWithLocation(session, command, request.getLatitude(), request.getLongitude());
+            } else {
+                transitionService.transition(session, command);
+            }
             transitionService.validatePendingState(session.getStatus(), session.getPendingType(), Collections.emptyList(), null);
             if (!claimResume(session, pausedStatus)) {
                 throw new IllegalArgumentException("当前决策已被其他续聊请求处理，请刷新后查看最新结果");
@@ -403,7 +407,7 @@ public class ConsumptionDecisionService {
         response.getOptions().add(new DecisionOption("DECLINE_LOCATION", "不提供位置，按全城搜索"));
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
         recordStep(response, session.getId(), "CLARIFYING", "默认需要位置，等待用户授权或补充", startedAt);
-        return finishPausedDecision(session, response, metrics, DecisionCommand.PROVIDE_LOCATION, "LOCATION", startedAt);
+        return finishPausedDecision(session, response, metrics, DecisionCommand.REQUIRE_LOCATION, "LOCATION", startedAt);
     }
 
     private DecisionResponse pauseForRelaxation(AiDecisionSession session, DecisionResponse response,

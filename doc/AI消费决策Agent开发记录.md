@@ -1165,3 +1165,11 @@ V49 将评测口径改为：源轮和目标轮的推荐集合都必须非空，�
 显式 `selectedOptionId` 现在同时校验状态-命令组合与会话持久化待选项，拒绝完成/取消任务的续聊、跨状态复用及未展示 option；聊天编排在确认位置、拒绝位置和切换城市前先校验，避免非法命令先修改 Working Memory。纯坐标续聊继续兼容为 `PROVIDE_LOCATION` 命令来源。状态不变量包括：`CLARIFYING` 必须保留位置问题与选项，`WAITING_RELAXATION` 必须保留至少一个合法放宽选项，`RESUMING` 不得保留待处理选项。
 
 新增 `DecisionTransitionServiceTest` 覆盖新建、补/拒位置、严格无结果、用户放宽、结束、终态非法命令、未展示 option、状态不变量和 Side Effect；并回归聊天编排、消费决策、Working Memory 和两类评测服务。定向命令 `mvn -q -Dtest=DecisionTransitionServiceTest,ConsumptionDecisionServiceTest,ChatOrchestrationServiceTest,ConversationStateServiceTest,AiEvaluationServiceTest,AiConversationEvaluationServiceTest test` 结果为 76 个测试执行、75 通过、0 失败、0 错误、1 个既有跳过。此为代码级状态转移回归，不是使用真实模型的对话评测运行，因此不与 #58/#59/#60 的质量指标混用。
+
+## 2026-08-28：位置命令语义审查与最小修复
+
+审查发现旧版 `PROVIDE_LOCATION` 同时表示“系统需要位置并进入澄清”和“用户提交位置并恢复执行”，属于同一命令承载相反语义。本轮新增领域命令 `REQUIRE_LOCATION`：`EXTRACTING/RESUMING + REQUIRE_LOCATION -> CLARIFYING`，其职责是产生 `REQUIRE_LOCATION` Side Effect 并持久化位置待选项；`CLARIFYING + PROVIDE_LOCATION -> RESUMING` 只表示用户已提供位置。
+
+恢复转移增加坐标门槛：只有通过 `transitionWithLocation` 提交非空 latitude/longitude 才能进入 `RESUMING`，缺少坐标的 `PROVIDE_LOCATION` 不会修改状态。已有带坐标的续聊 API 和 Chat 入口保持兼容，未改 API 契约。`SWITCH_CITY` 的实际调用链只返回 Chat 层切城提示，不继续原 Decision，因此仍保持 `ZERO_RESULT_NO_DATA`，Side Effect 明确为 `REQUEST_NEW_SEARCH`，等待下一轮新推荐，不伪装为原任务恢复。
+
+新增位置命令语义、坐标门槛和切城状态保持测试；定向执行 `mvn -q -Dtest=DecisionTransitionServiceTest,ConsumptionDecisionServiceTest,ChatOrchestrationServiceTest test` 通过，52 个测试发现、51 个执行通过、1 个既有跳过、0 失败、0 错误。
