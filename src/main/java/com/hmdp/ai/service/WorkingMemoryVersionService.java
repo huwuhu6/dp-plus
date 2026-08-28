@@ -7,6 +7,7 @@ import com.hmdp.ai.entity.AiWorkingMemory;
 import com.hmdp.ai.mapper.AiConversationEventMapper;
 import com.hmdp.ai.mapper.AiWorkingMemoryMapper;
 import com.hmdp.ai.runtime.ConversationEventType;
+import com.hmdp.utils.UserHolder;
 import jakarta.annotation.Resource;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,18 @@ public class WorkingMemoryVersionService {
     public AiWorkingMemory latest(String chatId) {
         return workingMemoryMapper.selectOne(new QueryWrapper<AiWorkingMemory>()
                 .eq("chat_id", chatId).orderByDesc("version").last("limit 1"));
+    }
+
+    /** Reads one exact historical row and returns a detached copy. */
+    public AiWorkingMemory get(String chatId, int version) {
+        AiWorkingMemory row = workingMemoryMapper.selectOne(new QueryWrapper<AiWorkingMemory>()
+                .eq("chat_id", chatId).eq("version", version).last("limit 1"));
+        if (row == null) throw new IllegalArgumentException("Requested working memory version does not exist");
+        ensureOwner(row);
+        AiWorkingMemory copy = new AiWorkingMemory();
+        copy.setId(row.getId()); copy.setChatId(row.getChatId()); copy.setUserId(row.getUserId());
+        copy.setVersion(row.getVersion()); copy.setMemoryJson(row.getMemoryJson()); copy.setCreatedAt(row.getCreatedAt());
+        return copy;
     }
 
     @Transactional
@@ -47,5 +60,12 @@ public class WorkingMemoryVersionService {
     private String write(Object memory) {
         try { return objectMapper.writeValueAsString(memory); }
         catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be written", e); }
+    }
+
+    private void ensureOwner(AiWorkingMemory row) {
+        if (row.getUserId() == null) return;
+        if (UserHolder.getUser() == null || !row.getUserId().equals(UserHolder.getUser().getId())) {
+            throw new SecurityException("No permission to access this chat working memory");
+        }
     }
 }

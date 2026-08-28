@@ -26,7 +26,9 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class ConversationStateService {
@@ -36,6 +38,7 @@ public class ConversationStateService {
     @Resource private AiChatSessionMapper chatSessionMapper;
     @Resource private AiWorkingMemoryMapper workingMemoryMapper;
     @Resource private WorkingMemoryVersionService workingMemoryVersionService;
+    @Resource private ConversationEventService conversationEventService;
     @Resource private ObjectMapper objectMapper;
 
     public AiChatSession getOrCreate(String chatId) {
@@ -98,6 +101,13 @@ public class ConversationStateService {
         } catch (Exception e) {
             throw new IllegalStateException("Conversation working memory cannot be read", e);
         }
+    }
+
+    /** Parses and normalizes a historical snapshot without making it current state. */
+    public ConversationWorkingMemory historicalWorkingMemory(String memoryJson) {
+        AiChatSession snapshot = new AiChatSession();
+        snapshot.setWorkingMemoryJson(memoryJson);
+        return workingMemory(snapshot);
     }
 
     public ConversationLocationSlot usableLocation(AiChatSession state) {
@@ -242,6 +252,20 @@ public class ConversationStateService {
     /** Commits the chat-path tool reducer output back into the single conversation memory. */
     public void applyAgentContext(AiChatSession state, Long sessionId, AgentSessionContext context) {
         if (context == null) return;
+        if (context.getBaseWorkingMemoryVersion() == null
+                || !context.getBaseWorkingMemoryVersion().equals(state.getVersion())) {
+            Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+            metadata.put("baseWorkingMemoryVersion", context.getBaseWorkingMemoryVersion());
+            metadata.put("actualWorkingMemoryVersion", state.getVersion());
+            metadata.put("sessionId", sessionId);
+            if (conversationEventService != null) {
+                conversationEventService.record(ConversationEventType.STALE_RUNTIME_RESULT,
+                        com.hmdp.ai.runtime.ConversationEventStatus.SKIPPED, null, null, null, metadata);
+            }
+            log.warn("[AI][state] event=STALE_RUNTIME_RESULT chatId={} sessionId={} baseVersion={} actualVersion={}",
+                    state.getChatId(), sessionId, context.getBaseWorkingMemoryVersion(), state.getVersion());
+            throw new IllegalStateException("Agent runtime context is stale and cannot update working memory");
+        }
         ConversationWorkingMemory memory = workingMemory(state);
         memory.setSourceDecisionSessionId(sessionId);
         memory.setCandidatePool(new ArrayList<DecisionRecommendation>(context.getCandidatePoolSnapshot() == null
@@ -259,11 +283,34 @@ public class ConversationStateService {
     public AgentSessionContext agentContext(AiChatSession state) {
         ConversationWorkingMemory memory = workingMemory(state);
         AgentSessionContext context = new AgentSessionContext();
+        context.setBaseWorkingMemoryVersion(state.getVersion());
         context.setFocusedShopId(memory.getFocusedShopId()); context.setFocusedShopName(memory.getFocusedShopName());
         context.setCandidatePoolSnapshot(new ArrayList<DecisionRecommendation>(memory.getCandidatePool()));
         context.setShownShopIdsSnapshot(new ArrayList<Long>(memory.getShownShopIds()));
         context.setDecisionConstraints(memory.getActiveCriteria());
         return context;
+    }
+
+    /**
+     * Restores only BUSINESS_STATE fields from a historical snapshot. This always appends
+     * a new version; diagnostics such as lastPolicyAction deliberately remain current.
+     */
+    public AiWorkingMemory restoreBusinessState(AiChatSession state, ConversationWorkingMemory source,
+                                                Map<String, Object> metadata) {
+        if (source == null) throw new IllegalArgumentException("Historical working memory cannot be empty");
+        ConversationWorkingMemory current = workingMemory(state);
+        ConversationWorkingMemory restored = copyBusinessState(source);
+        restored.setLastPolicyAction(current.getLastPolicyAction());
+        restored.setLastPolicyReason(current.getLastPolicyReason());
+        normalize(restored);
+        int expectedVersion = state.getVersion() == null ? 0 : state.getVersion();
+        AiWorkingMemory committed = workingMemoryVersionService.append(state.getChatId(), state.getUserId(), expectedVersion,
+                restored, ConversationEventType.STATE_REDUCED,
+                java.util.Collections.<String, Object>singletonMap("reason", "BUSINESS_STATE_RESTORED"), metadata);
+        state.setVersion(committed.getVersion()); state.setWorkingMemoryJson(committed.getMemoryJson());
+        state.setActiveDecisionSessionId(restored.getActiveDecisionSessionId());
+        state.setLastDecisionSessionId(restored.getLastDecisionSessionId());
+        return committed;
     }
 
     /**
@@ -295,6 +342,18 @@ public class ConversationStateService {
                 eventType, java.util.Collections.<String, Object>singletonMap("reason", reason), null);
         state.setVersion(committed.getVersion()); state.setWorkingMemoryJson(committed.getMemoryJson());
         state.setActiveDecisionSessionId(memory.getActiveDecisionSessionId()); state.setLastDecisionSessionId(memory.getLastDecisionSessionId());
+    }
+
+    private ConversationWorkingMemory copyBusinessState(ConversationWorkingMemory source) {
+        try {
+            ConversationWorkingMemory copy = objectMapper.readValue(writeWorkingMemory(source), ConversationWorkingMemory.class);
+            // lastPolicy* is runtime diagnostics, not part of the BUSINESS_STATE restore scope.
+            copy.setLastPolicyAction(null);
+            copy.setLastPolicyReason(null);
+            return copy;
+        } catch (Exception e) {
+            throw new IllegalStateException("Historical working memory cannot be copied", e);
+        }
     }
 
     /**

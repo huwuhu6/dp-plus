@@ -66,6 +66,41 @@ class WorkingMemoryVersionServiceTest {
         assertEquals(4, service.latest("chat-1").getVersion());
     }
 
+    @Test
+    void readsOnlyAnExactHistoricalVersionAndReturnsDetachedCopy() {
+        AiWorkingMemoryMapper memoryMapper = mock(AiWorkingMemoryMapper.class);
+        AiWorkingMemory stored = new AiWorkingMemory();
+        stored.setId(7L); stored.setChatId("chat-1"); stored.setVersion(3); stored.setMemoryJson("{\"dialogPhase\":\"IDLE\"}");
+        when(memoryMapper.selectOne(any(QueryWrapper.class))).thenReturn(stored);
+        WorkingMemoryVersionService service = service(memoryMapper, mock(AiConversationEventMapper.class), mock(ConversationEventService.class));
+
+        AiWorkingMemory snapshot = service.get("chat-1", 3);
+
+        snapshot.setMemoryJson("{}");
+        assertEquals("{\"dialogPhase\":\"IDLE\"}", stored.getMemoryJson());
+        assertEquals(3, snapshot.getVersion());
+    }
+
+    @Test
+    void rejectsMissingHistoricalVersionInsteadOfFallingBackToLatest() {
+        AiWorkingMemoryMapper memoryMapper = mock(AiWorkingMemoryMapper.class);
+        when(memoryMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        WorkingMemoryVersionService service = service(memoryMapper, mock(AiConversationEventMapper.class), mock(ConversationEventService.class));
+
+        assertThrows(IllegalArgumentException.class, () -> service.get("chat-1", 99));
+    }
+
+    @Test
+    void rejectsHistoricalSnapshotOwnedByAnotherUser() {
+        AiWorkingMemoryMapper memoryMapper = mock(AiWorkingMemoryMapper.class);
+        AiWorkingMemory stored = new AiWorkingMemory();
+        stored.setChatId("chat-1"); stored.setVersion(3); stored.setUserId(9L);
+        when(memoryMapper.selectOne(any(QueryWrapper.class))).thenReturn(stored);
+        WorkingMemoryVersionService service = service(memoryMapper, mock(AiConversationEventMapper.class), mock(ConversationEventService.class));
+
+        assertThrows(SecurityException.class, () -> service.get("chat-1", 3));
+    }
+
     private WorkingMemoryVersionService service(AiWorkingMemoryMapper memoryMapper, AiConversationEventMapper eventMapper,
                                                 ConversationEventService eventService) {
         WorkingMemoryVersionService service = new WorkingMemoryVersionService();

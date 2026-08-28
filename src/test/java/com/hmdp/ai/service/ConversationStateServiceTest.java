@@ -19,6 +19,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -188,6 +189,7 @@ class ConversationStateServiceTest {
         ConversationWorkingMemory memory = new ConversationWorkingMemory();
         AiChatSession state = state(memory, "follow-up-state-test");
         AgentSessionContext context = new AgentSessionContext();
+        context.setBaseWorkingMemoryVersion(state.getVersion());
         DecisionRecommendation initial = new DecisionRecommendation();
         initial.setShopId(7L); initial.setShopName("首选店");
         DecisionRecommendation alternative = new DecisionRecommendation();
@@ -202,6 +204,53 @@ class ConversationStateServiceTest {
         assertEquals(2, updated.getCandidatePool().size());
         assertEquals(8L, updated.getFocusedShopId());
         assertEquals("RECOMMENDING", updated.getDialogPhase());
+    }
+
+    @Test
+    void restoresOnlyBusinessStateIntoANewVersion() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory current = new ConversationWorkingMemory();
+        current.setLastPolicyAction("CURRENT_POLICY");
+        current.setLastPolicyReason("diagnostic");
+        AiChatSession state = state(current, "restore-state-test");
+        state.setVersion(11);
+
+        ConversationWorkingMemory source = new ConversationWorkingMemory();
+        source.getActiveCriteria().setCuisine("火锅");
+        DecisionRecommendation candidate = new DecisionRecommendation();
+        candidate.setShopId(7L); candidate.setShopName("历史候选");
+        source.getCandidatePool().add(candidate);
+        source.setShownShopIds(Arrays.asList(7L, 8L));
+        source.setFocusedShopId(7L); source.setFocusedShopName("历史候选");
+        source.setActiveDecisionSessionId(33L); source.setLastDecisionSessionId(32L);
+        source.setSourceDecisionSessionId(33L); source.setDialogPhase("COMPLETED");
+
+        service.restoreBusinessState(state, source, java.util.Collections.<String, Object>singletonMap("restoredFromVersion", 10));
+
+        ConversationWorkingMemory restored = service.workingMemory(state);
+        assertEquals(12, state.getVersion());
+        assertEquals("火锅", restored.getActiveCriteria().getCuisine());
+        assertEquals(Arrays.asList(7L, 8L), restored.getShownShopIds());
+        assertEquals(7L, restored.getFocusedShopId());
+        assertEquals(33L, restored.getActiveDecisionSessionId());
+        assertEquals("CURRENT_POLICY", restored.getLastPolicyAction());
+        assertEquals("diagnostic", restored.getLastPolicyReason());
+    }
+
+    @Test
+    void rejectsStaleRuntimeContextBeforeItMutatesWorkingMemory() throws Exception {
+        ConversationStateService service = service();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        memory.setFocusedShopId(1L);
+        AiChatSession state = state(memory, "stale-runtime-test");
+        state.setVersion(5);
+        AgentSessionContext stale = new AgentSessionContext();
+        stale.setBaseWorkingMemoryVersion(4);
+        stale.setFocusedShopId(99L);
+
+        assertThrows(IllegalStateException.class, () -> service.applyAgentContext(state, 1L, stale));
+        assertEquals(1L, service.workingMemory(state).getFocusedShopId());
+        assertEquals(5, state.getVersion());
     }
 
     @Test

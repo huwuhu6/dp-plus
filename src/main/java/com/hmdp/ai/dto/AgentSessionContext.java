@@ -8,6 +8,8 @@ import java.util.List;
 @Data
 public class AgentSessionContext {
     private Integer turnNo = 0;
+    /** Durable version this runtime projection was created from. */
+    private Integer baseWorkingMemoryVersion;
     private Long focusedShopId;
     private String focusedShopName;
     /** Snapshot of the durable candidate pool; it is not the historical shown set. */
