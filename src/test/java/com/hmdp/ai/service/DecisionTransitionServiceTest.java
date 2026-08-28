@@ -166,6 +166,42 @@ class DecisionTransitionServiceTest {
         assertFalse(transitions.isTerminal("RESUMING"));
     }
 
+    @Test
+    void registersEverySupportedCommandWithOneStableTransitionMeaning() {
+        assertEquals("CREATED", transitions.resolve("NEW", DecisionCommand.START_DECISION).getNextState());
+        assertEquals("EXTRACTING", transitions.resolve("CREATED", DecisionCommand.EXTRACT_CONSTRAINTS).getNextState());
+        assertEquals("RESUMING", transitions.resolve("CREATED", DecisionCommand.EXECUTE).getNextState());
+        assertEquals("CLARIFYING", transitions.resolve("EXTRACTING", DecisionCommand.REQUIRE_LOCATION).getNextState());
+        assertEquals("RESUMING", transitions.resolve("CLARIFYING", DecisionCommand.PROVIDE_LOCATION).getNextState());
+        assertEquals("RESUMING", transitions.resolve("CLARIFYING", DecisionCommand.DECLINE_LOCATION).getNextState());
+        assertEquals("EXTRACTING", transitions.resolve("EXTRACTING", DecisionCommand.AUTO_RELAXATION).getNextState());
+        assertEquals("WAITING_RELAXATION", transitions.resolve("RESUMING", DecisionCommand.STRICT_SEARCH_EMPTY).getNextState());
+        assertEquals("ZERO_RESULT_NO_DATA", transitions.resolve("EXTRACTING", DecisionCommand.NO_DATA_FOUND).getNextState());
+        assertEquals("COMPLETED", transitions.resolve("RESUMING", DecisionCommand.COMPLETE).getNextState());
+        assertEquals("CANCELLED", transitions.resolve("WAITING_RELAXATION", DecisionCommand.END_DECISION).getNextState());
+        assertEquals("FAILED", transitions.resolve("CREATED", DecisionCommand.FAIL).getNextState());
+        assertEquals("ZERO_RESULT_NO_DATA", transitions.resolve("ZERO_RESULT_NO_DATA", DecisionCommand.SWITCH_CITY).getNextState());
+    }
+
+    @Test
+    void mapsAllUserOptionsToDomainCommandsWithoutTreatingThemAsState() {
+        for (String option : List.of("PROVIDE_LOCATION", "DECLINE_LOCATION", "END_DECISION",
+                "EXPAND_RADIUS", "INCREASE_BUDGET", "RELAX_CUISINE", "RELAX_QUIET",
+                "ALLOW_QUEUE", "RELAX_LIGHT_TASTE", "RELAX_HARD_CONSTRAINTS", "SWITCH_CITY")) {
+            assertEquals(option, transitions.commandForOption(option).name());
+        }
+        assertThrows(IllegalArgumentException.class, () -> transitions.commandForOption("REQUIRE_LOCATION"));
+    }
+
+    @Test
+    void terminalStatesRejectEveryContinuationCommandWithoutMutation() {
+        for (String state : List.of("COMPLETED", "CANCELLED", "FAILED")) {
+            for (DecisionCommand command : DecisionCommand.values()) {
+                assertThrows(IllegalArgumentException.class, () -> transitions.resolve(state, command));
+            }
+        }
+    }
+
     private AiDecisionSession extractingSession() {
         AiDecisionSession session = new AiDecisionSession();
         transitions.transition(session, DecisionCommand.START_DECISION);

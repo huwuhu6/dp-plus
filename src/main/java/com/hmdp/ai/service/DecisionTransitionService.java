@@ -82,6 +82,7 @@ public class DecisionTransitionService {
 
     public DecisionCommand commandForOption(String optionId) {
         if (optionId == null || optionId.trim().isEmpty()) throw new IllegalArgumentException("selectedOptionId 不能为空");
+        if (!isUserOption(optionId)) throw new IllegalArgumentException("selectedOptionId 不是用户可选命令: " + optionId);
         try {
             return DecisionCommand.valueOf(optionId);
         } catch (IllegalArgumentException ex) {
@@ -192,6 +193,18 @@ public class DecisionTransitionService {
             return ((com.hmdp.ai.dto.DecisionOption) option).getId();
         }
         return null;
+    }
+
+    private boolean isUserOption(String optionId) {
+        switch (optionId) {
+            case "PROVIDE_LOCATION": case "DECLINE_LOCATION": case "END_DECISION":
+            case "EXPAND_RADIUS": case "INCREASE_BUDGET": case "RELAX_CUISINE":
+            case "RELAX_QUIET": case "ALLOW_QUEUE": case "RELAX_LIGHT_TASTE":
+            case "RELAX_HARD_CONSTRAINTS": case "SWITCH_CITY":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private boolean isBlank(String value) { return value == null || value.trim().isEmpty(); }

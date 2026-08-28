@@ -1173,3 +1173,11 @@ V49 将评测口径改为：源轮和目标轮的推荐集合都必须非空，�
 恢复转移增加坐标门槛：只有通过 `transitionWithLocation` 提交非空 latitude/longitude 才能进入 `RESUMING`，缺少坐标的 `PROVIDE_LOCATION` 不会修改状态。已有带坐标的续聊 API 和 Chat 入口保持兼容，未改 API 契约。`SWITCH_CITY` 的实际调用链只返回 Chat 层切城提示，不继续原 Decision，因此仍保持 `ZERO_RESULT_NO_DATA`，Side Effect 明确为 `REQUEST_NEW_SEARCH`，等待下一轮新推荐，不伪装为原任务恢复。
 
 新增位置命令语义、坐标门槛和切城状态保持测试；定向执行 `mvn -q -Dtest=DecisionTransitionServiceTest,ConsumptionDecisionServiceTest,ChatOrchestrationServiceTest test` 通过，52 个测试发现、51 个执行通过、1 个既有跳过、0 失败、0 错误。
+
+## 2026-08-28：Decision Transition 边界完整收敛
+
+对 `DecisionTransitionService` 做边界审查后，确认 `AiDecisionSession.status` 的业务写入仅保留在该组件；`ConsumptionDecisionService` 和 `ChatOrchestrationService` 只负责解析命令、调用转移及执行副作用，响应 DTO 的 `setStatus` 不属于领域状态写入。`REQUIRE_LOCATION`、`PROVIDE_LOCATION`、`DECLINE_LOCATION` 的语义分别固定为系统要求位置、用户提交位置、用户拒绝位置；系统内部的提取、空结果、无数据、完成和失败命令不再允许通过 `selectedOptionId` 伪造。
+
+`selectedOptionId` 先限制在用户可选 option 集合，再解析为 `DecisionCommand`，随后校验当前状态和会话持久化 pending options；状态终态拒绝所有继续命令。`PROVIDE_LOCATION` 只有经纬度非空时才能从 `CLARIFYING` 进入 `RESUMING`。`SWITCH_CITY` 按真实调用链保留 `ZERO_RESULT_NO_DATA`，只声明 `REQUEST_NEW_SEARCH` 业务副作用，不改变原 Decision 生命周期。
+
+新增完整合法命令矩阵、终态拒绝、未展示 option、位置命令边界和切城语义测试。定向执行 `mvn -q -Dtest=DecisionTransitionServiceTest,ConsumptionDecisionServiceTest,ChatOrchestrationServiceTest,ConversationStateServiceTest,AiEvaluationServiceTest,AiConversationEvaluationServiceTest test`：81 个测试发现、80 个执行通过、1 个既有跳过、0 失败、0 错误。
