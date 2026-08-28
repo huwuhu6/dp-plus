@@ -1184,6 +1184,14 @@ V49 将评测口径改为：源轮和目标轮的推荐集合都必须非空，�
 
 ## 2026-08-28：改写与意图路由职责收敛（方案 B）
 
+## 2026-08-28：Conditional Routing Decision Boundary
+
+本轮新增瞬态 `RoutingDecisionAssessment`，把路由裁决拆为候选 Action、上下文完整性和状态合法性三个维度。Chat 编排在 Rewrite 前先生成 assessment；仅当需要指代/省略解析且上下文未解决时调用 Rewrite。明确的新推荐、替代推荐、位置澄清和已完成商户追问优先走 Java 规则，混合语义或无法唯一裁决的请求才升级 Routing Model。
+
+Routing Model 返回的 route 先经过 Java Action Contract 校验，非法或与当前 Decision 状态不匹配时使用现有 `fallbackRoute()`。assessment 只存在于当前 `ChatProcessingContext`，通过 `node_status` 元数据输出；本轮未引入 embedding router、Structured Understanding 或新的持久化字段。
+
+验证：`mvn -q -DskipTests compile` 通过；相关 AI 测试共 76 项全部通过（含 1 项既有跳过）。新增测试覆盖“换一家”规则裁决、商户引用上下文需求，以及“第一家怎么样，换一家”冲突升级。
+
 本轮只迁移职责边界，未修改 Decision Transition、Working Memory、Tool Loop、RAG、API 或数据库。`ConversationContextRewriter` 不再执行 `classifyIntent`，也不再为“换一家/再推荐几家”等业务操作生成改写结果；其生产输出仅用于省略、指代、候选商户、地点和继承条件的上下文解析。改写 Prompt 明确禁止输出业务 Intent、`ChatProcessingAction` 或 Decision 状态。`ContextRewriteResult.intentType` 与 `RewriteIntentType` 暂保留为兼容字段，但生产逻辑和路由已无消费点，后续迁移完快照后再删除。
 
 `ChatOrchestrationService` 收拢原有确定性业务判断：替代推荐/条件细化继续依据原始消息、有效改写消息、会话状态和 Working Memory 判断，并继续把 `shownShopIds` 作为排除集合；已完成决策下的“第一家/第二家/这家/那家”及评价、优惠、营业时间等追问由 Routing 判为 `BUSINESS_FOLLOW_UP`。只有这些规则无法判断时才调用 Routing Model，失败仍走 `fallbackRoute()`。因此“第一家有优惠券吗”仍为 Rewrite Model=1、Routing Model=0；“换一家/再推荐几家”均为 Rewrite Model=0、Routing Model=0；一般闲聊仍可进入 Routing Model。

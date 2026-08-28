@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,6 +41,60 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ChatOrchestrationServiceTest {
+    @Test
+    void marksAlternativeRecommendationAsDeterministicRouting() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("\u6362\u4e00\u5bb6");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext context =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(request, null);
+        context.setOriginalMessage(request.getMessage());
+        context.setEffectiveMessage(request.getMessage());
+
+        com.hmdp.ai.runtime.RoutingDecisionAssessment assessment = ReflectionTestUtils.invokeMethod(
+                service, "assessRouting", context, false);
+
+        assertEquals(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION, assessment.getCandidateAction());
+        assertEquals("RULE", assessment.getSource());
+        assertFalse(assessment.isShouldEscalate());
+    }
+
+    @Test
+    void escalatesMixedReferenceAndAlternativeRequest() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("\u7b2c\u4e00\u5bb6\u600e\u4e48\u6837\uff0c\u6362\u4e00\u5bb6");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext context =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(request, null);
+        context.setOriginalMessage(request.getMessage());
+        context.setEffectiveMessage(request.getMessage());
+
+        com.hmdp.ai.runtime.RoutingDecisionAssessment assessment = ReflectionTestUtils.invokeMethod(
+                service, "assessRouting", context, false);
+
+        assertTrue(assessment.isConflictDetected());
+        assertTrue(assessment.isShouldEscalate());
+        assertEquals("competing_actions", assessment.getReason());
+    }
+
+    @Test
+    void marksShopReferenceAsContextRequiredBeforeRewrite() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("\u7b2c\u4e00\u5bb6\u6709\u4f18\u60e0\u5238\u5417");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext context =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(request, null);
+        context.setOriginalMessage(request.getMessage());
+        context.setEffectiveMessage(request.getMessage());
+
+        com.hmdp.ai.runtime.RoutingDecisionAssessment assessment = ReflectionTestUtils.invokeMethod(
+                service, "assessRouting", context, false);
+
+        assertEquals(com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP, assessment.getCandidateAction());
+        assertTrue(assessment.isContextRequired());
+        assertTrue(assessment.isRequiredContextMissing());
+    }
+
     @Test
     void streamsSafeGeneralChatFromModelAndRetainsCompleteAnswer() throws Exception {
         ChatOrchestrationService service = new ChatOrchestrationService();

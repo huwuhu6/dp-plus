@@ -21,6 +21,7 @@ import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.runtime.ConversationEventStatus;
 import com.hmdp.ai.runtime.ConversationEventType;
+import com.hmdp.ai.runtime.RoutingDecisionAssessment;
 import com.hmdp.ai.service.pipeline.BootstrapNode;
 import com.hmdp.ai.service.pipeline.ChatPipeline;
 import com.hmdp.ai.service.pipeline.ChatPipelineNode;
@@ -125,6 +126,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         Long activeSessionId = resolveActiveSessionId(state, request.getDecisionSessionId());
         context.setActiveDecisionSessionId(activeSessionId);
         context.setActiveDecision(activeSessionId == null ? null : decisionService.getDecision(activeSessionId));
+        context.setRoutingAssessment(assessRouting(context, false));
         log.info("[AI][chat] event=MEMORY_LOADED chatId={} messages={}", context.getChatId(), context.getChatHistory().size());
         log.info("[AI][chat] event=TURN_START chatId={} clientSessionId={} activeSessionId={} status={} query={}",
                 context.getChatId(), request.getDecisionSessionId(), activeSessionId,
@@ -134,9 +136,20 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     @Override
     public void rewrite(ChatProcessingContext context) {
-        context.setContextRewrite(rewriteContext(context.getOriginalMessage(), context.getChatHistory(),
-                context.getChatSession(), context.getActiveDecisionSessionId()));
+        RoutingDecisionAssessment assessment = context.getRoutingAssessment();
+        if (assessment != null && (!assessment.isContextRequired() || assessment.isConflictDetected()
+                || assessment.isContextResolved())) {
+            context.setContextRewrite(ContextRewriteResult.unchanged(context.getOriginalMessage(), "CONTEXT_RESOLUTION_NOT_REQUIRED"));
+        } else {
+            context.setContextRewrite(rewriteContext(context.getOriginalMessage(), context.getChatHistory(),
+                    context.getChatSession(), context.getActiveDecisionSessionId()));
+        }
         context.setEffectiveMessage(context.getContextRewrite().getRewrittenQuery());
+        if (assessment != null && assessment.isContextRequired()) {
+            assessment.setContextResolved(Boolean.TRUE.equals(context.getContextRewrite().getApplied())
+                    || !context.getOriginalMessage().equals(context.getEffectiveMessage()));
+            assessment.setRequiredContextMissing(!assessment.isContextResolved());
+        }
         if (conversationEventService != null) {
             Map<String, Object> rewrite = new LinkedHashMap<String, Object>();
             rewrite.put("original", context.getOriginalMessage());
@@ -150,6 +163,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     @Override
     public void route(ChatProcessingContext context) {
+        RoutingDecisionAssessment assessment = assessRouting(context, true);
+        context.setRoutingAssessment(assessment);
         ChatMessageRequest request = context.getRequest();
         DecisionResponse activeDecision = context.getActiveDecision();
         String message = context.getOriginalMessage();
@@ -174,7 +189,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             context.setRoutingReason("suspended_decision_meta_question");
             return;
         }
-        boolean replacesPausedDecision = isPausedDecision(activeDecision) && request.getSelectedOptionId() == null
+        boolean replacesPausedDecision = !assessment.isConflictDetected()
+                && isPausedDecision(activeDecision) && request.getSelectedOptionId() == null
                 && (isSearchRefinement(context.getOriginalMessage(), context.getEffectiveMessage())
                 || isNewRecommendationIntent(context.getEffectiveMessage())
                 || isContinuationRefinement(context.getEffectiveMessage(), context.getChatSession()));
@@ -185,16 +201,26 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             context.setUsedModel(false);
             return;
         }
-        if (isNewRecommendationIntent(message)
-                || isSearchRefinement(context.getOriginalMessage(), context.getEffectiveMessage())) {
+        if (!assessment.isConflictDetected()
+                && (isNewRecommendationIntent(message)
+                || isSearchRefinement(context.getOriginalMessage(), context.getEffectiveMessage()))) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
             context.setRoutingReason("new_recommendation_intent");
             context.setUsedModel(aiProperties.isConfigured());
             return;
         }
-        String route = resolveContextualFollowUpRoute(context.getChatId(), context.getEffectiveMessage(), context.getChatSession(),
+        String route = assessment.isConflictDetected() ? null
+                : resolveContextualFollowUpRoute(context.getChatId(), context.getEffectiveMessage(), context.getChatSession(),
                 context.getActiveDecisionSessionId(), activeDecision, context.getContextRewrite());
-        if (route == null) route = route(context.getEffectiveMessage(), activeDecision == null ? "NONE" : activeDecision.getStatus(), context.getChatHistory());
+        if (route == null) {
+            String modelRoute = route(context.getEffectiveMessage(), activeDecision == null ? "NONE" : activeDecision.getStatus(), context.getChatHistory());
+            route = validateModelRoute(modelRoute, activeDecision, context.getEffectiveMessage());
+            assessment.setSource("MODEL");
+            assessment.setCandidateAction(toProcessingAction(route));
+            assessment.setStateAllowed(isRouteAllowed(route, activeDecision));
+            assessment.setShouldEscalate(false);
+            assessment.setReason("routing_model_candidate_validated");
+        }
         context.setRoute(route);
         context.setAction(toProcessingAction(route));
         context.setRoutingReason("resolved_route:" + route);
@@ -762,6 +788,76 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 || message.contains("营业时间") || message.contains("排队") || message.contains("地址")
                 || message.contains("预约") || message.contains("第一家") || message.contains("第二家")
                 || message.contains("第三家") || message.contains("这家") || message.contains("那家");
+    }
+
+    private RoutingDecisionAssessment assessRouting(ChatProcessingContext context, boolean afterRewrite) {
+        RoutingDecisionAssessment assessment = new RoutingDecisionAssessment();
+        String message = context.getOriginalMessage() == null ? "" : context.getOriginalMessage();
+        String effective = context.getEffectiveMessage() == null ? message : context.getEffectiveMessage();
+        DecisionResponse decision = context.getActiveDecision();
+        assessment.setStateAllowed(true);
+        if (context.getRequest() != null && context.getRequest().getSelectedOptionId() != null) {
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT);
+            assessment.setSource("COMMAND");
+            assessment.setStateAllowed(isPausedDecision(decision));
+            assessment.setShouldEscalate(!assessment.isStateAllowed());
+            assessment.setReason("selected_option_command");
+            return assessment;
+        }
+        boolean reference = isFocusedShopQuestion(message) || message.contains("第一家") || message.contains("第二家")
+                || message.contains("第三家") || message.contains("刚才那个") || message.contains("上一轮那个");
+        boolean conflict = ((isShopInquiry(message) || reference) && isAlternativeRecommendation(message, effective))
+                || (message.contains("先看看") && isAlternativeRecommendation(message, effective));
+        assessment.setConflictDetected(conflict);
+        if (conflict) {
+            assessment.setSource("RULE"); assessment.setShouldEscalate(true); assessment.setReason("competing_actions");
+            return assessment;
+        }
+        if (isAlternativeRecommendation(message, effective) || isNewRecommendationIntent(effective)) {
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
+            assessment.setSource("RULE"); assessment.setReason("explicit_recommendation_or_alternative");
+            return assessment;
+        }
+        if (isPausedDecision(decision) && (refersToCurrentDeviceLocation(message) || message.contains("附近呢"))) {
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
+            assessment.setSource("CONTEXT");
+            assessment.setContextRequired(true);
+            assessment.setContextResolved(false);
+            assessment.setRequiredContextMissing(true);
+            assessment.setReason("current_device_location_resolution");
+            return assessment;
+        }
+        boolean completed = decision != null && "COMPLETED".equals(decision.getStatus());
+        if ((completed || reference) && (isShopInquiry(message) || reference)) {
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP);
+            assessment.setSource(afterRewrite ? "CONTEXT" : "RULE");
+            assessment.setContextRequired(reference);
+            assessment.setContextResolved(afterRewrite && !message.equals(effective));
+            assessment.setRequiredContextMissing(assessment.isContextRequired() && !assessment.isContextResolved());
+            assessment.setShouldEscalate(false);
+            assessment.setReason(reference ? "shop_reference_resolution" : "explicit_shop_inquiry");
+            return assessment;
+        }
+        if (isNewRecommendationIntent(effective) || isSearchRefinement(message, effective)) {
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
+            assessment.setSource("RULE"); assessment.setReason("deterministic_recommendation_rule");
+            return assessment;
+        }
+        assessment.setSource("MODEL"); assessment.setShouldEscalate(true); assessment.setReason("no_unique_action_candidate");
+        return assessment;
+    }
+
+    private String validateModelRoute(String route, DecisionResponse decision, String message) {
+        if (!isRouteAllowed(route, decision)) return fallbackRoute(message == null ? "" : message, decision == null ? "NONE" : decision.getStatus());
+        return route;
+    }
+
+    private boolean isRouteAllowed(String route, DecisionResponse decision) {
+        if (route == null) return false;
+        if ("EXPLAIN_SUSPENDED_DECISION".equals(route)) return isSuspendedDecision(decision);
+        if ("BUSINESS_FOLLOW_UP".equals(route)) return decision != null && "COMPLETED".equals(decision.getStatus());
+        if ("EXIT_DECISION".equals(route)) return true;
+        return "GENERAL_CHAT".equals(route) || "START_DECISION".equals(route);
     }
 
     private boolean isNewRecommendationIntent(String message) {

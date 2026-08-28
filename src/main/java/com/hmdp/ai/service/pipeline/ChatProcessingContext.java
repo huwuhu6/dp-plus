@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import com.hmdp.ai.dto.ChatStreamEventData;
+import com.hmdp.ai.runtime.RoutingDecisionAssessment;
 
 /** Per-turn transient data. Durable business state stays in ConversationWorkingMemory. */
 @Getter
@@ -46,6 +47,7 @@ public class ChatProcessingContext {
     private DecisionConstraints mergedConstraints;
     private CriteriaMergeResult criteriaMergeResult;
     private PolicyDecision policyDecision;
+    private RoutingDecisionAssessment routingAssessment;
     private ChatMessageResponse response;
 
     public boolean isCompleted() {
