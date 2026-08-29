@@ -16,4 +16,7 @@ public class AiShopProfile {
     private String ambienceTags;
     private String queueLevel;
     private String summary;
+    private Long inputRevision;
+    private Long aggregatedRevision;
+    private String profileStatus;
 }

@@ -20,6 +20,7 @@ public class ShopReview {
     private Integer rating;
     private String content;
     private String status;
+    private Long revision;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }
