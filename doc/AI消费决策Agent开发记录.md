@@ -1265,3 +1265,15 @@ Tool 规划不再被记录为执行事实。`ToolExecutionOrchestrator` 在参�
 Profile 完成更新使用 `WHERE shop_id = ? AND profile_status = 'WAIT_REBUILD' AND input_revision = expectedRevision` 的 revision CAS，同时写入 `aggregated_revision=expectedRevision` 和 `READY`。因此只有 `aggregated_revision == input_revision` 的成功重算才会进入 `READY`；任务读取期间若有新评价使 revision 增长，旧任务条件更新失败，不会用旧摘要覆盖新状态，也不会自动重试或回退新数据。无有效评价时不调用模型，只通过同样的 CAS 记录已聚合版本。
 
 本阶段未实现 Milvus 增量写入，未改变现有全量 `rebuildIndex()`、推荐检索接口或既有 AI 评测行为；后续需要分别在 Review Document 投影和 Profile 成功重算后接入独立的向量写入器。验证包括 `ShopReviewServiceTest`、`ShopProfileDraftGeneratorTest`、`ShopProfileRebuildServiceTest`、`MilvusSemanticShopRetrieverTest` 与 `ConsumptionDecisionServiceTest` 的定向回归；全量测试结果以本次提交前实际 Surefire 执行为准。
+
+## 2026-08-29：Milvus 向量增量同步
+
+新增 `tbl_ai_vector_sync_task`，以稳定 `document_id` 唯一键持久化每个向量文档的最新期望状态。Review 继续使用 `shop-review-{AiReviewDocument.id}`，Profile 继续使用 `shop-profile-{shopId}`；全量重建和增量写入统一经 `SemanticShopDocumentFactory` 构造文本与 metadata。Review metadata 增加 `sourceRevision`，Profile metadata 增加对应 `aggregatedRevision` 的 `profileRevision`，仅用于诊断、任务校验和后续对账；召回仍只依赖 `shopId` 进行 MySQL 硬过滤白名单下推。
+
+任务合并按 `(target_revision, operation)` 决定最新状态：更高 revision 覆盖较低 revision，同 revision 时 `DELETE` 覆盖 `UPSERT`。Worker 领取任务后，成功回写严格以 `document_id + operation + target_revision + status=SYNCING + lease_token` 条件更新为 `SYNCED`；条件不匹配时重新排队最新状态，不能把已被新评价或删除替换的任务误记为成功。失败同样只以匹配 lease/revision 回写重试时间；JVM 崩溃留下的过期 lease 由下一轮扫描恢复。没有使用 Redis 锁、MQ、全 chat 锁或自动 rebase。
+
+Review 原始事实、AI Projection、Profile dirty 标记和 Vector Sync Task 均在同一 MySQL 事务内提交；Review 删除会在删除 Projection 前持久化 DELETE task，因此 MySQL 已删但 Milvus delete 超时仍可恢复。Profile LLM 仍在事务外运行；成功结果由 `ShopProfileRebuildCommitService` 在短事务内执行 Profile revision CAS 与 Profile UPSERT task 入队，避免出现 `READY` 已提交但同步任务不存在。Milvus 网络、embedding 或写入失败不会回滚 MySQL。
+
+Spring AI 1.0.3 的 Milvus `add()` 实现实际调用原生 `insert`，没有可依赖的 upsert 契约。新增隔离 collection 的 opt-in 集成测试，连续写同一 ID 未报错且语义查询返回后写文本；由于这不证明原子替换或消除物理重复，生产 Writer 仍采用稳定 ID 的 `delete -> add`，且 delete 失败时不继续 add、保留任务供重试。默认 `ai.vector-sync.enabled=false`，现有部署继续保持全量重建行为。
+
+验证：定向覆盖 Review Upsert/Delete 入队、Profile CAS 后入队、任务版本条件回写、失败重试、Worker claim、稳定文档构造、增量 replace/delete 以及既有 Milvus 召回；`mvn -q test` 结果以本次提交前 Surefire 汇总为准。真实 Milvus 重复 ID 集成测试需显式传入 `-Dmilvus.integration.enabled=true`，使用随机临时 collection 并在结束后删除，不接触项目 collection。

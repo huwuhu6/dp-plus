@@ -28,6 +28,7 @@ public class ShopReviewService {
     @Resource private AiReviewDocumentMapper documentMapper;
     @Resource private AiShopProfileMapper profileMapper;
     @Resource private ShopMapper shopMapper;
+    @Resource private VectorSyncTaskService vectorSyncTaskService;
 
     @Transactional
     public ShopReview upsert(ShopReviewUpsertRequest request) {
@@ -62,7 +63,8 @@ public class ShopReviewService {
                     .eq("id", existing.getId()).eq("revision", expectedRevision));
             if (updated != 1) throw new IllegalStateException("Shop review changed concurrently");
         }
-        upsertDocument(review);
+        AiReviewDocument document = upsertDocument(review);
+        vectorSyncTaskService.enqueueReviewUpsert(document);
         markDirty(review.getShopId());
         if (previousShopId != null && !previousShopId.equals(review.getShopId())) markDirty(previousShopId);
         return review;
@@ -80,12 +82,17 @@ public class ShopReviewService {
         int updated = reviewMapper.update(review, new UpdateWrapper<ShopReview>()
                 .eq("id", review.getId()).eq("revision", expectedRevision));
         if (updated != 1) throw new IllegalStateException("Shop review changed concurrently");
-        documentMapper.delete(new QueryWrapper<AiReviewDocument>().eq("source_review_id", review.getId()));
+        AiReviewDocument document = documentMapper.selectOne(new QueryWrapper<AiReviewDocument>()
+                .eq("source_review_id", review.getId()).last("limit 1"));
+        if (document != null) {
+            vectorSyncTaskService.enqueueReviewDelete(document, review.getRevision());
+            documentMapper.deleteById(document.getId());
+        }
         markDirty(review.getShopId());
         return true;
     }
 
-    private void upsertDocument(ShopReview review) {
+    private AiReviewDocument upsertDocument(ShopReview review) {
         AiReviewDocument document = documentMapper.selectOne(new QueryWrapper<AiReviewDocument>()
                 .eq("source_review_id", review.getId()));
         if (document == null) {
@@ -104,6 +111,7 @@ public class ShopReviewService {
         } else if (documentMapper.updateById(document) != 1) {
             throw new IllegalStateException("Review projection was not updated");
         }
+        return document;
     }
 
     private void markDirty(Long shopId) {

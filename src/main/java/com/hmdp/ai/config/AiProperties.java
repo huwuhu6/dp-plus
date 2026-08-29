@@ -19,6 +19,7 @@ public class AiProperties {
     private RoutingProperties routing = new RoutingProperties();
     private QueryRewriteProperties queryRewrite = new QueryRewriteProperties();
     private ProfileRebuildProperties profileRebuild = new ProfileRebuildProperties();
+    private VectorSyncProperties vectorSync = new VectorSyncProperties();
     private String retrievalStrategyVersion = "structured-profile-evidence-v2";
     private String evaluationDatasetVersion = "seed-v2";
     private String holdoutDatasetVersion = "holdout-v1";
@@ -71,5 +72,14 @@ public class AiProperties {
         private Integer batchSize = 20;
         private Integer timeoutMs = 12000;
         private Integer maxReviewExamples = 16;
+    }
+
+    @Data
+    public static class VectorSyncProperties {
+        private Boolean enabled = false;
+        private Integer fixedDelayMs = 15000;
+        private Integer batchSize = 20;
+        private Integer leaseSeconds = 90;
+        private Integer retryDelaySeconds = 15;
     }
 }

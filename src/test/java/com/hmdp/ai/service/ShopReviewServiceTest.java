@@ -29,6 +29,7 @@ class ShopReviewServiceTest {
     private ShopReviewMapper reviewMapper;
     private AiReviewDocumentMapper documentMapper;
     private AiShopProfileMapper profileMapper;
+    private VectorSyncTaskService vectorSyncTaskService;
     private ShopMapper shopMapper;
 
     @BeforeEach
@@ -37,10 +38,12 @@ class ShopReviewServiceTest {
         reviewMapper = mock(ShopReviewMapper.class);
         documentMapper = mock(AiReviewDocumentMapper.class);
         profileMapper = mock(AiShopProfileMapper.class);
+        vectorSyncTaskService = mock(VectorSyncTaskService.class);
         shopMapper = mock(ShopMapper.class);
         ReflectionTestUtils.setField(service, "reviewMapper", reviewMapper);
         ReflectionTestUtils.setField(service, "documentMapper", documentMapper);
         ReflectionTestUtils.setField(service, "profileMapper", profileMapper);
+        ReflectionTestUtils.setField(service, "vectorSyncTaskService", vectorSyncTaskService);
         ReflectionTestUtils.setField(service, "shopMapper", shopMapper);
         when(shopMapper.selectById(7L)).thenReturn(new Shop());
         when(profileMapper.markDirty(7L)).thenReturn(1);
@@ -100,20 +103,26 @@ class ShopReviewServiceTest {
         assertEquals("New text", document.getValue().getContent());
         assertEquals(5L, document.getValue().getSourceRevision());
         assertEquals(1, document.getValue().getSentiment());
+        verify(vectorSyncTaskService).enqueueReviewUpsert(document.getValue());
         verify(profileMapper).markDirty(7L);
     }
 
     @Test
     void softDeletesReviewRemovesProjectionAndMarksProfileDirty() {
         ShopReview existing = review(31L, 4L, "Old text", 2, "ACTIVE");
+        AiReviewDocument projection = new AiReviewDocument();
+        projection.setId(51L);
+        projection.setShopId(7L);
         when(reviewMapper.selectOne(any())).thenReturn(existing);
         when(reviewMapper.update(any(ShopReview.class), any())).thenReturn(1);
-        when(documentMapper.delete(any())).thenReturn(1);
+        when(documentMapper.selectOne(any())).thenReturn(projection);
+        when(documentMapper.deleteById(51L)).thenReturn(1);
 
         assertTrue(service.delete("user", "external-7"));
         assertEquals("DELETED", existing.getStatus());
         assertEquals(5L, existing.getRevision());
-        verify(documentMapper).delete(any());
+        verify(vectorSyncTaskService).enqueueReviewDelete(projection, 5L);
+        verify(documentMapper).deleteById(51L);
         verify(profileMapper).markDirty(7L);
     }
 

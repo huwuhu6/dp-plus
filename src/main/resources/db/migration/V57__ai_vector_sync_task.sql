@@ -1,0 +1,22 @@
+CREATE TABLE `tbl_ai_vector_sync_task` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `document_id` varchar(128) NOT NULL,
+  `document_type` varchar(16) NOT NULL,
+  `entity_id` bigint unsigned NOT NULL,
+  `shop_id` bigint unsigned NOT NULL,
+  `operation` varchar(16) NOT NULL,
+  `target_revision` bigint unsigned NOT NULL,
+  `status` varchar(16) NOT NULL DEFAULT 'PENDING',
+  `attempt_count` int unsigned NOT NULL DEFAULT 0,
+  `available_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `lease_token` varchar(64) NULL,
+  `leased_at` datetime(3) NULL,
+  `last_error` varchar(512) NULL,
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_vector_sync_document` (`document_id`),
+  KEY `idx_ai_vector_sync_due` (`status`, `available_at`, `id`),
+  CONSTRAINT `ck_ai_vector_sync_operation` CHECK (`operation` IN ('UPSERT', 'DELETE')),
+  CONSTRAINT `ck_ai_vector_sync_status` CHECK (`status` IN ('PENDING', 'SYNCING', 'SYNCED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -36,6 +36,7 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
     @Resource private ShopMapper shopMapper;
     @Resource private AiShopProfileMapper profileMapper;
     @Resource private AiReviewDocumentMapper reviewMapper;
+    @Resource private SemanticShopDocumentFactory documentFactory;
     @Value("${ai.retrieval.semantic-top-k:80}") private int semanticTopK;
     @Value("${ai.retrieval.semantic-min-score:0.35}") private double semanticMinScore;
 
@@ -97,11 +98,11 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
         List<Document> documents = new ArrayList<>();
         for (AiShopProfile profile : profiles) {
             Shop shop = shopsById.get(profile.getShopId());
-            if (shop != null) documents.add(profileDocument(shop, profile));
+            if (shop != null) documents.add(documentFactory.profileDocument(shop, profile));
         }
         for (AiReviewDocument review : reviews) {
             Shop shop = shopsById.get(review.getShopId());
-            if (shop != null) documents.add(reviewDocument(shop, review));
+            if (shop != null) documents.add(documentFactory.reviewDocument(shop, review));
         }
         if (documents.isEmpty()) return 0;
         List<String> ids = documents.stream().map(Document::getId).toList();
@@ -122,32 +123,6 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
         return documents.size();
     }
 
-    private Document profileDocument(Shop shop, AiShopProfile profile) {
-        Map<String, Object> metadata = metadata(shop.getId(), "PROFILE");
-        String text = "商户：" + shop.getName()
-                + "。菜系：" + safe(profile.getCuisine())
-                + "。场景：" + safe(profile.getSceneTags())
-                + "。环境：" + safe(profile.getAmbienceTags())
-                + "。简介：" + safe(profile.getSummary());
-        return new Document("shop-profile-" + shop.getId(), text, metadata);
-    }
-
-    private Document reviewDocument(Shop shop, AiReviewDocument review) {
-        Map<String, Object> metadata = metadata(shop.getId(), "REVIEW");
-        metadata.put("reviewId", review.getId());
-        metadata.put("sourceType", safe(review.getSourceType()));
-        String text = "商户：" + shop.getName() + "。评价证据：" + safe(review.getContent())
-                + "。标签：" + safe(review.getTags());
-        return new Document("shop-review-" + review.getId(), text, metadata);
-    }
-
-    private Map<String, Object> metadata(Long shopId, String documentType) {
-        Map<String, Object> metadata = new HashMap<>();
-        metadata.put("shopId", shopId);
-        metadata.put("documentType", documentType);
-        return metadata;
-    }
-
     private Long toLong(Object value) {
         if (value instanceof Number) return ((Number) value).longValue();
         if (value == null) return null;
@@ -163,7 +138,4 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
         return normalized.length() > 80 ? normalized.substring(0, 80) + "..." : normalized;
     }
 
-    private String safe(String value) {
-        return value == null ? "" : value;
-    }
 }

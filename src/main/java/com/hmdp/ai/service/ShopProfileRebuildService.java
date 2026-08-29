@@ -21,6 +21,7 @@ public class ShopProfileRebuildService {
     @Resource private AiShopProfileMapper profileMapper;
     @Resource private ShopReviewMapper reviewMapper;
     @Resource private ShopProfileDraftProvider draftGenerator;
+    @Resource private ShopProfileRebuildCommitService rebuildCommitService;
     @Resource private AiProperties aiProperties;
 
     public int rebuildPendingProfiles() {
@@ -44,14 +45,14 @@ public class ShopProfileRebuildService {
         List<ShopReview> reviews = reviewMapper.selectList(new QueryWrapper<ShopReview>()
                 .eq("shop_id", shopId).eq("status", "ACTIVE").orderByDesc("id"));
         if (reviews.isEmpty()) {
-            return profileMapper.completeWithoutReviews(shopId, expectedRevision) == 1;
+            return rebuildCommitService.completeWithoutReviews(shopId, expectedRevision);
         }
         try {
             ShopProfileDraftGenerator.ProfileDraft draft = draftGenerator.generate(profile, reviews);
             String queueLevel = queueLevel(reviews);
-            boolean completed = profileMapper.completeRebuild(shopId, expectedRevision,
+            boolean completed = rebuildCommitService.completeRebuild(shopId, expectedRevision,
                     String.join(",", draft.sceneTags()), String.join(",", draft.ambienceTags()),
-                    queueLevel, draft.summary()) == 1;
+                    queueLevel, draft.summary());
             if (!completed) log.info("[AI][profile] event=REBUILD_STALE shopId={} expectedRevision={}", shopId, expectedRevision);
             return completed;
         } catch (Exception e) {
