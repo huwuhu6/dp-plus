@@ -643,15 +643,8 @@ public class ConsumptionDecisionService {
     }
 
     private void saveMessage(Long sessionId, String role, String messageType, String content) {
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("decisionSessionId", sessionId);
-        result.put("role", role);
-        result.put("messageType", messageType);
-        result.put("content", content);
-        if (conversationEventService != null) {
-            conversationEventService.record("USER".equals(role) ? ConversationEventType.USER_INPUT : ConversationEventType.ASSISTANT_OUTPUT,
-                    ConversationEventStatus.SUCCESS, null, null, result, null);
-        }
+        // The chat boundary owns exactly one USER_INPUT and one finalized ASSISTANT_OUTPUT per turn.
+        // Decision-local milestones remain in DecisionSession and best-effort runtime observations.
     }
 
     private void populateModelUsage(DecisionResponse response, DecisionMetrics metrics) {
@@ -1020,7 +1013,7 @@ public class ConsumptionDecisionService {
         result.put("decisionSessionId", sessionId); result.put("state", state);
         result.put("summary", summary); result.put("durationMs", duration);
         if (conversationEventService != null) {
-            conversationEventService.record(eventTypeForStep(state), ConversationEventStatus.SUCCESS, null, null, result, null);
+            conversationEventService.recordBestEffort(eventTypeForStep(state), ConversationEventStatus.SUCCESS, null, null, result, null);
         }
     }
 

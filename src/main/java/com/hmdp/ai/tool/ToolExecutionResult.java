@@ -10,6 +10,8 @@ public class ToolExecutionResult {
     private AgentToolResult result;
     private String errorMessage;
     private Long durationMs;
+    /** Durable TOOL_CALL identity when execution has actually begun. */
+    private Long toolCallEventId;
 
     public boolean isSuccess() {
         return result != null && errorMessage == null;

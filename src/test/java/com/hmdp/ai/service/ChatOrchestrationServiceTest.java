@@ -39,8 +39,33 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 class ChatOrchestrationServiceTest {
+    @Test
+    void stopsBeforeStateMutationWhenDurableUserInputCannotBeWritten() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ChatMemoryService memory = mock(ChatMemoryService.class);
+        ConversationStateService state = mock(ConversationStateService.class);
+        ConversationEventService events = mock(ConversationEventService.class);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memory);
+        ReflectionTestUtils.setField(service, "conversationStateService", state);
+        ReflectionTestUtils.setField(service, "conversationEventService", events);
+        when(memory.resolveChatId(any())).thenReturn("chat-durable");
+        when(memory.load("chat-durable")).thenReturn(Collections.emptyList());
+        doThrow(new IllegalStateException("event store unavailable")).when(events).persistDurableEvent(
+                org.mockito.ArgumentMatchers.eq(com.hmdp.ai.runtime.ConversationEventType.USER_INPUT),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("帮我找附近火锅");
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> service.bootstrap(new com.hmdp.ai.service.pipeline.ChatProcessingContext(request, null)));
+
+        verifyNoInteractions(state);
+    }
+
     @Test
     void marksAlternativeRecommendationAsDeterministicRouting() {
         ChatOrchestrationService service = new ChatOrchestrationService();

@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ChatStreamEventData;
+import com.hmdp.ai.runtime.ConversationEventStatus;
+import com.hmdp.ai.runtime.ConversationEventType;
+import com.hmdp.ai.runtime.RuntimeTrace;
 import com.hmdp.ai.tool.AgentToolResult;
 import com.hmdp.ai.tool.AgentToolRegistry;
 import com.hmdp.ai.tool.BaseAgentTool;
@@ -25,15 +28,18 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /** Executes independent read-only tools concurrently while serializing stateful tools. */
 @Service
 public class ToolExecutionOrchestrator {
+    private static final String TOOL_TIMEOUT_MESSAGE = "工具执行超时";
     @Resource private AgentToolRegistry toolRegistry;
     @Resource private ObjectMapper objectMapper;
     @Resource private ToolResultCompressor resultCompressor;
     @Resource private AiProperties aiProperties;
+    @Resource private ConversationEventService conversationEventService;
 
     public List<ToolExecutionResult> execute(List<ToolExecutionRequest> requests, AgentSessionContext context) {
         return execute(requests, context, null);
@@ -41,6 +47,12 @@ public class ToolExecutionOrchestrator {
 
     public List<ToolExecutionResult> execute(List<ToolExecutionRequest> requests, AgentSessionContext context,
                                              Consumer<ChatStreamEventData> eventConsumer) {
+        return execute(requests, context, eventConsumer, null, null);
+    }
+
+    public List<ToolExecutionResult> execute(List<ToolExecutionRequest> requests, AgentSessionContext context,
+                                             Consumer<ChatStreamEventData> eventConsumer, Long decisionSessionId,
+                                             RuntimeTrace trace) {
         List<ToolExecutionResult> results = new ArrayList<ToolExecutionResult>();
         List<ToolExecutionRequest> parallel = new ArrayList<ToolExecutionRequest>();
         List<ToolExecutionRequest> sequential = new ArrayList<ToolExecutionRequest>();
@@ -57,17 +69,31 @@ public class ToolExecutionOrchestrator {
             ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
             try {
                 List<CompletableFuture<ToolExecutionResult>> futures = new ArrayList<CompletableFuture<ToolExecutionResult>>();
+                List<AtomicReference<ToolExecutionResult>> startedExecutions = new ArrayList<AtomicReference<ToolExecutionResult>>();
                 for (ToolExecutionRequest request : parallel) {
-                    futures.add(CompletableFuture.supplyAsync(() -> executeOne(request, snapshot(context), eventConsumer), executor)
-                            .completeOnTimeout(failed(request, "工具执行超时"), timeoutMs(), TimeUnit.MILLISECONDS));
+                    AtomicReference<ToolExecutionResult> started = new AtomicReference<ToolExecutionResult>();
+                    startedExecutions.add(started);
+                    futures.add(CompletableFuture.supplyAsync(() -> executeOne(request, snapshot(context), eventConsumer,
+                                    decisionSessionId, trace, started::set), executor)
+                            .completeOnTimeout(failed(request, TOOL_TIMEOUT_MESSAGE), timeoutMs(), TimeUnit.MILLISECONDS));
                 }
-                for (CompletableFuture<ToolExecutionResult> future : futures) results.add(future.join());
+                for (int index = 0; index < futures.size(); index++) {
+                    ToolExecutionResult result = futures.get(index).join();
+                    if (TOOL_TIMEOUT_MESSAGE.equals(result.getErrorMessage()) && startedExecutions.get(index).get() != null) {
+                        ToolExecutionResult started = startedExecutions.get(index).get();
+                        result.setToolCallEventId(started.getToolCallEventId());
+                        result.setEffectiveArguments(started.getEffectiveArguments());
+                    }
+                    results.add(result);
+                }
             } finally {
                 // A timed-out external call must not keep this request waiting for executor close.
                 executor.shutdownNow();
             }
         }
-        for (ToolExecutionRequest request : sequential) results.add(executeOne(request, context, eventConsumer));
+        for (ToolExecutionRequest request : sequential) {
+            results.add(executeOne(request, context, eventConsumer, decisionSessionId, trace, null));
+        }
         results.sort(Comparator.comparing(ToolExecutionResult::getOrder));
         return results;
     }
@@ -78,6 +104,12 @@ public class ToolExecutionOrchestrator {
 
     public ToolExecutionResult executeOne(ToolExecutionRequest request, AgentSessionContext context,
                                           Consumer<ChatStreamEventData> eventConsumer) {
+        return executeOne(request, context, eventConsumer, null, null, null);
+    }
+
+    private ToolExecutionResult executeOne(ToolExecutionRequest request, AgentSessionContext context,
+                                           Consumer<ChatStreamEventData> eventConsumer, Long decisionSessionId,
+                                           RuntimeTrace trace, Consumer<ToolExecutionResult> startedConsumer) {
         long startedAt = System.currentTimeMillis();
         String toolCallId = UUID.randomUUID().toString();
         ToolExecutionResult outcome = new ToolExecutionResult();
@@ -92,6 +124,16 @@ public class ToolExecutionOrchestrator {
             }
             enrichWithDeterministicContext(input, request.getToolName(), context);
             outcome.setEffectiveArguments(objectMapper.writeValueAsString(input));
+            if (conversationEventService != null && trace != null) {
+                Map<String, Object> call = new LinkedHashMap<String, Object>();
+                call.put("tool", request.getToolName());
+                call.put("arguments", outcome.getEffectiveArguments());
+                call.put("decisionSessionId", decisionSessionId);
+                call.put("turnNo", context == null ? null : context.getTurnNo());
+                outcome.setToolCallEventId(conversationEventService.persistDurableEvent(trace,
+                        ConversationEventType.TOOL_CALL, ConversationEventStatus.RUNNING, null, null, call, null));
+            }
+            if (startedConsumer != null) startedConsumer.accept(outcome);
             publishToolEvent(eventConsumer, "start", toolCallId, outcome);
             outcome.setResult(resultCompressor.compress(tool.execute(input)));
         } catch (Exception e) {

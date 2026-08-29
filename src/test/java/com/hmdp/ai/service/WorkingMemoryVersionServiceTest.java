@@ -33,6 +33,7 @@ class WorkingMemoryVersionServiceTest {
         });
         doAnswer(invocation -> { invocation.getArgument(0, AiWorkingMemory.class).setId(101L); return 1; })
                 .when(memoryMapper).insert(any(AiWorkingMemory.class));
+        when(eventMapper.insert(any(AiConversationEvent.class))).thenReturn(1);
 
         WorkingMemoryVersionService service = service(memoryMapper, eventMapper, eventService);
         AiWorkingMemory persisted = service.append("chat-1", 9L, 0, new ConversationWorkingMemory(),
@@ -55,6 +56,21 @@ class WorkingMemoryVersionServiceTest {
         assertThrows(IllegalStateException.class, () -> service.append("chat-1", 9L, 3,
                 new ConversationWorkingMemory(), ConversationEventType.STATE_REDUCED, "UPDATE", null));
         verify(eventMapper, org.mockito.Mockito.never()).insert(any(AiConversationEvent.class));
+    }
+
+    @Test
+    void rejectsStateMutationWhenStateEventInsertReportsNoRow() {
+        AiWorkingMemoryMapper memoryMapper = mock(AiWorkingMemoryMapper.class);
+        AiConversationEventMapper eventMapper = mock(AiConversationEventMapper.class);
+        ConversationEventService eventService = mock(ConversationEventService.class);
+        when(eventService.newStateEvent(any(), any(), any(), any(), any())).thenReturn(new AiConversationEvent());
+        when(memoryMapper.insert(any(AiWorkingMemory.class))).thenReturn(1);
+        when(eventMapper.insert(any(AiConversationEvent.class))).thenReturn(0);
+
+        WorkingMemoryVersionService service = service(memoryMapper, eventMapper, eventService);
+
+        assertThrows(IllegalStateException.class, () -> service.append("chat-1", 9L, 0,
+                new ConversationWorkingMemory(), ConversationEventType.STATE_REDUCED, "UPDATE", null));
     }
 
     @Test

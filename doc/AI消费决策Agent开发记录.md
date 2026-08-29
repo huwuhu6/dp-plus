@@ -1241,3 +1241,15 @@ Routing Model 返回的 route 先经过 Java Action Contract 校验，非法或�
 补充 `IdempotencyServiceTest`：同一 user/chat/key/request 重放、同 key 异请求冲突、不同 chat 重新执行、不同 user 不命中，以及缺失 chatId 的会话命令拒绝。定向回归 `mvn -q "-Dtest=IdempotencyServiceTest,ConversationStateRestoreServiceTest,AiChatControllerTest,ChatStreamServiceTest" test` 通过；`mvn -q -DskipTests compile` 通过。记录仍和业务 mutation 位于 `IdempotencyService.execute()` 的事务边界：聊天路径含 chat 内 START_DECISION，Decision Follow-up 调用 `continueDecision`，Restore 调用 `restoreInternal`；没有引入 Redis 幂等权威、自动 retry 或全 chat 锁。
 
 全量 `mvn -q test` 本轮执行 164 项，其中 163 项通过、1 项错误。错误来自未改动的 `AmapMcpLocationResolutionServiceTest.parsesCoordinatesReturnedByMapsGeo`：测试执行时将该类的 Type Pattern 视为低于 Java 16 的 source level，和本次幂等改动无调用关系；该环境/编译链问题未在本次定点修复中改动。
+
+## 2026-08-29：Runtime Event 与 Working Memory 的可靠性分层
+
+Runtime Event 入口拆分为 `persistDurableEvent(...)` 与 `recordBestEffort(...)`。`STATE_REDUCED` 继续由 `WorkingMemoryVersionService.append()` 在同一 MySQL 事务内与新的 Working Memory version 一起写入；两次 Mapper insert 均校验返回值，任一返回 0 或抛异常都会使状态 mutation 失败，未改为异步。
+
+`USER_INPUT`、最终 `ASSISTANT_OUTPUT`、`TOOL_CALL` 与 `TOOL_RESULT` 归为 Durable Interaction Fact。聊天入口先提交 `USER_INPUT` 后才进入 Bootstrap、Routing、Decision 和 Tool；最终回答形成后先提交 `ASSISTANT_OUTPUT`，再更新 Redis History projection，最后 SSE 才发送 `complete`。该 Event 表示服务端已接受 canonical answer，不表示首 token、SSE `send()` 成功、客户端收到或 UI ACK；partial token、生成中断的内容不会进入 History，fallback 只保存最终 fallback answer 一次。
+
+Tool 规划不再被记录为执行事实。`ToolExecutionOrchestrator` 在参数物化后、`tool.execute()` 前提交 `TOOL_CALL(RUNNING)`；并行 Tool 显式传递 `RuntimeTrace`，不依赖 ThreadLocal 传播。执行完成后才写对应 `TOOL_RESULT(SUCCESS/FAILED)`；工具结果事实写入失败不会自动重调远端 Tool，而是保留本次业务结果并标记 `traceIncomplete`。若 `TOOL_CALL` 未持久化，则不执行 Tool，也不伪造没有父 Call 的 Result。当前 timeout 表示 Agent 侧超时结果，不保证远端调用已经停止；未来外部写 Tool 仍需 invocation id 与业务幂等。
+
+`REWRITE`、`ROUTE_DECISION`、`POLICY_DECISION`、`RETRIEVAL` 等继续使用内存批量 best-effort buffer，落库失败不回滚业务。best-effort batch 改为 `INSERT IGNORE`，单条重复不会导致整批其他观测事件丢弃；Durable event 则复用现有 `eventId` 与 `(traceId, sequenceNo)`，同一 payload 重试返回已有事件，不同 payload 冲突明确失败。没有引入 Outbox、Kafka、CDC、新表或全局事件队列。
+
+新增 `ConversationEventServiceTest`、`ToolExecutionOrchestratorTest`、`WorkingMemoryVersionServiceTest` 与 `ChatOrchestrationServiceTest` 覆盖 durable/best-effort 入口隔离、重复 event identity、payload 冲突、状态 Event 返回 0、USER_INPUT 写失败不进入状态 mutation、Tool Call 先于执行及 Call 写失败不执行工具。评测每轮 `turnOutputsJson` 新增 `traceIncomplete`，使“业务正确但 Trace 不完整”不再被混同为业务失败。定向回归通过；随后执行全量 `mvn -q test`，Surefire 报告为 173 项测试、0 failure、0 error、1 个既有 skipped。未运行真实模型/SSE 断连压测，因此没有将上述单元测试结论表述为线上可靠性指标。

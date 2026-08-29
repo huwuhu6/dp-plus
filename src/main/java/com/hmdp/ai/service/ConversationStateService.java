@@ -262,7 +262,7 @@ public class ConversationStateService {
             metadata.put("actualWorkingMemoryVersion", latestVersion);
             metadata.put("sessionId", sessionId);
             if (conversationEventService != null) {
-                conversationEventService.record(ConversationEventType.STALE_RUNTIME_RESULT,
+                conversationEventService.recordBestEffort(ConversationEventType.STALE_RUNTIME_RESULT,
                         com.hmdp.ai.runtime.ConversationEventStatus.SKIPPED, null, null, null, metadata);
             }
             log.warn("[AI][state] event=STALE_RUNTIME_RESULT chatId={} sessionId={} baseVersion={} actualVersion={}",

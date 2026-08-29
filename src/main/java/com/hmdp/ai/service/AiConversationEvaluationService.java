@@ -332,6 +332,7 @@ public class AiConversationEvaluationService {
                 output.put("decisionStatus", response.getDecisionStatus());
                 output.put("answer", compact(response.getAnswer()));
                 output.put("contextRewrite", compactContextRewrite(response.getContextRewrite()));
+                output.put("traceIncomplete", Boolean.TRUE.equals(response.getTraceIncomplete()));
                 output.put("stages", stageTrace);
                 output.put("modelCalls", modelCallObservationSnapshot());
                 outputs.add(output);

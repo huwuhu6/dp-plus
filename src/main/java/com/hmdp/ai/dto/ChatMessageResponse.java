@@ -16,4 +16,6 @@ public class ChatMessageResponse {
     private ContextRewriteResult contextRewrite;
     private String policyAction;
     private String policyReason;
+    /** Business output may be valid even when a post-execution durable trace record failed. */
+    private Boolean traceIncomplete;
 }

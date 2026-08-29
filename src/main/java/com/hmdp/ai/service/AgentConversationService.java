@@ -218,7 +218,8 @@ public class AgentConversationService {
             log.info("[AI][agent] event=TOOL_EXECUTION_BATCH sessionId={} turnNo={} plannedTools={} parallelEligible={}", sessionId,
                     context.getTurnNo(), requests.stream().map(ToolExecutionRequest::getToolName).toList(),
                     requests.stream().filter(item -> !"search_alternative_shops".equals(item.getToolName())).count());
-            for (ToolExecutionResult execution : toolExecutionOrchestrator.execute(requests, context, eventConsumer)) {
+            for (ToolExecutionResult execution : toolExecutionOrchestrator.execute(requests, context, eventConsumer,
+                    sessionId, conversationEventService == null ? null : conversationEventService.currentTrace())) {
                 persistToolExecution(sessionId, context.getTurnNo(), execution);
                 if (execution.isSuccess()) results.add(execution.getResult());
             }
@@ -237,21 +238,31 @@ public class AgentConversationService {
         String toolCallId = java.util.UUID.randomUUID().toString();
         AiAgentToolCall record = new AiAgentToolCall();
         record.setSessionId(sessionId); record.setTurnNo(turnNo); record.setToolName(toolName);
+        Long callEventId = null;
+        boolean toolStarted = false;
         try {
             Map<String, Object> input = objectMapper.readValue(arguments, new TypeReference<Map<String, Object>>() { });
             materializeToolInput(input, toolName, context, explicitlyReferencedShopId);
             String effectiveArguments = objectMapper.writeValueAsString(input);
             record.setToolInputJson(effectiveArguments);
+            callEventId = persistToolCall(sessionId, turnNo, toolName, effectiveArguments, "DIRECT_RULE");
             publishToolEvent(eventConsumer, "start", toolCallId, toolName, effectiveArguments, null, null, null);
             log.info("[AI][agent] event=TOOL_START sessionId={} turnNo={} tool={} arguments={}", sessionId, turnNo,
                     toolName, compact(effectiveArguments));
+            toolStarted = true;
             AgentToolResult result = toolResultCompressor.compress(toolRegistry.find(toolName).execute(input));
             result.setToolName(toolName);
             result.setDurationMs(System.currentTimeMillis() - startedAt);
             record.setStatus("SUCCESS");
             record.setToolOutputJson(objectMapper.writeValueAsString(result.getFacts()));
             record.setDurationMs(System.currentTimeMillis() - startedAt);
-            toolCallMapper.insert(record);
+            try {
+                toolCallMapper.insert(record);
+            } catch (RuntimeException auditFailure) {
+                if (conversationEventService != null) conversationEventService.markTraceIncomplete("TOOL_AUDIT_ROW_PERSIST_FAILURE");
+            }
+            persistToolResult(callEventId, sessionId, turnNo, toolName, result.getFacts(), null,
+                    ConversationEventStatus.SUCCESS, result.getDurationMs(), "DIRECT_RULE");
             publishToolEvent(eventConsumer, "end", toolCallId, toolName, effectiveArguments, result.getDurationMs(), result, null);
             log.info("[AI][agent] event=TOOL_SUCCESS sessionId={} turnNo={} tool={} durationMs={} result={}", sessionId,
                     turnNo, toolName, result.getDurationMs(), compact(record.getToolOutputJson()));
@@ -262,7 +273,15 @@ public class AgentConversationService {
             publishToolEvent(eventConsumer, "end", toolCallId, toolName, record.getToolInputJson(), record.getDurationMs(), null,
                     e.getMessage());
             record.setToolOutputJson("{\"error\":\"工具执行失败\"}");
-            toolCallMapper.insert(record);
+            try {
+                toolCallMapper.insert(record);
+            } catch (RuntimeException auditFailure) {
+                if (conversationEventService != null) conversationEventService.markTraceIncomplete("TOOL_AUDIT_ROW_PERSIST_FAILURE");
+            }
+            if (toolStarted) {
+                persistToolResult(callEventId, sessionId, turnNo, toolName, null, e.getMessage(),
+                        ConversationEventStatus.FAILED, record.getDurationMs(), "DIRECT_RULE");
+            }
             log.warn("[AI][agent] event=TOOL_FAILURE sessionId={} turnNo={} tool={} errorType={} detail={}", sessionId,
                     turnNo, toolName, e.getClass().getSimpleName(), compact(e.getMessage()));
             throw new IllegalArgumentException("工具 " + toolName + " 无法执行");
@@ -295,13 +314,8 @@ public class AgentConversationService {
     }
 
     private void persistToolExecution(Long sessionId, Integer turnNo, ToolExecutionResult execution) {
-        Long callEventId = null;
-        if (conversationEventService != null) {
-            Map<String, Object> call = new LinkedHashMap<String, Object>();
-            call.put("tool", execution.getToolName()); call.put("arguments", execution.getEffectiveArguments());
-            call.put("decisionSessionId", sessionId); call.put("turnNo", turnNo);
-            callEventId = conversationEventService.record(ConversationEventType.TOOL_CALL, ConversationEventStatus.SUCCESS,
-                    null, null, call, null);
+        if (conversationEventService != null && execution.getToolCallEventId() == null) {
+            throw new IllegalStateException("Tool execution was not durably accepted");
         }
         AiAgentToolCall record = new AiAgentToolCall();
         record.setSessionId(sessionId); record.setTurnNo(turnNo); record.setToolName(execution.getToolName());
@@ -311,31 +325,25 @@ public class AgentConversationService {
             try {
                 record.setStatus("SUCCESS");
                 record.setToolOutputJson(objectMapper.writeValueAsString(execution.getResult().getFacts()));
-                if (conversationEventService != null) {
-                    Map<String, Object> result = new LinkedHashMap<String, Object>();
-                    result.put("tool", execution.getToolName()); result.put("facts", execution.getResult().getFacts());
-                    result.put("decisionSessionId", sessionId);
-                    conversationEventService.record(ConversationEventType.TOOL_RESULT, ConversationEventStatus.SUCCESS,
-                            null, callEventId, result,
-                            java.util.Collections.<String, Object>singletonMap("durationMs", execution.getDurationMs()));
-                }
+                toolCallMapper.insert(record);
+                persistToolResult(execution.getToolCallEventId(), sessionId, turnNo, execution.getToolName(),
+                        execution.getResult().getFacts(), null, ConversationEventStatus.SUCCESS,
+                        execution.getDurationMs(), "PLANNED_TOOL");
                 log.info("[AI][agent] event=TOOL_SUCCESS sessionId={} turnNo={} tool={} durationMs={} result={}", sessionId,
                         turnNo, execution.getToolName(), execution.getDurationMs(), compact(record.getToolOutputJson()));
             } catch (Exception e) {
+                if (conversationEventService != null) conversationEventService.markTraceIncomplete("TOOL_EXECUTION_AUDIT_FAILURE");
                 log.warn("[AI][agent] event=TOOL_AUDIT_FAILURE sessionId={} turnNo={} tool={} errorType={}", sessionId,
                         turnNo, execution.getToolName(), e.getClass().getSimpleName());
             }
         } else {
             record.setStatus("FAILED");
             record.setToolOutputJson("{\"error\":\"工具执行失败\"}");
-            if (conversationEventService != null) {
-                Map<String, Object> result = new LinkedHashMap<String, Object>();
-                result.put("tool", execution.getToolName()); result.put("error", execution.getErrorMessage());
-                result.put("decisionSessionId", sessionId);
-                conversationEventService.record(ConversationEventType.TOOL_RESULT, ConversationEventStatus.FAILED,
-                        null, callEventId, result,
-                        java.util.Collections.<String, Object>singletonMap("durationMs", execution.getDurationMs()));
-            }
+            toolCallMapper.insert(record);
+            ConversationEventStatus status = "工具执行超时".equals(execution.getErrorMessage())
+                    ? ConversationEventStatus.TIMEOUT : ConversationEventStatus.FAILED;
+            persistToolResult(execution.getToolCallEventId(), sessionId, turnNo, execution.getToolName(), null,
+                    execution.getErrorMessage(), status, execution.getDurationMs(), "PLANNED_TOOL");
             log.warn("[AI][agent] event=TOOL_FAILURE sessionId={} turnNo={} tool={} durationMs={} detail={}", sessionId,
                     turnNo, execution.getToolName(), execution.getDurationMs(), compact(execution.getErrorMessage()));
         }
@@ -347,42 +355,11 @@ public class AgentConversationService {
         List<String> toolNames = fallbackToolNames(message);
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         for (String toolName : toolNames) {
-            Long callEventId = null;
-            if (conversationEventService != null) {
-                Map<String, Object> call = new LinkedHashMap<String, Object>();
-                call.put("tool", toolName);
-                call.put("arguments", Collections.emptyMap());
-                call.put("decisionSessionId", sessionId);
-                call.put("turnNo", turnNo);
-                call.put("executionMode", "FALLBACK_RULE");
-                callEventId = conversationEventService.record(ConversationEventType.TOOL_CALL,
-                        ConversationEventStatus.SUCCESS, null, null, call, null);
-            }
             try {
                 AgentToolResult result = executeTool(sessionId, turnNo, toolName, "{}", context,
                         explicitlyReferencedShopId, eventConsumer);
                 results.add(result);
-                if (conversationEventService != null) {
-                    Map<String, Object> payload = new LinkedHashMap<String, Object>();
-                    payload.put("tool", toolName);
-                    payload.put("decisionSessionId", sessionId);
-                    payload.put("turnNo", turnNo);
-                    payload.put("facts", result.getFacts());
-                    conversationEventService.record(ConversationEventType.TOOL_RESULT,
-                            ConversationEventStatus.SUCCESS, null, callEventId, payload,
-                            Collections.<String, Object>singletonMap("executionMode", "FALLBACK_RULE"));
-                }
             } catch (IllegalArgumentException e) {
-                if (conversationEventService != null) {
-                    Map<String, Object> payload = new LinkedHashMap<String, Object>();
-                    payload.put("tool", toolName);
-                    payload.put("decisionSessionId", sessionId);
-                    payload.put("turnNo", turnNo);
-                    payload.put("error", e.getMessage());
-                    conversationEventService.record(ConversationEventType.TOOL_RESULT,
-                            ConversationEventStatus.FAILED, null, callEventId, payload,
-                            Collections.<String, Object>singletonMap("executionMode", "FALLBACK_RULE"));
-                }
                 log.warn("[AI][agent] event=FALLBACK_TOOL_FAILURE sessionId={} turnNo={} tool={} errorType={}", sessionId,
                         turnNo, toolName, e.getClass().getSimpleName());
             }
@@ -401,6 +378,35 @@ public class AgentConversationService {
         if (message.contains("还有") || message.contains("其他") || message.contains("换一家")) result.add("search_alternative_shops");
         else result.add("get_shop_detail");
         return result;
+    }
+
+    private Long persistToolCall(Long sessionId, Integer turnNo, String toolName, String arguments, String executionMode) {
+        if (conversationEventService == null) return null;
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("tool", toolName); payload.put("arguments", arguments);
+        payload.put("decisionSessionId", sessionId); payload.put("turnNo", turnNo);
+        payload.put("executionMode", executionMode);
+        return conversationEventService.persistDurableEvent(ConversationEventType.TOOL_CALL,
+                ConversationEventStatus.RUNNING, null, null, payload, null);
+    }
+
+    private void persistToolResult(Long callEventId, Long sessionId, Integer turnNo, String toolName, Object facts,
+                                   String error, ConversationEventStatus status, Long durationMs, String executionMode) {
+        if (conversationEventService == null) return;
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("tool", toolName); payload.put("decisionSessionId", sessionId); payload.put("turnNo", turnNo);
+        if (facts != null) payload.put("facts", facts);
+        if (error != null) payload.put("error", error);
+        Map<String, Object> metadata = new LinkedHashMap<String, Object>();
+        metadata.put("durationMs", durationMs); metadata.put("executionMode", executionMode);
+        try {
+            conversationEventService.persistDurableEvent(ConversationEventType.TOOL_RESULT, status,
+                    null, callEventId, payload, metadata);
+        } catch (RuntimeException persistenceFailure) {
+            conversationEventService.markTraceIncomplete("TOOL_RESULT_PERSIST_FAILURE");
+            log.warn("[AI][agent] event=TOOL_RESULT_PERSIST_FAILURE sessionId={} tool={} errorType={}",
+                    sessionId, toolName, persistenceFailure.getClass().getSimpleName());
+        }
     }
 
     private void addMissingCompoundFactTools(List<ToolExecutionRequest> requests, String message, Long explicitlyReferencedShopId) {

@@ -10,6 +10,7 @@ import com.hmdp.ai.tool.BaseAgentTool;
 import com.hmdp.ai.tool.ToolExecutionRequest;
 import com.hmdp.ai.tool.ToolExecutionResult;
 import com.hmdp.ai.tool.ToolResultCompressor;
+import com.hmdp.ai.runtime.RuntimeTrace;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -24,6 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 class ToolExecutionOrchestratorTest {
     @Test
@@ -143,5 +147,52 @@ class ToolExecutionOrchestratorTest {
         assertEquals(events.get(0).getToolCallId(), events.get(1).getToolCallId());
         assertTrue(events.get(1).getDurationMs() >= 0L);
         assertEquals("shop detail", ((Map<?, ?>) events.get(1).getOutput()).get("summary"));
+    }
+
+    @Test
+    void persistsDurableCallBeforeExecutingTool() {
+        AgentToolRegistry registry = mock(AgentToolRegistry.class);
+        ConversationEventService events = mock(ConversationEventService.class);
+        BaseAgentTool detail = mock(BaseAgentTool.class);
+        when(registry.find("get_shop_detail")).thenReturn(detail);
+        when(detail.execute(anyMap())).thenReturn(new AgentToolResult().summary("detail").displayText("detail"));
+        when(events.persistDurableEvent(org.mockito.ArgumentMatchers.any(RuntimeTrace.class),
+                org.mockito.ArgumentMatchers.eq(com.hmdp.ai.runtime.ConversationEventType.TOOL_CALL),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(91L);
+        ToolExecutionOrchestrator orchestrator = orchestrator(registry);
+        ReflectionTestUtils.setField(orchestrator, "conversationEventService", events);
+
+        ToolExecutionResult result = orchestrator.execute(List.of(new ToolExecutionRequest(0, "get_shop_detail", "{}", null)),
+                new AgentSessionContext(), null, 8L, new RuntimeTrace("chat-tool", "trace-tool", 1)).get(0);
+
+        assertEquals(91L, result.getToolCallEventId());
+        org.mockito.InOrder order = inOrder(events, detail);
+        order.verify(events).persistDurableEvent(org.mockito.ArgumentMatchers.any(RuntimeTrace.class),
+                org.mockito.ArgumentMatchers.eq(com.hmdp.ai.runtime.ConversationEventType.TOOL_CALL),
+                org.mockito.ArgumentMatchers.eq(com.hmdp.ai.runtime.ConversationEventStatus.RUNNING),
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.isNull());
+        order.verify(detail).execute(anyMap());
+    }
+
+    @Test
+    void doesNotExecuteToolWhenDurableCallCannotBeWritten() {
+        AgentToolRegistry registry = mock(AgentToolRegistry.class);
+        ConversationEventService events = mock(ConversationEventService.class);
+        BaseAgentTool detail = mock(BaseAgentTool.class);
+        when(registry.find("get_shop_detail")).thenReturn(detail);
+        when(events.persistDurableEvent(org.mockito.ArgumentMatchers.any(RuntimeTrace.class),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new IllegalStateException("db unavailable"));
+        ToolExecutionOrchestrator orchestrator = orchestrator(registry);
+        ReflectionTestUtils.setField(orchestrator, "conversationEventService", events);
+
+        ToolExecutionResult result = orchestrator.execute(List.of(new ToolExecutionRequest(0, "get_shop_detail", "{}", null)),
+                new AgentSessionContext(), null, 8L, new RuntimeTrace("chat-tool", "trace-tool", 1)).get(0);
+
+        assertTrue(!result.isSuccess());
+        verify(detail, never()).execute(anyMap());
     }
 }

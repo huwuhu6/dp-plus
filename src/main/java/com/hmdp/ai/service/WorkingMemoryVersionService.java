@@ -59,7 +59,8 @@ public class WorkingMemoryVersionService {
         row.setChatId(chatId); row.setUserId(userId); row.setVersion(expectedVersion + 1);
         row.setMemoryJson(write(memory)); row.setCreatedAt(LocalDateTime.now());
         try {
-            workingMemoryMapper.insert(row);
+            int inserted = workingMemoryMapper.insert(row);
+            if (inserted != 1) throw new IllegalStateException("Working memory version was not persisted");
         } catch (DuplicateKeyException e) {
             AiWorkingMemory winner = latest(chatId);
             int winnerVersion = winner == null || winner.getVersion() == null ? actualVersion : winner.getVersion();
@@ -67,7 +68,8 @@ public class WorkingMemoryVersionService {
         }
         AiConversationEvent event = eventService.newStateEvent(eventService.currentTrace(), eventType,
                 row.getId(), eventResult, metadata);
-        eventMapper.insert(event);
+        int eventInserted = eventMapper.insert(event);
+        if (eventInserted != 1) throw new IllegalStateException("State-reduced event was not persisted");
         return row;
     }
 

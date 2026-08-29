@@ -124,7 +124,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             Map<String, Object> input = new LinkedHashMap<String, Object>();
             input.put("content", context.getOriginalMessage());
             input.put("decisionSessionId", request.getDecisionSessionId());
-            conversationEventService.record(ConversationEventType.USER_INPUT, ConversationEventStatus.SUCCESS,
+            conversationEventService.persistDurableEvent(ConversationEventType.USER_INPUT, ConversationEventStatus.SUCCESS,
                     null, null, input, null);
         }
         AiChatSession state = conversationStateService.getOrCreate(context.getChatId());
@@ -164,7 +164,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             rewrite.put("rewritten", context.getEffectiveMessage());
             rewrite.put("applied", context.getContextRewrite().getApplied());
             rewrite.put("reason", context.getContextRewrite().getReason());
-            conversationEventService.record(ConversationEventType.REWRITE, ConversationEventStatus.SUCCESS,
+            conversationEventService.recordBestEffort(ConversationEventType.REWRITE, ConversationEventStatus.SUCCESS,
                     null, null, rewrite, null);
         }
     }
@@ -234,7 +234,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         context.setRoutingReason("resolved_route:" + route);
         context.setUsedModel(aiProperties.isConfigured());
         if (conversationEventService != null) {
-            conversationEventService.record(ConversationEventType.ROUTE_DECISION, ConversationEventStatus.SUCCESS,
+            conversationEventService.recordBestEffort(ConversationEventType.ROUTE_DECISION, ConversationEventStatus.SUCCESS,
                     null, null, java.util.Collections.<String, Object>singletonMap("route", route), null);
         }
         log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}",
@@ -341,7 +341,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (conversationEventService != null) {
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             result.put("decisionSessionId", decision.getSessionId()); result.put("status", decision.getStatus());
-            conversationEventService.record(ConversationEventType.DECISION_STARTED, ConversationEventStatus.SUCCESS,
+            conversationEventService.recordBestEffort(ConversationEventType.DECISION_STARTED, ConversationEventStatus.SUCCESS,
                     null, null, result, null);
         }
         conversationStateService.activateDecision(context.getChatSession(), decision.getSessionId());
@@ -437,7 +437,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             Map<String, Object> input = new LinkedHashMap<String, Object>();
             input.put("content", message);
             input.put("decisionSessionId", request.getDecisionSessionId());
-            conversationEventService.record(ConversationEventType.USER_INPUT, ConversationEventStatus.SUCCESS,
+            conversationEventService.persistDurableEvent(ConversationEventType.USER_INPUT, ConversationEventStatus.SUCCESS,
                     null, null, input, null);
         }
         AiChatSession state = conversationStateService.getOrCreate(chatId);
@@ -469,7 +469,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             Map<String, Object> rewrite = new LinkedHashMap<String, Object>();
             rewrite.put("original", message); rewrite.put("rewritten", effectiveMessage);
             rewrite.put("applied", contextRewrite.getApplied()); rewrite.put("reason", contextRewrite.getReason());
-            conversationEventService.record(ConversationEventType.REWRITE, ConversationEventStatus.SUCCESS,
+            conversationEventService.recordBestEffort(ConversationEventType.REWRITE, ConversationEventStatus.SUCCESS,
                     null, null, rewrite, null);
         }
         if (isPausedDecision(activeDecision) && request.getSelectedOptionId() == null
@@ -502,7 +502,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 contextRewrite);
         if (route == null) route = route(effectiveMessage, activeDecision == null ? "NONE" : activeDecision.getStatus(), chatHistory);
         if (conversationEventService != null) {
-            conversationEventService.record(ConversationEventType.ROUTE_DECISION, ConversationEventStatus.SUCCESS,
+            conversationEventService.recordBestEffort(ConversationEventType.ROUTE_DECISION, ConversationEventStatus.SUCCESS,
                     null, null, java.util.Collections.<String, Object>singletonMap("route", route), null);
         }
         log.info("[AI][chat] event=ROUTE_SELECTED chatId={} activeSessionId={} route={}", chatId, activeSessionId, route);
@@ -603,7 +603,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (conversationEventService != null) {
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             result.put("decisionSessionId", decision.getSessionId()); result.put("status", decision.getStatus());
-            conversationEventService.record(ConversationEventType.DECISION_STARTED, ConversationEventStatus.SUCCESS,
+            conversationEventService.recordBestEffort(ConversationEventType.DECISION_STARTED, ConversationEventStatus.SUCCESS,
                     null, null, result, null);
         }
         conversationStateService.activateDecision(state, decision.getSessionId());
@@ -1071,7 +1071,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             result.put("action", policy.getAction()); result.put("reason", policy.getReason());
             result.put("blocking", policy.isBlocking()); result.put("decisionSessionId", sessionId);
-            conversationEventService.record(ConversationEventType.POLICY_DECISION, ConversationEventStatus.SUCCESS,
+            conversationEventService.recordBestEffort(ConversationEventType.POLICY_DECISION, ConversationEventStatus.SUCCESS,
                     null, null, result, null);
         }
         log.info("[AI][policy] event=POLICY_DECIDED chatId={} sessionId={} action={} blocking={} reason={} scope={}",
@@ -1127,14 +1127,19 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     }
 
     private void recordTurn(String chatId, String userMessage, ChatMessageResponse response) {
-        chatMemoryService.appendTurn(chatId, userMessage, response.getAnswer(), response.getRoute(), response.getDecisionSessionId());
-        if (conversationEventService != null) {
+        try {
+            if (conversationEventService != null) {
             Map<String, Object> output = new LinkedHashMap<String, Object>();
             output.put("content", response.getAnswer()); output.put("route", response.getRoute());
             output.put("decisionSessionId", response.getDecisionSessionId());
-            conversationEventService.record(ConversationEventType.ASSISTANT_OUTPUT, ConversationEventStatus.SUCCESS,
+                conversationEventService.persistDurableEvent(ConversationEventType.ASSISTANT_OUTPUT, ConversationEventStatus.SUCCESS,
                     null, null, output, null);
-            conversationEventService.clearTrace();
+                response.setTraceIncomplete(conversationEventService.isTraceIncomplete());
+            }
+            // Redis is a projection of the two durable message facts, never their authority.
+            chatMemoryService.appendTurn(chatId, userMessage, response.getAnswer(), response.getRoute(), response.getDecisionSessionId());
+        } finally {
+            if (conversationEventService != null) conversationEventService.clearTrace();
         }
         log.info("[AI][chat] event=MEMORY_SAVED chatId={} userChars={} assistantChars={}", chatId,
                 userMessage.length(), response.getAnswer() == null ? 0 : response.getAnswer().length());
