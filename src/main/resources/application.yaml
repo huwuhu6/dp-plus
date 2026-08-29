@@ -93,6 +93,12 @@ ai:
     model: ${AI_QUERY_REWRITE_MODEL:qwen-flash}
     timeout-ms: ${AI_QUERY_REWRITE_TIMEOUT_MS:8000}
   narrative-enabled: ${AI_NARRATIVE_ENABLED:true}
+  profile-rebuild:
+    enabled: ${AI_PROFILE_REBUILD_ENABLED:false}
+    fixed-delay-ms: ${AI_PROFILE_REBUILD_FIXED_DELAY_MS:60000}
+    batch-size: ${AI_PROFILE_REBUILD_BATCH_SIZE:20}
+    timeout-ms: ${AI_PROFILE_REBUILD_TIMEOUT_MS:12000}
+    max-review-examples: ${AI_PROFILE_REBUILD_MAX_REVIEW_EXAMPLES:16}
   retrieval:
     vector-enabled: ${AI_RETRIEVAL_VECTOR_ENABLED:false}
     semantic-weight: ${AI_RETRIEVAL_SEMANTIC_WEIGHT:18}

@@ -1253,3 +1253,15 @@ Tool 规划不再被记录为执行事实。`ToolExecutionOrchestrator` 在参�
 `REWRITE`、`ROUTE_DECISION`、`POLICY_DECISION`、`RETRIEVAL` 等继续使用内存批量 best-effort buffer，落库失败不回滚业务。best-effort batch 改为 `INSERT IGNORE`，单条重复不会导致整批其他观测事件丢弃；Durable event 则复用现有 `eventId` 与 `(traceId, sequenceNo)`，同一 payload 重试返回已有事件，不同 payload 冲突明确失败。没有引入 Outbox、Kafka、CDC、新表或全局事件队列。
 
 新增 `ConversationEventServiceTest`、`ToolExecutionOrchestratorTest`、`WorkingMemoryVersionServiceTest` 与 `ChatOrchestrationServiceTest` 覆盖 durable/best-effort 入口隔离、重复 event identity、payload 冲突、状态 Event 返回 0、USER_INPUT 写失败不进入状态 mutation、Tool Call 先于执行及 Call 写失败不执行工具。评测每轮 `turnOutputsJson` 新增 `traceIncomplete`，使“业务正确但 Trace 不完整”不再被混同为业务失败。定向回归通过；随后执行全量 `mvn -q test`，Surefire 报告为 173 项测试、0 failure、0 error、1 个既有 skipped。未运行真实模型/SSE 断连压测，因此没有将上述单元测试结论表述为线上可靠性指标。
+
+## 2026-08-29：商户原始评价与画像批量重算
+
+新增 `tbl_shop_review` 作为商户原始评价事实层；`source_type + source_key` 是来源幂等键，`ACTIVE/DELETED` 表达最小生命周期。`tbl_ai_review_document` 保持检索证据投影，新增 `source_review_id/source_revision` 追踪其来源，不再把 AI 证据文档当成原始用户评价。探店笔记评论 `tbl_blog_comments` 未改变语义。
+
+评价新增、语义修改、删除均在同一事务中维护原始评价、Review Document 投影，并通过 `AiShopProfileMapper.markDirty()` 原子执行 `input_revision + 1` 与 `profile_status=WAIT_REBUILD`；重复幂等写入且评价语义未变时不会触发无意义重算。该递增由数据库完成，不采用“先读 revision 再写回”的并发不安全方式。
+
+新增默认关闭的 `ShopProfileRebuildScheduler` 与 `ShopProfileRebuildService`。任务批量扫描 `WAIT_REBUILD` 的商户，读取该商户全部 `ACTIVE` 原始评价，再提交有限代表性样本、评分分布和既有商户事实给模型生成 `sceneTags`、`ambienceTags`、`summary`。模型输出必须符合函数调用 JSON schema；空结果、超时或非法字段不会覆盖现有 Profile，并保持待重算状态以供下一轮处理。`cuisine` 继续是商户事实，不由模型改写；`queueLevel` 由评价中的等待/无需等待信号按确定性规则推导，避免让摘要模型直接影响确定性过滤与排序。
+
+Profile 完成更新使用 `WHERE shop_id = ? AND profile_status = 'WAIT_REBUILD' AND input_revision = expectedRevision` 的 revision CAS，同时写入 `aggregated_revision=expectedRevision` 和 `READY`。因此只有 `aggregated_revision == input_revision` 的成功重算才会进入 `READY`；任务读取期间若有新评价使 revision 增长，旧任务条件更新失败，不会用旧摘要覆盖新状态，也不会自动重试或回退新数据。无有效评价时不调用模型，只通过同样的 CAS 记录已聚合版本。
+
+本阶段未实现 Milvus 增量写入，未改变现有全量 `rebuildIndex()`、推荐检索接口或既有 AI 评测行为；后续需要分别在 Review Document 投影和 Profile 成功重算后接入独立的向量写入器。验证包括 `ShopReviewServiceTest`、`ShopProfileDraftGeneratorTest`、`ShopProfileRebuildServiceTest`、`MilvusSemanticShopRetrieverTest` 与 `ConsumptionDecisionServiceTest` 的定向回归；全量测试结果以本次提交前实际 Surefire 执行为准。

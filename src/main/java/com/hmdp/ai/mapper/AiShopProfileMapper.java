@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hmdp.ai.entity.AiShopProfile;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 
 public interface AiShopProfileMapper extends BaseMapper<AiShopProfile> {
     @Insert("""
@@ -16,4 +17,34 @@ public interface AiShopProfileMapper extends BaseMapper<AiShopProfile> {
               profile_status = 'WAIT_REBUILD'
             """)
     int markDirty(@Param("shopId") Long shopId);
+
+    @Update("""
+            UPDATE tbl_ai_shop_profile
+            SET scene_tags = #{sceneTags},
+                ambience_tags = #{ambienceTags},
+                queue_level = #{queueLevel},
+                summary = #{summary},
+                aggregated_revision = #{expectedRevision},
+                profile_status = 'READY'
+            WHERE shop_id = #{shopId}
+              AND profile_status = 'WAIT_REBUILD'
+              AND input_revision = #{expectedRevision}
+            """)
+    int completeRebuild(@Param("shopId") Long shopId,
+                        @Param("expectedRevision") Long expectedRevision,
+                        @Param("sceneTags") String sceneTags,
+                        @Param("ambienceTags") String ambienceTags,
+                        @Param("queueLevel") String queueLevel,
+                        @Param("summary") String summary);
+
+    @Update("""
+            UPDATE tbl_ai_shop_profile
+            SET aggregated_revision = #{expectedRevision},
+                profile_status = 'READY'
+            WHERE shop_id = #{shopId}
+              AND profile_status = 'WAIT_REBUILD'
+              AND input_revision = #{expectedRevision}
+            """)
+    int completeWithoutReviews(@Param("shopId") Long shopId,
+                               @Param("expectedRevision") Long expectedRevision);
 }

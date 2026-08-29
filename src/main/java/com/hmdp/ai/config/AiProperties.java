@@ -18,6 +18,7 @@ public class AiProperties {
     private ResultEvaluationProperties resultEvaluation = new ResultEvaluationProperties();
     private RoutingProperties routing = new RoutingProperties();
     private QueryRewriteProperties queryRewrite = new QueryRewriteProperties();
+    private ProfileRebuildProperties profileRebuild = new ProfileRebuildProperties();
     private String retrievalStrategyVersion = "structured-profile-evidence-v2";
     private String evaluationDatasetVersion = "seed-v2";
     private String holdoutDatasetVersion = "holdout-v1";
@@ -61,5 +62,14 @@ public class AiProperties {
     public static class ResultEvaluationProperties {
         private Boolean autoExpandDefaultNearbyRadius = true;
         private Double autoExpandedNearbyRadiusKm = 5D;
+    }
+
+    @Data
+    public static class ProfileRebuildProperties {
+        private Boolean enabled = false;
+        private Integer fixedDelayMs = 60000;
+        private Integer batchSize = 20;
+        private Integer timeoutMs = 12000;
+        private Integer maxReviewExamples = 16;
     }
 }
