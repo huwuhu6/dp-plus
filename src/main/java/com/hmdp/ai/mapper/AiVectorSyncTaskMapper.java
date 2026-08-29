@@ -102,6 +102,17 @@ public interface AiVectorSyncTaskMapper extends BaseMapper<AiVectorSyncTask> {
 
     @Update("""
             UPDATE tbl_ai_vector_sync_task
+            SET status = 'PENDING', available_at = NOW(3), last_error = 'reconciliation detected drift'
+            WHERE document_id = #{documentId}
+              AND operation = #{operation}
+              AND target_revision = #{targetRevision}
+              AND status = 'SYNCED'
+            """)
+    int requeueSyncedDesired(@Param("documentId") String documentId, @Param("operation") String operation,
+                             @Param("targetRevision") Long targetRevision);
+
+    @Update("""
+            UPDATE tbl_ai_vector_sync_task
             SET status = 'PENDING', lease_token = NULL, leased_at = NULL, available_at = #{now},
                 last_error = 'lease expired'
             WHERE status = 'SYNCING' AND leased_at < #{expiredBefore}

@@ -1,11 +1,8 @@
 package com.hmdp.ai.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.hmdp.ai.dto.SemanticRecallResult;
 import com.hmdp.ai.entity.AiReviewDocument;
 import com.hmdp.ai.entity.AiShopProfile;
-import com.hmdp.ai.mapper.AiReviewDocumentMapper;
-import com.hmdp.ai.mapper.AiShopProfileMapper;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import jakarta.annotation.Resource;
@@ -33,10 +30,7 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
     private static final int EMBEDDING_BATCH_SIZE = 10;
 
     @Autowired(required = false) private VectorStore vectorStore;
-    @Resource private ShopMapper shopMapper;
-    @Resource private AiShopProfileMapper profileMapper;
-    @Resource private AiReviewDocumentMapper reviewMapper;
-    @Resource private SemanticShopDocumentFactory documentFactory;
+    @Resource private SemanticShopDocumentSource documentSource;
     @Value("${ai.retrieval.semantic-top-k:80}") private int semanticTopK;
     @Value("${ai.retrieval.semantic-min-score:0.35}") private double semanticMinScore;
 
@@ -90,20 +84,8 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
 
     @Override
     public int rebuildIndex() {
-        List<Shop> shops = shopMapper.selectList(null);
-        Map<Long, Shop> shopsById = new HashMap<>();
-        for (Shop shop : shops) shopsById.put(shop.getId(), shop);
-        List<AiShopProfile> profiles = profileMapper.selectList(null);
-        List<AiReviewDocument> reviews = reviewMapper.selectList(new QueryWrapper<AiReviewDocument>());
-        List<Document> documents = new ArrayList<>();
-        for (AiShopProfile profile : profiles) {
-            Shop shop = shopsById.get(profile.getShopId());
-            if (shop != null) documents.add(documentFactory.profileDocument(shop, profile));
-        }
-        for (AiReviewDocument review : reviews) {
-            Shop shop = shopsById.get(review.getShopId());
-            if (shop != null) documents.add(documentFactory.reviewDocument(shop, review));
-        }
+        SemanticShopDocumentSource.Snapshot snapshot = documentSource.loadSnapshot();
+        List<Document> documents = snapshot.documents().stream().map(SemanticShopDocumentSource.ExpectedDocument::document).toList();
         if (documents.isEmpty()) return 0;
         List<String> ids = documents.stream().map(Document::getId).toList();
         try {
@@ -119,7 +101,7 @@ public class MilvusSemanticShopRetriever implements SemanticShopRetriever {
                     (documents.size() + EMBEDDING_BATCH_SIZE - 1) / EMBEDDING_BATCH_SIZE,
                     end - start);
         }
-        log.info("[AI][semantic] action=INDEX_REBUILT shops={} documents={}", shops.size(), documents.size());
+        log.info("[AI][semantic] action=INDEX_REBUILT shops={} documents={}", snapshot.shopCount(), documents.size());
         return documents.size();
     }
 

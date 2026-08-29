@@ -38,6 +38,21 @@ public class VectorSyncTaskService {
         merge(task(shopId, shopId, SemanticShopDocumentFactory.PROFILE, UPSERT, value(aggregatedRevision)));
     }
 
+    /** Requeues an already-synced desired state only after reconciliation has observed actual Milvus drift. */
+    public void requestProfileRepair(Long shopId, long revision) {
+        requestRepair(task(shopId, shopId, SemanticShopDocumentFactory.PROFILE, UPSERT, revision));
+    }
+
+    public void requestReviewRepair(Long reviewDocumentId, Long shopId, long revision) {
+        requestRepair(task(reviewDocumentId, shopId, SemanticShopDocumentFactory.REVIEW, UPSERT, revision));
+    }
+
+    public void requestManagedDeleteRepair(String documentId, String documentType, Long entityId, Long shopId, long revision) {
+        AiVectorSyncTask task = task(entityId, shopId, documentType, DELETE, revision);
+        task.setDocumentId(documentId);
+        requestRepair(task);
+    }
+
     public List<AiVectorSyncTask> dueTasks(int requestedBatchSize) {
         int batchSize = Math.max(1, Math.min(requestedBatchSize, 100));
         return taskMapper.selectList(new QueryWrapper<AiVectorSyncTask>()
@@ -82,6 +97,11 @@ public class VectorSyncTaskService {
         // MySQL returns 1 for insert, 2 for a changed duplicate-key update, and 0 for an idempotent duplicate.
         // All three outcomes mean that this document's desired state is durably represented.
         taskMapper.mergeLatest(task);
+    }
+
+    private void requestRepair(AiVectorSyncTask task) {
+        merge(task);
+        taskMapper.requeueSyncedDesired(task.getDocumentId(), task.getOperation(), task.getTargetRevision());
     }
 
     private AiVectorSyncTask task(Long entityId, Long shopId, String type, String operation, long revision) {

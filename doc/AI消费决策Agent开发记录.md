@@ -1277,3 +1277,9 @@ Review 原始事实、AI Projection、Profile dirty 标记和 Vector Sync Task �
 Spring AI 1.0.3 的 Milvus `add()` 实现实际调用原生 `insert`，没有可依赖的 upsert 契约。新增隔离 collection 的 opt-in 集成测试，连续写同一 ID 未报错且语义查询返回后写文本；由于这不证明原子替换或消除物理重复，生产 Writer 仍采用稳定 ID 的 `delete -> add`，且 delete 失败时不继续 add、保留任务供重试。默认 `ai.vector-sync.enabled=false`，现有部署继续保持全量重建行为。
 
 验证：定向覆盖 Review Upsert/Delete 入队、Profile CAS 后入队、任务版本条件回写、失败重试、Worker claim、稳定文档构造、增量 replace/delete 以及既有 Milvus 召回；`mvn -q test` 结果以本次提交前 Surefire 汇总为准。真实 Milvus 重复 ID 集成测试需显式传入 `-Dmilvus.integration.enabled=true`，使用随机临时 collection 并在结束后删除，不接触项目 collection。
+
+## 2026-08-29：Milvus 索引对账差异识别
+
+新增 `SemanticShopDocumentSource`，将全量 `rebuildIndex()` 与后续 reconciliation 的 MySQL 取数边界统一为同一实现，并继续经 `SemanticShopDocumentFactory` 构造文档，避免全量重建与对账对“合法文档”的判断漂移。Factory metadata 增加 `documentFingerprint`：仅基于最终向量文本、稳定文档 ID 与受契约约束的 metadata 计算 SHA-256；不包含时间、任务状态和重试次数，因此用于发现同 revision 的静默内容漂移，而不承担版本控制职责。
+
+新增只读 `MilvusVectorIndexInspector` 的 schema preflight 与强一致分页扫描能力，并新增 `VectorIndexReconciliationService`。当前阶段只识别 Missing、Stale Revision、Fingerprint Mismatch、受管 Orphan 和 Schema Failure；任何修复都只能调用既有 `VectorSyncTaskService` 重新形成持久化同步意图，绝不直接写 Milvus。对于已 `SYNCED` 且实际确认漂移的同一 `(documentId, operation, revision)`，任务表增加条件更新将其重新置为 `PENDING`；更高 revision 或正在执行的任务不会被旧对账结果覆盖。尚未新增 Scheduler，自动周期执行留待下一阶段。
