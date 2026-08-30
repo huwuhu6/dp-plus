@@ -1283,3 +1283,28 @@ Spring AI 1.0.3 的 Milvus `add()` 实现实际调用原生 `insert`，没有可
 新增 `SemanticShopDocumentSource`，将全量 `rebuildIndex()` 与后续 reconciliation 的 MySQL 取数边界统一为同一实现，并继续经 `SemanticShopDocumentFactory` 构造文档，避免全量重建与对账对“合法文档”的判断漂移。Factory metadata 增加 `documentFingerprint`：仅基于最终向量文本、稳定文档 ID 与受契约约束的 metadata 计算 SHA-256；不包含时间、任务状态和重试次数，因此用于发现同 revision 的静默内容漂移，而不承担版本控制职责。
 
 新增只读 `MilvusVectorIndexInspector` 的 schema preflight 与强一致分页扫描能力，并新增 `VectorIndexReconciliationService`。当前阶段只识别 Missing、Stale Revision、Fingerprint Mismatch、受管 Orphan 和 Schema Failure；任何修复都只能调用既有 `VectorSyncTaskService` 重新形成持久化同步意图，绝不直接写 Milvus。对于已 `SYNCED` 且实际确认漂移的同一 `(documentId, operation, revision)`，任务表增加条件更新将其重新置为 `PENDING`；更高 revision 或正在执行的任务不会被旧对账结果覆盖。尚未新增 Scheduler，自动周期执行留待下一阶段。
+
+## 2026-08-30：移除排序中硬过滤后的常量加分，修复语义查询地理 token 回退
+
+### 常量加分审计
+
+审查 `toRecommendation()` 的 10 项 ranking factor 后确认：菜系匹配（+20）和清淡证据（+12）在进入排序前已被 `matchesHardConstraints()` 硬过滤保证全部候选满足条件，因此对所有候选产生相同常数额外分，不改变相对排序。
+
+修改：删除 `score += 20D` 和 `score += 12D` 两行，保留 `matchedReasons` 输出供展示使用。测试验证排序不变性：高分餐厅（评分 50）排序始终高于低分餐厅（评分 30），与常量加分存在与否无关。
+
+### 语义查询地理 token 回退缺陷
+
+`semanticRetrievalQuery()` 去除省份/城市/区县 token 后，若查询为空会回退到 `request.getQuery()` 即原始查询，其中仍包含地理 token。例如查询"重庆"且城市为"重庆"时，去除后为空，回退仍为"重庆"，导致 Milvus 搜索无意义的地理信号。
+
+修改：空查询时不再回退到原始查询，改为使用 `constraints.getKeyword()`（若存在）或返回空字符串，由 `MilvusSemanticShopRetriever.recall()` 的 guard clause 处理为 `unavailable`，语义层降级。
+
+### 影响
+
+- 排序不受影响（差异化因子不变，仅移除常数偏移）
+- 纯地理查询（如"重庆"）不再产生无意义的语义检索
+- 含地理+关键词查询（如"重庆" + keyword="火锅"）仍正确使用 keyword 检索
+- 语义查询为空/空白的 guard clause 已由 `MilvusSemanticShopRetriever.recall()` line 42-43 覆盖
+
+### 验证
+
+新增 4 个测试；`MilvusSemanticShopRetrieverTest` 通过；`ConsumptionDecisionServiceTest` 26 项测试 0 failure、1 个既有 Mockito JDK 21 错误（`AiShopProfileMapper` mock，未改动）。

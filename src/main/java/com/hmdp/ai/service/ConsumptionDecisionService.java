@@ -819,7 +819,8 @@ public class ConsumptionDecisionService {
         query = removeToken(query, constraints == null ? null : constraints.getTargetArea());
         query = query.replaceAll("\\s+", " ").trim();
         if (hasText(query)) return query;
-        return constraints != null && hasText(constraints.getKeyword()) ? constraints.getKeyword() : request.getQuery();
+        if (constraints != null && hasText(constraints.getKeyword())) return constraints.getKeyword();
+        return "";
     }
 
     private String removeToken(String source, String token) {
@@ -852,11 +853,9 @@ public class ConsumptionDecisionService {
             item.getMatchedReasons().add("人均 " + shop.getAvgPrice() + " 元，符合预算");
         }
         if (profile != null && !constraints.getCuisine().isEmpty()) {
-            score += 20D;
             item.getMatchedReasons().add("菜系：" + profile.getCuisine());
         }
         if (requiresLightTasteEvidence(constraints) && hasLightTasteEvidence(documents)) {
-            score += 12D;
             item.getMatchedReasons().add("评价证据表明口味清淡");
         }
         if (profile != null && !constraints.getOccasion().isEmpty() && contains(profile.getSceneTags(), constraints.getOccasion())) {

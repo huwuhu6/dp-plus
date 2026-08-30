@@ -585,6 +585,90 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
+    void rankingOrderIsDeterminedByDifferentiatedFactorsNotConstantBonuses() {
+        // Both shops match cuisine 火锅 and budget 100, so cuisine (+20) and light taste (+12)
+        // are constant bonuses removed. The ordering must be based on differentiated factors:
+        // base rating, budget differentiation, occasion, quiet, queue, evidence.
+        Shop shopA = new Shop();
+        shopA.setId(1L);
+        shopA.setName("高分餐厅");
+        shopA.setScore(50);
+        shopA.setAvgPrice(60L);
+        shopA.setOpenHours("10:00-22:00");
+
+        Shop shopB = new Shop();
+        shopB.setId(2L);
+        shopB.setName("低分餐厅");
+        shopB.setScore(30);
+        shopB.setAvgPrice(90L);
+        shopB.setOpenHours("10:00-22:00");
+
+        AiShopProfile profile = new AiShopProfile();
+        profile.setShopId(1L);
+        profile.setCuisine("火锅");
+        profile.setSceneTags("约会");
+        profile.setAmbienceTags("安静");
+        profile.setQueueLevel("LOW");
+
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("火锅");
+        constraints.setBudgetPerPerson(100);
+        constraints.setOccasion("约会");
+        constraints.setQuiet(true);
+        constraints.setAvoidQueue(true);
+
+        DecisionRequest request = new DecisionRequest();
+
+        // Shop A: base=50/50*20=20, budget=20*(1-60/100*0.3)=16.4, occasion=+12, quiet=+12, queue=+8 = 68.4
+        DecisionRecommendation recA = ReflectionTestUtils.invokeMethod(service, "toRecommendation",
+                shopA, profile, Collections.emptyList(), request, constraints);
+        // Shop B: base=30/50*20=12, budget=20*(1-90/100*0.3)=14.6, occasion=+12, quiet=+12, queue=+8 = 58.6
+        DecisionRecommendation recB = ReflectionTestUtils.invokeMethod(service, "toRecommendation",
+                shopB, profile, Collections.emptyList(), request, constraints);
+
+        assertTrue(recA.getScore() > recB.getScore(),
+                "High-rated shop should rank higher than low-rated shop based on differentiated factors");
+        assertTrue(recA.getMatchedReasons().contains("菜系：火锅"),
+                "Cuisine matchedReasons should be preserved even without score bonus");
+        assertFalse(recA.getMatchedReasons().stream().anyMatch(r -> r.contains("口味清淡")),
+                "No light taste matchedReasons when constraint is not set");
+    }
+
+    @Test
+    void semanticRetrievalQueryReturnsEmptyWhenQueryIsOnlyGeographicToken() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("重庆");
+        request.setCity("重庆");
+
+        String query = ReflectionTestUtils.invokeMethod(service, "semanticRetrievalQuery",
+                request, constraints);
+
+        // After removing the city token "重庆", the query is empty.
+        // The original code fell back to request.getQuery() ("重庆"), which contains
+        // geographic tokens. After the fix, it returns empty string to let the
+        // MilvusSemanticShopRetriever guard clause handle it.
+        assertEquals("", query,
+                "semanticRetrievalQuery should return empty when query is only geographic tokens");
+    }
+
+    @Test
+    void semanticRetrievalQueryFallsBackToKeywordWhenQueryIsOnlyGeographic() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setKeyword("火锅");
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("重庆");
+        request.setCity("重庆");
+
+        String query = ReflectionTestUtils.invokeMethod(service, "semanticRetrievalQuery",
+                request, constraints);
+
+        // Keyword "火锅" should be preserved as the fallback semantic query
+        assertEquals("火锅", query,
+                "semanticRetrievalQuery should fall back to keyword when available");
+    }
+
+    @Test
     void exposesLocalRuleModeWhenModelIsNotConfigured() {
         DecisionResponse response = new DecisionResponse();
         DecisionMetrics metrics = new DecisionMetrics();
