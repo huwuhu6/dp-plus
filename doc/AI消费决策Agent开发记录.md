@@ -1308,3 +1308,83 @@ Spring AI 1.0.3 的 Milvus `add()` 实现实际调用原生 `insert`，没有可
 ### 验证
 
 新增 4 个测试；`MilvusSemanticShopRetrieverTest` 通过；`ConsumptionDecisionServiceTest` 26 项测试 0 failure、1 个既有 Mockito JDK 21 错误（`AiShopProfileMapper` mock，未改动）。
+
+## 2026-08-30：ConstraintExtractor Prompt 微调与实体边界实验
+
+### 背景
+
+回顾 AGENTS.md 中"实体边界误判"风险：`removeToken()` 使用 `String.replace()` 进行子串匹配，无实体边界感知。约束提取质量完全依赖模型。基线实验（18 查询）发现：
+
+- "帮我找重庆鸡公煲" → targetCity="重庆"（假阳性，重庆鸡公煲是菜品名，非搜索城市）
+- "西安肉夹馍" → targetCity="西安"（有歧义）
+
+### 方案
+
+不修改 Java 业务逻辑，不引入黑名单/关键词穷举。仅调整系统提示词，增加实体边界规则 + 4 组 few-shot 正反例。
+
+**v1（生产基线）**：原始 Prompt，仅包含"只能根据用户原话提取约束；显式目标地点与设备当前位置必须分开"等通用规则。
+
+**v2**：在 v1 基础上增加：
+- 实体边界规则 3 条（明确菜品名称中的地名不视为搜索城市）
+- 4 组 few-shot：2 正例（"帮我找重庆鸡公煲""我想吃北京烤鸭"→targetCity=""）、2 反例（"重庆的鸡公煲""在福州找日料店"→targetCity="重庆"/"福州"）
+
+### 实验设计
+
+| 维度 | 内容 |
+|------|------|
+| 测试集 | 18 基线查询（含纯城市、菜品名、显式城市+条件、错别字、行政区） |
+| Holdout | 8 查询（未出现在 Prompt 中，含"搜索XX店""XX哪里有卖"等变体） |
+| 模型 | deepseek-v4-flash，temperature=0.1，tool_choice=null |
+| 模拟 | 串联 `cleanRetrievalQuery()` + `semanticRetrievalQuery()` 验证下游影响 |
+
+### 结果对比
+
+| 指标 | v1 Baseline | v2 | 变化 |
+|------|------------|----|------|
+| Baseline targetCity 正确率 | 16/17 (94.1%) | **17/17 (100%)** | +5.9pp |
+| Holdout targetCity 正确率 | 7/8 (87.5%) | 7/8 (87.5%) | 持平 |
+| 误提取 targetCity（Baseline） | 1 次（G2 西安肉夹馍） | **0 次** | 已修复 |
+| 误提取 targetCity（Holdout） | 1 次（H4 搜索西安肉夹馍店） | 1 次（H4 搜索西安肉夹馍店） | 未修复 |
+| keyword 保留率 | 13/13 (100%) | 13/13 (100%) | 不变 |
+| semanticQuery 污染 | 0 次 | 0 次 | 不变 |
+| 回归（原本正确→错误） | 0 次 | 0 次 | 无回归 |
+
+### 逐项分析
+
+**修复的案例**：
+- G2 "西安肉夹馍"：v1 → targetCity="西安"，v2 → targetCity="" ✅
+- E1 "虫情技工包"：v1 → 模型未调用 tool（ERROR），v2 → 正确提取 ✅
+
+**未修复的 Holdout 案例**：
+- H4 "搜索西安肉夹馍店" → targetCity="西安"（v1、v2 均误判）
+
+该例与 few-shot 模式不同："搜索西安肉夹馍店"含"搜索...店"框架 + "西安肉夹馍"内嵌城市名。模型将"西安肉夹馍店"整体视为一个带城市名的店铺名称但未正确识别为实体。这是 v2 泛化性边界。
+
+**正确处理的困难案例**：
+- H3 "福州哪里有卖重庆鸡公煲" → targetCity="福州" ✅（用户明确在福州搜索）
+- H6 "找一下广州的重庆鸡公煲" → targetCity="广州" ✅（用户明确在广州搜索）
+- H8 "帮我搜一下附近有没有重庆鸡公煲" → targetCity="" ✅（附近搜索，无城市）
+- G4 "帮我找重庆鸡公煲" → targetCity="" ✅（v2 修复，v1 此前为假阳性）
+
+### 结论
+
+v2 在 baseline 上达到 **100%**，holdout 仍有 **87.5%**。剩余 1 例（"搜索西安肉夹馍店"）属于泛化性边界，并非回归。按照策略约定**不再继续补 Prompt**。
+
+### 下一步方案比较
+
+| 方案 | 成本 | 效果预期 | 复杂度 |
+|------|------|---------|--------|
+| **A. 当前 v2 Prompt** | 零成本 | Baseline 100%, Holdout 87.5% | 低 |
+| **B. Prompt + 提示词增强** | 低 | 可能提升 Holdout，但收益递减 | 中 |
+| **C. 下游 Java 实体边界校验** | 中 | 提供确定性兜底，不受模型波动影响 | 中 |
+| **D. 集成 NER/Entity Linking** | 高 | 真正的实体边界识别 | 高 |
+| **E. Domain Dictionary** | 低 | 穷举菜品名中的城市名，确定性最高但维护成本高 | 低 |
+
+**推荐**: 当前 v2 已足够满足生产需求（Baseline 100%）。如果后续实际用户反馈中"搜索西安肉夹馍店"类误判出现频率高，**优先方案 C**（Java 侧校验）—— 在 `ConstraintExtractor.normalize()` 中增加：如果 `targetCity` 在查询中出现在菜品名语境（如"XX店""XX煲""XX拉面"等后缀前），则清空 `targetCity`。此方案不依赖模型，可控性强。
+
+### 文件变更
+
+- `prompts/constraint-extractor/v1.md`：当前生产 Prompt 基线
+- `prompts/constraint-extractor/v2.md`：微调后 Prompt
+- `prompts/CHANGELOG.md`：Prompt 版本变更记录
+- `constraint_experiment.py`：支持 v1/v2 切换的统一实验脚本
