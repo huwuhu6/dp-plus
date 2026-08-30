@@ -37,7 +37,9 @@ import com.hmdp.mapper.ShopMapper;
 import com.hmdp.utils.UserHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.ai.chat.client.ChatClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,6 +63,9 @@ public class ConsumptionDecisionService {
     @Resource private AiModelCallTracker modelCallTracker;
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private SpringAiTextClient springAiTextClient;
+    @Resource
+    @Qualifier("lightweightChatClient")
+    private ChatClient lightweightChatClient;
     @Resource private AiProperties aiProperties;
     @Resource private ObjectMapper objectMapper;
     @Resource private ShopMapper shopMapper;
@@ -901,7 +906,7 @@ public class ConsumptionDecisionService {
             List<Map<String, Object>> messages = new ArrayList<>();
             messages.add(message("system", "你是消费决策助手。仅输出一到两句泛化的取舍建议，不得出现店名、数字、价格、距离、地址、营业时间、评分、证据原文或未提供的事实。"));
             messages.add(message("user", "用户需求：" + query + "\n已满足的偏好：" + objectMapper.writeValueAsString(items.get(0).getMatchedReasons())));
-            String generated = springAiTextClient.chatText(messages, "NARRATIVE_GENERATION").trim();
+            String generated = springAiTextClient.chatText(messages, "NARRATIVE_GENERATION", lightweightChatClient).trim();
             if (isSafeNarrative(generated, items)) {
                 narrative = generated;
                 log.info("[AI][session={}] state=ANSWERING action=MODEL_NARRATIVE_ACCEPTED", sessionId);

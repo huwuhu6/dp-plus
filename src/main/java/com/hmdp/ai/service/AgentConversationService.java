@@ -35,6 +35,8 @@ import com.hmdp.utils.UserHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 
 import jakarta.annotation.Resource;
 import java.util.ArrayList;
@@ -55,6 +57,9 @@ public class AgentConversationService {
     @Resource private AgentToolRegistry toolRegistry;
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private SpringAiTextClient springAiTextClient;
+    @Resource
+    @Qualifier("lightweightChatClient")
+    private ChatClient lightweightChatClient;
     @Resource private SpringAiToolPlanner springAiToolPlanner;
     @Resource private ToolExecutionOrchestrator toolExecutionOrchestrator;
     @Resource private ToolResultCompressor toolResultCompressor;
@@ -443,7 +448,7 @@ public class AgentConversationService {
             String answer = springAiTextClient.chatText(java.util.Arrays.asList(
                     message("system", "你是点评消费决策助手。基于已检索到的事实，用简洁自然的中文回答用户。不得补充、猜测或改写任何事实；证据不足时直接说明。"),
                     message("user", "用户问题：" + userMessage + "\n已检索事实：\n" + factualAnswer)),
-                    "AGENT_ANSWER_POLISH", aiProperties.getAnswerPolishTimeoutMs()).trim();
+                    "AGENT_ANSWER_POLISH", lightweightChatClient).trim();
             if (!answer.isEmpty()) {
                 log.info("[AI][agent] event=ANSWER_POLISH_SUCCESS query={} answer={}", compact(userMessage), compact(answer));
                 return answer;

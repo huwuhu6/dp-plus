@@ -1,0 +1,407 @@
+{
+  "narrative": [
+    {
+      "id": "N1",
+      "scenario": "正常推荐，多理由",
+      "query": "重庆适合约会的日料店",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "重庆约会选日料，优先考虑环境私密、适合交谈的餐厅，但需注意部分热门店的菜品可能偏大众化，若追求精致体验可适当放宽距离限制。",
+        "latency_ms": 9807,
+        "prompt_tokens": 92,
+        "completion_tokens": 94,
+        "error": null,
+        "safe_check": {
+          "passed": false,
+          "reason": "contains '距离'"
+        }
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "选择氛围温馨、灯光柔和的日料店，更利于营造私密亲密的约会氛围。优先考虑布局疏密有致、座位间距合理的空间设计。",
+        "latency_ms": 5215,
+        "prompt_tokens": 103,
+        "completion_tokens": 34,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      }
+    },
+    {
+      "id": "N2",
+      "scenario": "多候选取舍，预算优先",
+      "query": "福州性价比高的安静餐厅",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "选择闽菜餐厅时，可优先考虑环境安静、性价比高的店铺，但需注意部分热门菜品可能因专注特色而减少选择多样性。",
+        "latency_ms": 6677,
+        "prompt_tokens": 83,
+        "completion_tokens": 102,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "在预算与环境兼顾的前提下，优先选择以本地风味为主、客流量适中的餐厅，既能体验地道闽菜，又能保证用餐安静舒适。",
+        "latency_ms": 5187,
+        "prompt_tokens": 94,
+        "completion_tokens": 32,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      }
+    },
+    {
+      "id": "N3",
+      "scenario": "特征极少，仅菜系",
+      "query": "日料",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "建议优先选择食材新鲜、口碑稳定的店铺，同时根据预算平衡套餐与单点的搭配。",
+        "latency_ms": 6555,
+        "prompt_tokens": 61,
+        "completion_tokens": 62,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "在日料选择中，可优先考虑食材新鲜度与料理手法的正宗性，兼顾口味偏好与用餐体验的平衡。",
+        "latency_ms": 5195,
+        "prompt_tokens": 72,
+        "completion_tokens": 28,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      }
+    },
+    {
+      "id": "N4",
+      "scenario": "仅距离+评分",
+      "query": "附近有什么吃的",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "在已满足距离和基础评分的前提下，可根据个人口味偏好或性价比进一步筛选。",
+        "latency_ms": 8056,
+        "prompt_tokens": 69,
+        "completion_tokens": 219,
+        "error": null,
+        "safe_check": {
+          "passed": false,
+          "reason": "contains '距离'"
+        }
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "根据您的位置和基础评分，建议选择评价较为均衡、口碑稳定的餐饮类型，兼顾口味与用餐体验。",
+        "latency_ms": 5213,
+        "prompt_tokens": 81,
+        "completion_tokens": 24,
+        "error": null,
+        "safe_check": {
+          "passed": false,
+          "reason": "contains '评分'"
+        }
+      }
+    },
+    {
+      "id": "N5",
+      "scenario": "自动松弛后推荐",
+      "query": "重庆日料",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "建议优先考虑交通便利性，或根据用餐场景（如商务或休闲）调整对距离和评分的权衡。",
+        "latency_ms": 6776,
+        "prompt_tokens": 106,
+        "completion_tokens": 103,
+        "error": null,
+        "safe_check": {
+          "passed": false,
+          "reason": "contains '距离'"
+        }
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "在扩大搜索范围后，可优先考虑交通便利且评价稳定的日料门店，兼顾口味与用餐体验的平衡。",
+        "latency_ms": 5099,
+        "prompt_tokens": 118,
+        "completion_tokens": 26,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      }
+    },
+    {
+      "id": "N6",
+      "scenario": "长匹配理由，多条件",
+      "query": "预算150以内安静的约会餐厅",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "这家餐厅在预算和约会氛围上表现不错，安静的环境适合深度交流，不过西餐类可能需留意菜单价格以控制总花费。",
+        "latency_ms": 5984,
+        "prompt_tokens": 105,
+        "completion_tokens": 71,
+        "error": null,
+        "safe_check": {
+          "passed": false,
+          "reason": "contains '价格'"
+        }
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "在预算范围内选择西餐餐厅时，优先考虑环境安静、适合深度交流的场所，兼顾菜品品质与用餐氛围的平衡。",
+        "latency_ms": 5304,
+        "prompt_tokens": 119,
+        "completion_tokens": 29,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      }
+    },
+    {
+      "id": "N7",
+      "scenario": "仅有 1 家候选，SPARSE 模式",
+      "query": "广州日料",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "建议直接体验这家商户，但若对日料口味或环境有更细致的要求，不妨放宽筛选条件以获取更多选择。",
+        "latency_ms": 6735,
+        "prompt_tokens": 88,
+        "completion_tokens": 114,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "在仅有的选择中，优先考虑菜品新鲜度与用餐体验的平衡。若对食材品质有较高要求，可适当放宽对其他因素的考量。",
+        "latency_ms": 5141,
+        "prompt_tokens": 100,
+        "completion_tokens": 34,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      }
+    },
+    {
+      "id": "N8",
+      "scenario": "非餐饮场景，场景匹配",
+      "query": "找个安静的地方看书",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "选择以阅读氛围为主的场所，避免社交属性较强的环境，更能保证安静专注的体验。",
+        "latency_ms": 6841,
+        "prompt_tokens": 76,
+        "completion_tokens": 87,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "选择环境安静且氛围宜人的场所，更利于专注阅读。避免人流密集或嘈杂区域，优先考虑空间布局私密、干扰少的区域。",
+        "latency_ms": 5222,
+        "prompt_tokens": 88,
+        "completion_tokens": 34,
+        "error": null,
+        "safe_check": {
+          "passed": true,
+          "reason": "pass"
+        }
+      }
+    }
+  ],
+  "polish": [
+    {
+      "id": "P1",
+      "scenario": "单店详情查询，简短事实",
+      "userMessage": "山崎日本料理怎么样",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "山崎日本料理位于重庆市渝中区解放碑步行街，人均280元，评分4.5，营业时间11:00-22:00。",
+        "latency_ms": 6238,
+        "prompt_tokens": 91,
+        "completion_tokens": 83,
+        "error": null
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "山崎日本料理位于重庆市渝中区解放碑步行街，人均消费280元，评分4.5分，营业时间是11:00至22:00。",
+        "latency_ms": 5361,
+        "prompt_tokens": 107,
+        "completion_tokens": 42,
+        "error": null
+      }
+    },
+    {
+      "id": "P2",
+      "scenario": "商户对比，结构化事实",
+      "userMessage": "山崎日本料理和井上日料哪个更合适",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "根据现有信息，山崎日本料理（人均280元，评分4.5）价格更高、评分也更高；井上日料（人均180元，评分4.2）更实惠。但“更合适”取决于你的预算、距离和用餐场景（如请客或日常聚餐），目前没有这些信息，无法直接判断。",
+        "latency_ms": 6912,
+        "prompt_tokens": 139,
+        "completion_tokens": 142,
+        "error": null
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "根据现有信息，山崎日本料理人均280元，评分4.5；井上日料人均180元，评分4.2。若你预算充足且更看重评分与品质，山崎可能更合适；若注重性价比、预算有限，井上日料更优。具体选择还需结合你的距离偏好和用餐场景。",
+        "latency_ms": 5687,
+        "prompt_tokens": 161,
+        "completion_tokens": 76,
+        "error": null
+      }
+    },
+    {
+      "id": "P3",
+      "scenario": "证据不足，无评价",
+      "userMessage": "这家店有包间吗",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "抱歉，目前没有找到关于这家店是否有包间的信息，无法确认。",
+        "latency_ms": 6490,
+        "prompt_tokens": 63,
+        "completion_tokens": 68,
+        "error": null
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "无法确认这家店是否有包间。",
+        "latency_ms": 4905,
+        "prompt_tokens": 74,
+        "completion_tokens": 8,
+        "error": null
+      }
+    },
+    {
+      "id": "P4",
+      "scenario": "长事实输入，多工具结果拼接",
+      "userMessage": "帮我查一下这几家店的详细信息",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "根据检索到的信息，以下是两家店的详细信息：\n\n**山崎日本料理**  \n- 人均：280元  \n- 评分：4.5  \n- 营业时间：11:00-22:00  \n- 地址：重庆市渝中区解放碑步行街  \n- 距离：1.2km  \n- 评价：食材新鲜，三文鱼入口即化；环境安静，适合约会。\n\n**井上日料**  \n- 人均：180元  \n- 评分：4.2  \n- 营业时间：10:00-21:30  \n- 地址：重庆市江北区观音桥步行街  \n- 距离：0.8km  \n- 评价：价格适中，性价比高。\n\n目前只查到这两家店的信息，没有其他店铺的详情。",
+        "latency_ms": 8042,
+        "prompt_tokens": 216,
+        "completion_tokens": 257,
+        "error": null
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "山崎日本料理：人均280元，评分4.5，营业时间11:00-22:00，地址位于重庆市渝中区解放碑步行街，距离约1.2km。  \n井上日料：人均180元，评分4.2，营业时间10:00-21:30，地址位于重庆市江北区观音桥步行街，距离约0.8km。  \n\n参考评价：食材新鲜，三文鱼入口即化；环境安静，适合约会；价格适中，性价比高。",
+        "latency_ms": 5734,
+        "prompt_tokens": 249,
+        "completion_tokens": 123,
+        "error": null
+      }
+    },
+    {
+      "id": "P5",
+      "scenario": "含具体时间数字",
+      "userMessage": "山崎日本料理营业到几点",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "山崎日本料理的营业时间是 11:00 到 22:00。",
+        "latency_ms": 6030,
+        "prompt_tokens": 93,
+        "completion_tokens": 45,
+        "error": null
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "山崎日本料理的营业时间是11:00-22:00。",
+        "latency_ms": 5079,
+        "prompt_tokens": 109,
+        "completion_tokens": 20,
+        "error": null
+      }
+    },
+    {
+      "id": "P6",
+      "scenario": "预算限制查询",
+      "userMessage": "人均150以内有什么推荐",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "抱歉，根据已检索到的信息，井上日料人均180元，超出150元预算，暂无其他符合条件的推荐。",
+        "latency_ms": 5948,
+        "prompt_tokens": 100,
+        "completion_tokens": 68,
+        "error": null
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "根据现有信息，暂无人均150元以内的推荐。井上日料人均180元，超出预算。",
+        "latency_ms": 5137,
+        "prompt_tokens": 119,
+        "completion_tokens": 28,
+        "error": null
+      }
+    },
+    {
+      "id": "P7",
+      "scenario": "优惠券查询",
+      "userMessage": "这家店有什么优惠券",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "山崎日本料理目前有以下优惠券：\n\n- **工作日午市套餐**：8折优惠，有效期至2026年9月30日。\n- **满200减30**：优惠券，有效期至2026年9月15日。\n- **秒杀**：库存50份。",
+        "latency_ms": 6876,
+        "prompt_tokens": 106,
+        "completion_tokens": 101,
+        "error": null
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "这家店目前有以下优惠券：\n\n1. 工作日午市套餐 8 折优惠，有效期至 2026年9月30日。\n2. 满 200 减 30 优惠券，有效期至 2026年9月15日，仅剩 50 份秒杀库存。",
+        "latency_ms": 5824,
+        "prompt_tokens": 129,
+        "completion_tokens": 80,
+        "error": null
+      }
+    },
+    {
+      "id": "P8",
+      "scenario": "多轮上下文，备选+证据",
+      "userMessage": "刚才那家日料店的评价怎么样",
+      "model_a": {
+        "model": "deepseek-v4-flash",
+        "content": "井上日料性价比高，环境一般但味道不错，不过高峰期需要排队。",
+        "latency_ms": 6382,
+        "prompt_tokens": 121,
+        "completion_tokens": 73,
+        "error": null
+      },
+      "model_b": {
+        "model": "qwen-flash",
+        "content": "这家日料店评分4.2，人均180元，有顾客评价性价比很高，经常来；环境一般，但味道不错；高峰期需要排队。",
+        "latency_ms": 5335,
+        "prompt_tokens": 144,
+        "completion_tokens": 35,
+        "error": null
+      }
+    }
+  ],
+  "summary": {}
+}

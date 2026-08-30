@@ -1388,3 +1388,66 @@ v2 在 baseline 上达到 **100%**，holdout 仍有 **87.5%**。剩余 1 例（"
 - `prompts/constraint-extractor/v2.md`：微调后 Prompt
 - `prompts/CHANGELOG.md`：Prompt 版本变更记录
 - `constraint_experiment.py`：支持 v1/v2 切换的统一实验脚本
+
+## 2026-08-30：叙事生成与答案润色降级到 qwen-flash
+
+### 背景
+
+项目有两个"事实→自然语言转换"的 LLM 调用，均使用 `deepseek-v4-flash`：
+- **叙事生成**（`ConsumptionDecisionService.generateAnswer()`）：将 `matchedReasons` 结构化数据转为 1-2 句泛化取舍建议
+- **答案润色**（`AgentConversationService.polishAnswer()`）：将工具执行的原始拼接文本润色为自然语言回答
+
+这两个任务不涉及复杂推理或结构化输出，属于轻量文本生成。项目已有 `qwen-flash` 配置（用于路由和查询重写），成本更低、延迟更优。
+
+### A/B 实验设计
+
+构造 8 个叙事生成样本 + 8 个答案润色样本，覆盖正常推荐、多候选取舍、证据不足、长输入、边界场景等。固定相同 Prompt、temperature=0.1，分别调用 `deepseek-v4-flash` 和 `qwen-flash`。
+
+### 实验结果
+
+#### 叙事生成
+
+| 指标 | deepseek-v4-flash | qwen-flash | 差异 |
+|------|-------------------|------------|------|
+| 内容安全通过率（safe_check） | 4/8 (50%) | **7/8 (87.5%)** | qwen 更符合约束 |
+| 延迟 P50 | 6776ms | **5213ms** | -23% |
+| 延迟 P95 | 9807ms | **5304ms** | -46% |
+| Token 总量 | 1532 | **1016** | -34% |
+| 失败率 | 0/8 | 0/8 | 持平 |
+
+deepseek-v4-flash 在 4/8 样本中输出了禁止词（"距离""评分""价格"），触发了 `isSafeNarrative` 拒绝。qwen-flash 的回复更抽象泛化，更符合 Prompt 要求。**在这个受强约束、要求高度抽象化的任务上，轻量模型反而更符合 Prompt 约束。**
+
+#### 答案润色
+
+| 指标 | deepseek-v4-flash | qwen-flash | 差异 |
+|------|-------------------|------------|------|
+| 事实一致性 | 全部保留 | 全部保留 | 持平 |
+| 幻觉 | 0 次 | 0 次 | 持平 |
+| 长输入截断 | ⚠️ P4 截断 | ✅ 完整 | qwen 更稳定 |
+| 延迟 P50 | 6490ms | **5361ms** | -17% |
+| 延迟 P95 | 8042ms | **5824ms** | -28% |
+| Token 总量 | 1766 | **1504** | -15% |
+| 失败率 | 0/8 | 0/8 | 持平 |
+
+两者均未产生幻觉。deepseek 在长输入（P4）输出被截断，qwen 完整输出。
+
+### 方案
+
+两个任务均降级到 `qwen-flash`。叙事生成收益明确（内容安全通过率大幅提升，延迟/Token 下降），答案润色无质量回退且长文本更稳定。
+
+**改动**：
+- `AiProperties.java`：新增 `LightweightProperties` 配置段（model 默认 `qwen-flash`，baseUrl/apiKey 默认复用主模型）
+- `application.yaml`：新增 `ai.lightweight` 配置段，支持环境变量覆盖
+- `AgentChatClientConfig.java`：新增 `lightweightChatClient` bean
+- `SpringAiTextClient.java`：新增 `chatText(messages, action, ChatClient)` 重载，支持指定客户端
+- `ConsumptionDecisionService.java`：叙事生成使用 `lightweightChatClient`
+- `AgentConversationService.java`：答案润色使用 `lightweightChatClient`
+
+**保留**：
+- 原有 `narrativeEnabled` 开关不变，可一键关闭所有叙事生成
+- 两个调用在模型失败时均有 fallback（叙事→默认措辞，润色→返回原始事实），不受影响
+- 主模型配置 `deepseek-v4-flash` 不变，仅影响叙事和润色
+
+### 测试
+
+`ConsumptionDecisionServiceTest` 26 项 + `AgentConversationServiceTest` 7 项：0 failure、0 新 error。1 个既有 Mockito JDK 21 错误未改动。

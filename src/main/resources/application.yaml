@@ -85,6 +85,12 @@ ai:
     api-key: ${AI_ROUTING_API_KEY:${DASHSCOPE_API_KEY:}}
     model: ${AI_ROUTING_MODEL:qwen-flash}
     timeout-ms: ${AI_ROUTING_TIMEOUT_MS:4000}
+  lightweight:
+    provider: ${AI_LIGHTWEIGHT_PROVIDER:dashscope}
+    base-url: ${AI_LIGHTWEIGHT_BASE_URL:${ai.base-url}}
+    api-key: ${AI_LIGHTWEIGHT_API_KEY:${ai.api-key}}
+    model: ${AI_LIGHTWEIGHT_MODEL:qwen-flash}
+    timeout-ms: ${AI_LIGHTWEIGHT_TIMEOUT_MS:8000}
   query-rewrite:
     enabled: ${AI_QUERY_REWRITE_ENABLED:true}
     provider: ${AI_QUERY_REWRITE_PROVIDER:dashscope}

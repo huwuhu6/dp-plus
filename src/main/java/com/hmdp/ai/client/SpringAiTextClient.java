@@ -27,6 +27,9 @@ public class SpringAiTextClient {
     @Resource
     @Qualifier("agentChatClient")
     private ChatClient chatClient;
+    @Resource
+    @Qualifier("lightweightChatClient")
+    private ChatClient lightweightChatClient;
     @Resource private AiProperties aiProperties;
     @Resource private AiModelCallTracker modelCallTracker;
 
@@ -54,6 +57,33 @@ public class SpringAiTextClient {
 
     public String chatText(List<Map<String, Object>> rawMessages, String action, Integer timeoutMs) {
         return chatText(rawMessages, action);
+    }
+
+    /**
+     * Calls a specific ChatClient (not the default agentChatClient).
+     * Used by narrative generation and answer polish to route through the lightweight model.
+     */
+    public String chatText(List<Map<String, Object>> rawMessages, String action, ChatClient chatClient) {
+        long startedAt = System.currentTimeMillis();
+        String modelName = aiProperties.getLightweight().getModel();
+        log.info("[AI][spring-ai] action={} model={} messages={} event=REQUEST", action,
+                modelName, rawMessages == null ? 0 : rawMessages.size());
+        try {
+            ChatResponse response = chatClient.prompt().messages(toMessages(rawMessages)).call().chatResponse();
+            String content = response == null || response.getResult() == null ? null : response.getResult().getOutput().getText();
+            if (content == null || content.isBlank()) {
+                throw new IllegalStateException("Model did not return text content");
+            }
+            modelCallTracker.recordSuccess(promptTokens(response), completionTokens(response));
+            log.info("[AI][spring-ai] action={} model={} event=SUCCESS durationMs={} chars={}", action,
+                    modelName, System.currentTimeMillis() - startedAt, content.length());
+            return content;
+        } catch (RuntimeException e) {
+            modelCallTracker.recordFailure();
+            log.warn("[AI][spring-ai] action={} model={} event=FAILURE durationMs={} errorType={}", action,
+                    modelName, System.currentTimeMillis() - startedAt, e.getClass().getSimpleName());
+            throw e;
+        }
     }
 
     /**
