@@ -25,6 +25,7 @@ retrieval_tags_ab_embeddings.json
 retrieval_tags_ab_profile_embeddings.json
 .ab-baseline/
 retrieval_ablation_reports/
+retrieval_tags_ab_query_embeddings.json
 
 ### NetBeans ###
 /nbproject/private/

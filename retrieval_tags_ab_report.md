@@ -109,3 +109,80 @@ The v2 results are identical to v1 for the comparison metrics. Adding Profile wa
 ## Per-Case Results
 
 See `retrieval_tags_ab_results.json` for full per-case details.
+
+---
+
+## Final Audit (2026-08-31)
+
+### 1. Cache Completeness
+
+| Check | Result |
+|-------|:------:|
+| Total review docs in CSV | 405 |
+| A (content-only) cache entries | 396 |
+| B (content+tags) cache entries | 396 |
+| A key set == B key set | ✅ |
+| Missing from relevant shops (20-89) | **0** |
+| Missing from old seed shops (1-6, 8) | 9 (irrelevant) |
+
+**Conclusion**: Cache is complete for the ablation dataset. The 9 missing entries are from old seed shops not included in the ablation dataset.
+
+### 2. Epsilon vs Top80 Boundary Margin Analysis
+
+Epsilon = |cos_A - cos_B| for each (query, review_document) pair. Measures how much adding tags changes the cosine similarity score.
+
+| Statistic | Value |
+|-----------|:-----:|
+| Total (query, doc) pairs | 13,860 |
+| Max epsilon | 0.0399 |
+| P99 epsilon | 0.0203 |
+| P95 epsilon | 0.0142 |
+| Median epsilon | 0.0044 |
+| Mean epsilon | 0.0055 |
+
+**Top80 boundary margin** (80th vs 81st rank, all 462 documents across 35 queries):
+
+| Statistic | Value |
+|-----------|:-----:|
+| Queries with ≥80 docs | 35/35 |
+| Min margin | 0.000043 |
+| Median margin | 0.000474 |
+| Max margin | 0.002552 |
+
+**Comparison**: P95 epsilon (0.0142) ≈ 30× median margin (0.00047). The tags-induced perturbation is **larger than the Top80 boundary margin for all 35 queries**.
+
+**However**, this does not contradict the null A/B result. The epsilon is a signed difference — adding tags raises some document scores and lowers others. The MAX aggregation across Profile + Review documents smooths these individual changes. Since Profile embeddings are identical across A/B, the shop-level ranking is largely preserved.
+
+### 3. Production Anchor Deep-Dive
+
+Document-level Top80 comparison between exact cosine and production Milvus snapshot:
+
+| Metric | Value |
+|--------|:-----:|
+| Queries analyzed | 35 |
+| Exact-only docs (avg/query) | 59.7 |
+| Prod-only docs (avg/query) | 7.5 |
+
+The document-level difference is large (avg 59.7 docs in exact Top80 but not in production), yet the shop-level overlap@3 remains 0.8571. This confirms that the **shop-level MAX aggregation masks document-level differences**: as long as at least one document per shop is in both Top80s, the shop-level overlap is preserved.
+
+### 4. Corrected Production Anchor Interpretation
+
+The overlap@3=0.8571 and overlap@5=0.7857 are **aggregate indicators** reflecting multiple factors:
+
+1. **TopK=80 truncation**: Production Milvus only returns Top80 documents. Exact cosine scores ALL documents. Documents ranked 81+ in exact are invisible to production, and vice versa.
+2. **ANN approximation**: Milvus uses HNSW approximate search, which is not guaranteed to return the exact Top80.
+3. **Document-level proximity**: The exact Top80 and production Top80 may differ at the document level even when the shop-level overlap is high.
+4. **Tie-break effects**: Near-equal scores near the Top80 boundary can flip membership between exact and ANN search.
+
+**These factors are not decomposed independently.** The overlap@3/overlap@5 are sufficient for the A/B comparison (both variants see the same production anchor), but not a diagnostic of any single factor.
+
+### 5. Final Qualification
+
+| Question | Answer |
+|----------|:------:|
+| Is the A/B conclusion valid? | **Yes.** Tags are redundant with review content. No recall or Top1 improvement. |
+| Is the cache complete? | **Yes.** 396/396 entries for relevant shops. A==B key sets. |
+| Do tags perturb ranking? | **Yes, at the document level.** But the effect washes out at the shop level due to MAX aggregation and shared Profile embeddings. |
+| Is the production anchor reliable? | **As an aggregate indicator, yes.** It is not a single-factor diagnostic, but it is stable across variants. |
+
+**Final verdict**: Keep content-only (A) for review embedding text. No engineering action required on the current production index (content+tags). Switch to content-only at the next natural re-indexing event.

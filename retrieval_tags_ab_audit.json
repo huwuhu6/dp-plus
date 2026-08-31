@@ -1,0 +1,36 @@
+{
+  "cache_completeness": {
+    "total_review_docs_in_csv": 405,
+    "cache_review_docs": 396,
+    "a_count": 396,
+    "b_count": 396,
+    "a_key_set_eq_b_key_set": true,
+    "complete_for_relevant_shops": true,
+    "note": "9 missing review docs are from old seed shops (IDs 1-6,8) not in the ablation dataset. Cache is complete for shops 20-89."
+  },
+  "epsilon_distribution": {
+    "total_pairs": 13860,
+    "max": 0.039863,
+    "p99": 0.0203,
+    "p95": 0.014245,
+    "median": 0.004436,
+    "mean": 0.00547
+  },
+  "top80_margin": {
+    "queries_with_80_plus_docs": 35,
+    "min_margin": 0.00096,
+    "max_margin": 6.7e-05,
+    "median_margin": 0.000474,
+    "mean_margin": 0.000619,
+    "risk_assessment": "moderate",
+    "risk_detail": "P95 epsilon >= median margin: tags may affect Top80 membership in some queries"
+  },
+  "production_anchor": {
+    "total_queries": 35,
+    "exact_more_docs_total": 2088,
+    "prod_more_docs_total": 264,
+    "avg_exact_only_per_query": 59.7,
+    "avg_prod_only_per_query": 7.5,
+    "interpretation": "The overlap@3/overlap@5 aggregate multiple factors: TopK=80 truncation, ANN approximation, document-level proximity, and tie-break effects. This experiment does not decompose them independently."
+  }
+}

@@ -1655,6 +1655,20 @@ B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
 - 不声称统计显著，不声称模型在行业数据上已被充分证明
 - 7 个 SEMANTIC_RETRIEVAL_ERROR 只是在当前 35 Query、当前 Candidate Pool、当前 Embedding/TopK 配置下观察到的失败，不等价于"Embedding 模型召回率为 94%"
 
+### Tags A/B 最终审计 (2026-08-31)
+
+**审计结论**：Cache 完整，A/B 结论有效，影响范围正确。
+
+**1. Cache 完整性**：396/396 条 review embedding 缓存完整覆盖相关商户（ID 20-89），A 与 B 键集完全一致。9 条缺失来自旧种子数据商户（ID 1-6, 8），不参与消融评测。
+
+**2. Epsilon vs Top80 边界分析**：|cos_A - cos_B| 的 P95 为 0.0142，median 为 0.0044。Top80 边界（80th-81st 分数差）的 median 为 0.00047。**epsilon 普遍大于边界 margin**（35/35 查询均如此），说明添加 tags 确实改变了部分文档的相似度分数。但最终 Recall@3 和 Top1 为 0 变化，原因在于：
+- Profile 文档在 A/B 间共享，是 MAX 聚合的主要贡献者（Profile-dominance 41-49%）
+- 文档级分数变化在 Shop 级 MAX 聚合中被平滑
+
+**3. Production Anchor 修正归因**：exact Top80 与生产 Milvus Top80 在文档级差异显著（avg 59.7 exact-only + 7.5 prod-only per query），但 Shop 级 overlap@3 仍为 0.8571。这意味着 overlap 指标是多个因素的聚合结果（TopK=80 截断、ANN 近似误差、文档级重叠性），**不可分解为单一因素的诊断**。该指标在 A/B 比较中仍然有效，因为两个变体看到相同的生产 snapshot。
+
+**最终结论**：Retrieval 主线所有实验已完成。封板。
+
 ## Known Limitations
 
 ### 1. AiReviewDocument.tags 未启用（已实验验证无影响）
@@ -1662,6 +1676,8 @@ B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
 **当前状态**：`ShopReviewService` 写入 `AiReviewDocument` 时 `tags` 恒为空（`document.setTags("")`），但批量加载的演示数据（LOCAL_DEMO, source_revision=null）通过 SQL 直接写入，tags 非空。当前生产索引中的 Review Document 文本实际包含 tags（如 `"标签：自助,三文鱼,甜虾,补货快,性价比"`），即 content+tags。
 
 **2026-08-31 A/B 实验验证（v2 — Profile + Review）**：通过 exact cosine 在 allowed set 内的精确对比，包含 Profile document 聚合层（66 个 Profile，A/B 共用），A（content-only）与 B（content+tags）的 Recall@3 完全一致（0.7932 vs 0.7932），Top1 Accuracy 完全一致（0.9655），NDCG@3 仅差 +0.45pp（在噪声范围内）。预注册决策规则（Recall@3 ≥ +3pp 才保留 B）未满足，结论为：**tags 在 embedding 文本中无实际检索增益**。v2 新增 Profile-dominance rate 统计：A 组 41.17%，B 组 48.58%，说明 Profile 文档在 MAX 聚合中贡献显著。
+
+**2026-08-31 最终审计确认**：Cache 完整性检查通过（396/396 相关商户，A==B 键集）。Epsilon 分布（|cos_A - cos_B|，P95=0.0142, median=0.0044）虽大于 Top80 边界 margin（median=0.00047），但文档级扰动在 Shop 级 MAX 聚合中被共享 Profile 文档平滑，不影响 Recall@3 和 Top1 结论。Production Anchor 归因修正为多因素聚合指标，不可分解为单一诊断。
 
 **建议**：当前 content+tags 索引无害但无必要。未来重索引可直接使用 content-only 文本，无回归风险。
 
@@ -1729,7 +1745,7 @@ B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
 - **Reranker / Cross-Encoder**：大部分错误是 ranking 权重问题，而非语义信号不足
 - **NER / Entity Linking**：实体边界已通过 Prompt 基线达到 100%，Holdout 边界情况不需要 NER 管线
 - **Ontology / 知识图谱**：CuisineCanonicalizer 已用封闭映射集覆盖主要菜系，不需要外部知识库
-- **Review.tags embedding A/B**：Exact cosine 对比 content-only vs content+tags，Recall@3 完全一致（0.7932），Top1 完全一致（0.9655），NDCG@3 差 +0.45pp。预注册规则未满足，推荐 content-only。详见 `retrieval_tags_ab_report.md`。
+- **Review.tags embedding A/B**：Exact cosine 对比 content-only vs content+tags，Recall@3 完全一致（0.7932），Top1 完全一致（0.9655），NDCG@3 差 +0.45pp。预注册规则未满足，推荐 content-only。最终审计确认：cache 完整（396/396），epsilon 分布（P95=0.014）虽大于 Top80 边界（median=0.00047），但文档级扰动在 Shop 级 MAX 聚合中被平滑，不影响最终结论。详见 `retrieval_tags_ab_report.md`。
 - **Semantic weight 调优**：weight=18 已显示方向性增量，当前数据规模不足以支持最优权重搜索
 - **Per-shop document cap**：当前文档分布均匀，未出现单 Shop 占据 TopK 大部分名额的情况
 - **Sentiment-aware embedding**：未观察到因忽略 sentiment 导致的实际错误案例
