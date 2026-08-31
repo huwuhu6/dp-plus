@@ -22,6 +22,7 @@ target/
 # Generated data files (not source)
 retrieval_ablation_reviews.csv
 retrieval_tags_ab_embeddings.json
+retrieval_tags_ab_profile_embeddings.json
 .ab-baseline/
 retrieval_ablation_reports/
 

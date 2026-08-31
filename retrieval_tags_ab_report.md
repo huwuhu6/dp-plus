@@ -1,17 +1,20 @@
-# Review Embedding Content-only vs Content+Tags A/B Report
+# Review Embedding Content-only vs Content+Tags A/B Report (v2 — Profile + Review)
 
 ## Experiment Info
 - **Date**: 2026-08-31
 - **Dataset**: ablation-v1 (35 cases)
-- **Method**: Exact cosine over allowed set (NOT ANN)
+- **Method**: Exact cosine over allowed set (Profile + Review, MAX aggregation across all document types)
 - **Ground Truth**: 105 shops (grade ≥ 2) across 35 queries
+- **Profile documents**: 66 (shared, fixed across A/B)
 
 ## Two Variants
 
-| Variant | Embedding Text | Description |
-|---------|----------------|-------------|
-| A (content-only) | `商户：{name}。评价证据：{content}。标签：` | Tags stripped from text |
-| B (content+tags) | `商户：{name}。评价证据：{content}。标签：{tags}` | Tags included (matches current production index) |
+| Variant | Profile Text | Review Text | Description |
+|---------|-------------|-------------|-------------|
+| A (content-only) | Production `profileDocument()` | `商户：{name}。评价证据：{content}。标签：` | Tags stripped from review text |
+| B (content+tags) | Same as A (identical) | `商户：{name}。评价证据：{content}。标签：{tags}` | Tags included in review text |
+
+**Only variable**: Review embedding text tags. Profile embeddings are identical across A/B.
 
 ## Core Metrics
 
@@ -34,12 +37,23 @@
 | SEMANTIC_THRESHOLD_ERROR | 0 | 0 |
 | RANKING_ERROR | 36 | 36 |
 
+## Profile-dominance Rate
+
+| Variant | Rate | Meaning |
+|---------|:----:|---------|
+| A | 41.17% | In 41% of (query, shop) pairs, Profile document won the MAX aggregation |
+| B | 48.58% | Slightly higher because B review scores changed, shifting some wins |
+
+Profile documents are a significant contributor to the semantic scores, but the A/B comparison is unaffected since they're shared.
+
 ## Production Anchor
 
 | Metric | Value |
 |--------|:-----:|
-| B exact cosine vs B production Milvus overlap@3 | 0.8571 |
-| B exact cosine vs B production Milvus overlap@5 | 0.7714 |
+| B exact cosine (Profile+Review) vs B production Milvus overlap@3 | **0.8571** |
+| B exact cosine (Profile+Review) vs B production Milvus overlap@5 | **0.7857** |
+
+The Production Anchor overlap@3 (0.8571) is unchanged from v1 because the Milvus pre-filter already includes Profile documents. The overlap@5 improved slightly from 0.7714 (v1) to 0.7857 (v2), indicating that adding Profile to the exact side made the ranking closer to production.
 
 ## Decision
 
@@ -52,43 +66,45 @@
 | Top1 not worse | ✅ (0.00pp) |
 | CVR not worse | ✅ (0.00pp) |
 
-**Result: Keep content-only (A).** Tags in embedding text do not improve Recall@3 or Top1 Accuracy.
+**Result: Keep content-only (A).** Adding tags to review embedding text produces no measurable Recall or Top1 improvement, even with the full Profile + Review production pipeline.
 
 ## Key Findings
 
-### 1. Tags Are Redundant with Content
+### 1. Tags Are Redundant with Content (Confirmed with Profile Pipeline)
 
-Tags in the embedding text produce **identical** Recall@3, Recall@5, and Top1 Accuracy. The only difference is a marginal NDCG@3 improvement of +0.45pp, which is within noise for 35 queries.
+The v2 experiment confirms the v1 finding: tags in the review embedding text produce **identical** Recall@3, Recall@5, and Top1 Accuracy. The only difference is a marginal NDCG@3 improvement of +0.45pp, which is within noise for 35 queries.
 
-The reason: tags are derived from the same review content (`"自助,三文鱼,甜虾,补货快,性价比"` from `"性价比高...三文鱼甜虾北极贝吃到饱...食材补货快..."`). The embedding model (text-embedding-v4) already captures these semantic signals from the content alone. Tags add no new information.
+### 2. Profile Documents Are a Significant Signal Source
 
-### 2. Exact Cosine Eliminates ANN Retrieval Loss
+Profile-dominance rate of 41-49% means Profile documents contribute meaningfully to the MAX aggregation. This is expected — the Profile text (`菜系：日料。场景：约会,商务。环境：安静,景观`) is highly relevant to queries like "日料" or "安静的日料店".
 
-Comparing with the previous ablation experiment (which used ANN pre-filter):
+### 3. Profile Does Not Change the A/B Conclusion
 
-| Metric | V_Sem (ANN) | A (exact cosine) | Δ |
-|--------|:-----------:|:-----------------:|:-:|
-| Recall@3 | 0.7614 | 0.7932 | **+3.18pp** |
-| NDCG@3 | 0.9558 | 0.9828 | **+2.70pp** |
-| Top1 | 0.9355 | 0.9655 | **+3.00pp** |
+Since Profile embeddings are shared across A/B, they contribute equally to both variants. The A/B delta remains zero for Recall@3 and Top1.
 
-The improvement comes from exact cosine evaluating ALL allowed shops, while ANN TopK=80 only covers ~13 shops (80 docs / 6 per shop). With exact cosine, all 66 shops get semantic scores, reducing SEMANTIC_RETRIEVAL_ERROR from 7 to 0.
+### 4. Production Anchor Stable
 
-### 3. No SEMANTIC_THRESHOLD_ERROR
+The overlap@3 (0.8571) is the same as v1, confirming that the exact cosine ranking is a reasonable proxy for production ANN retrieval. The overlap@5 improved slightly (0.7857 vs 0.7714) because adding Profile to the exact side narrowed the gap with production.
 
-All shops with non-zero semantic scores exceed the 0.35 threshold. This confirms the threshold is not a limiting factor.
+## Comparison with v1 (Review-only)
 
-### 4. Production Anchor Shows Good Agreement
+| Aspect | v1 (Review-only) | v2 (Profile + Review) |
+|--------|:-----------------:|:---------------------:|
+| A Recall@3 | 0.7932 | 0.7932 |
+| B Recall@3 | 0.7932 | 0.7932 |
+| Anchor overlap@3 | 0.8571 | 0.8571 |
+| Anchor overlap@5 | 0.7714 | 0.7857 |
+| Profile-dominance | N/A | 41-49% |
 
-B exact cosine vs B production Milvus shows 0.8571 overlap@3. The 14.3% disagreement is expected since ANN is approximate (not exact) and the Milvus pre-filter has TopK=80 limit. The correlation is sufficient to validate the experiment methodology.
+The v2 results are identical to v1 for the comparison metrics. Adding Profile was necessary to align with the production pipeline, but it does not change the conclusion.
 
 ## Recommendations
 
-1. **Keep content-only (A) for embedding text**. Tags add no measurable recall improvement.
+1. **Keep content-only (A) for review embedding text.** Tags add no measurable recall improvement, even with the full Profile + Review production pipeline.
 
-2. **The current production index (content+tags) is not harmful**, but it's unnecessary. Future re-indexing can use content-only text without regression risk.
+2. **The current production index (content+tags) is not harmful**, but it's unnecessary. Future re-indexing can use content-only review text without regression risk.
 
-3. **Consider alternative semantic improvements** instead of tags: query expansion, multi-vector retrieval, or cross-encoder re-ranking.
+3. **Profile documents are working as expected** — they contribute meaningful semantic signal and should remain in the production index.
 
 ## Per-Case Results
 

@@ -1661,7 +1661,7 @@ B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
 
 **当前状态**：`ShopReviewService` 写入 `AiReviewDocument` 时 `tags` 恒为空（`document.setTags("")`），但批量加载的演示数据（LOCAL_DEMO, source_revision=null）通过 SQL 直接写入，tags 非空。当前生产索引中的 Review Document 文本实际包含 tags（如 `"标签：自助,三文鱼,甜虾,补货快,性价比"`），即 content+tags。
 
-**2026-08-31 A/B 实验验证**：通过 exact cosine 在 allowed set 内的精确对比，A（content-only）与 B（content+tags）的 Recall@3 完全一致（0.7932 vs 0.7932），Top1 Accuracy 完全一致（0.9655），NDCG@3 仅差 +0.45pp（在噪声范围内）。预注册决策规则（Recall@3 ≥ +3pp 才保留 B）未满足，结论为：**tags 在 embedding 文本中无实际检索增益**。
+**2026-08-31 A/B 实验验证（v2 — Profile + Review）**：通过 exact cosine 在 allowed set 内的精确对比，包含 Profile document 聚合层（66 个 Profile，A/B 共用），A（content-only）与 B（content+tags）的 Recall@3 完全一致（0.7932 vs 0.7932），Top1 Accuracy 完全一致（0.9655），NDCG@3 仅差 +0.45pp（在噪声范围内）。预注册决策规则（Recall@3 ≥ +3pp 才保留 B）未满足，结论为：**tags 在 embedding 文本中无实际检索增益**。v2 新增 Profile-dominance rate 统计：A 组 41.17%，B 组 48.58%，说明 Profile 文档在 MAX 聚合中贡献显著。
 
 **建议**：当前 content+tags 索引无害但无必要。未来重索引可直接使用 content-only 文本，无回归风险。
 

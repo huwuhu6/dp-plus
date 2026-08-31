@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """
-Review Embedding Content-only vs Content+Tags A/B Experiment.
+Review Embedding Content-only vs Content+Tags A/B Experiment (v2 — Profile + Review).
+
+This version adds Profile document aggregation to match the full production semantic
+scoring pipeline. Previous version (v1) only computed Review document scores.
 
 Two variants:
-  A: text = "商户：{name}。评价证据：{content}。标签："          (content-only, tags stripped)
-  B: text = "商户：{name}。评价证据：{content}。标签：{tags}"   (content+tags, matches current production)
+  A: Profile (production) + Review (content-only)
+  B: Profile (same) + Review (content+tags)
 
-Method: exact cosine over allowed set (NOT ANN). This eliminates ANN retrieval noise
-and isolates the embedding text representation variable.
+Only variable: Review embedding text tags.
 
 Pre-registered decision rule:
-  Keep B (content+tags) only if Recall@3 ≥ +3pp AND NDCG@3/Top1/CVR not worse.
+  Keep B (content+tags) only if Recall@3 >= +3pp AND NDCG@3/Top1/CVR not worse.
   If condition not met, use A (content-only).
 
 Output: retrieval_tags_ab_results.json, retrieval_tags_ab_report.md
 
-Production Anchor: B exact cosine vs B production Milvus pre-filter (from existing snapshot).
+Production Anchor: B exact cosine (Profile + Review) vs B production Milvus pre-filter.
 """
 
 import csv
@@ -193,7 +195,6 @@ def load_dataset(json_path: str) -> List[AblationCase]:
     return cases
 
 def load_review_documents(csv_path: str) -> Dict[int, List[ReviewDocument]]:
-    """Load review documents grouped by shop_id."""
     docs_by_shop: Dict[int, List[ReviewDocument]] = defaultdict(list)
     with open(csv_path, "r", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -205,6 +206,11 @@ def load_review_documents(csv_path: str) -> Dict[int, List[ReviewDocument]]:
             )
             docs_by_shop[doc.shop_id].append(doc)
     return dict(docs_by_shop)
+
+def load_profile_embeddings(json_path: str) -> Dict[str, List[float]]:
+    """Load pre-computed profile embeddings. Returns {doc_id: embedding}."""
+    with open(json_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 # ── Hard Filter ──
@@ -270,7 +276,6 @@ def cosine_similarity(a: List[float], b: List[float]) -> float:
 
 # ── Build A/B text and pre-compute embeddings ──
 def build_ab_texts(shop_name: str, review: ReviewDocument) -> Tuple[str, str]:
-    """Return (text_a, text_b) for a review document."""
     text_a = f"商户：{shop_name}。评价证据：{review.content}。标签："
     text_b = f"商户：{shop_name}。评价证据：{review.content}。标签：{review.tags}"
     return text_a, text_b
@@ -280,13 +285,6 @@ def precompute_embeddings(
     reviews_by_shop: Dict[int, List[ReviewDocument]],
     cache_path: str,
 ) -> Tuple[Dict[str, List[float]], Dict[str, List[float]]]:
-    """Pre-compute A and B embeddings for all review documents.
-
-    Returns:
-        emb_a: {doc_id: embedding}  (content-only)
-        emb_b: {doc_id: embedding}  (content+tags)
-    """
-    # Load cache if exists
     emb_a: Dict[str, List[float]] = {}
     emb_b: Dict[str, List[float]] = {}
     if os.path.exists(cache_path):
@@ -296,7 +294,6 @@ def precompute_embeddings(
         emb_b = {k: v for k, v in cache.get("emb_b", {}).items()}
         print(f"Loaded {len(emb_a)} A embeddings, {len(emb_b)} B embeddings from cache")
 
-    # Collect all review docs that need embedding
     pending = []
     for shop_id, docs in reviews_by_shop.items():
         shop = shops.get(shop_id)
@@ -316,67 +313,87 @@ def precompute_embeddings(
 
     for i, (doc_id, text_a, text_b) in enumerate(pending):
         try:
-            if i > 0 and i % 10 == 0:
-                print(f"  [{i}/{len(pending)}]...", end=" ", flush=True)
-                # Save cache periodically
-                _save_embedding_cache(cache_path, emb_a, emb_b)
-                print("cached")
-
             emb_a[doc_id] = get_embedding(text_a)
-            # Rate limit: avoid burst
             time.sleep(0.1)
             emb_b[doc_id] = get_embedding(text_b)
             time.sleep(0.1)
-
             if i % 50 == 0:
+                _save_embedding_cache(cache_path, emb_a, emb_b)
                 print(f"  [{i}/{len(pending)}] {doc_id} done")
-
         except Exception as e:
             print(f"  ERROR computing {doc_id}: {e}")
             continue
 
-    # Final save
     _save_embedding_cache(cache_path, emb_a, emb_b)
     print(f"Saved {len(emb_a)} A + {len(emb_b)} B embeddings to cache")
     return emb_a, emb_b
 
 def _save_embedding_cache(cache_path: str, emb_a: Dict, emb_b: Dict):
-    """Save embedding cache to disk."""
     temp_path = cache_path + ".tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump({"emb_a": emb_a, "emb_b": emb_b}, f, ensure_ascii=False)
     os.replace(temp_path, cache_path)
 
 
-# ── Exact cosine scoring per shop ──
+# ── Exact cosine scoring per shop (Profile + Review, MAX aggregation) ──
 def compute_semantic_scores_exact(
     query_emb: List[float],
     allowed_ids: Set[int],
     reviews_by_shop: Dict[int, List[ReviewDocument]],
-    embeddings: Dict[str, List[float]],
+    review_embeddings: Dict[str, List[float]],  # A or B review embeddings
+    profile_embeddings: Dict[str, List[float]],  # shared Profile embeddings
     shops: Dict[int, Shop],
-) -> Dict[int, float]:
+) -> Tuple[Dict[int, float], float]:
     """Compute per-shop semantic score using exact cosine similarity.
 
-    For each allowed shop, computes cosine similarity between query embedding and
-    each of the shop's review document embeddings, then takes the MAX (same as
-    production scoreByShopId.merge(shopId, score, Math::max)).
+    For each allowed shop, computes cosine similarity for:
+      - 1 Profile document (fixed, shared across A/B)
+      - N Review documents (A or B variant)
+
+    Then takes MAX across ALL documents per shop, exactly matching production
+    scoreByShopId.merge(shopId, score, Math::max).
+
+    Returns:
+        scores: {shop_id: max_cosine}
+        profile_dominance_rate: fraction of shops where Profile document won the MAX
     """
     scores: Dict[int, float] = {}
+    profile_wins = 0
+    total_shops = 0
+
     for shop_id in allowed_ids:
-        docs = reviews_by_shop.get(shop_id, [])
+        total_shops += 1
         max_score = 0.0
+        profile_was_max = False
+
+        # Profile document
+        profile_doc_id = f"shop-profile-{shop_id}"
+        profile_emb = profile_embeddings.get(profile_doc_id)
+        if profile_emb:
+            sim = cosine_similarity(query_emb, profile_emb)
+            if sim > max_score:
+                max_score = sim
+                profile_was_max = True
+
+        # Review documents
+        docs = reviews_by_shop.get(shop_id, [])
         for doc in docs:
             doc_id = f"shop-review-{doc.id}"
-            doc_emb = embeddings.get(doc_id)
+            doc_emb = review_embeddings.get(doc_id)
             if doc_emb is None:
                 continue
             sim = cosine_similarity(query_emb, doc_emb)
             if sim > max_score:
                 max_score = sim
+                profile_was_max = False
+
         if max_score > 0:
             scores[shop_id] = max_score
-    return scores
+            if profile_was_max:
+                profile_wins += 1
+
+    profile_dominance = profile_wins / total_shops if total_shops > 0 else 0.0
+    return scores, profile_dominance
 
 
 # ── Ranking (same formula as retrieval_ablation_experiment.py) ──
@@ -389,7 +406,6 @@ def compute_rank_score(
     lon: float,
     evidence_count: int,
 ) -> float:
-    """Production toRecommendation() ranking formula."""
     budget = constraints.get("budgetPerPerson", -1)
     radius = constraints.get("radiusKm", -1)
     occasion = constraints.get("occasion", "")
@@ -397,38 +413,29 @@ def compute_rank_score(
     avoid_queue = constraints.get("avoidQueue", False)
     semantic_weight = 18.0
 
-    # Rating: max 20
     rating = shop.score / 10.0 / 5.0 * 20.0 if shop.score > 0 else 0.0
 
-    # Budget: max 20
     budget_score = 0.0
     if budget > 0 and shop.avg_price and shop.avg_price > 0:
         ratio = shop.avg_price / budget
         budget_score = 20.0 * (1.0 - ratio * 0.3)
     budget_score = max(0.0, budget_score)
 
-    # Occasion: +12
     occasion_score = 12.0 if (occasion and profile and contains_tag(profile.scene_tags, occasion)) else 0.0
 
-    # Distance: max 20
     distance_score = 0.0
     if radius > 0:
         d = distance_km(lat, lon, shop.y, shop.x)
         distance_score = max(0.0, 20.0 * (1.0 - d / radius))
 
-    # Quiet: +12
     quiet_score = 12.0 if (quiet and profile and contains_tag(profile.ambience_tags, "安静")) else 0.0
 
-    # Avoid queue: +8
     queue_score = 8.0 if (avoid_queue and profile and profile.queue_level == "LOW") else 0.0
 
-    # Evidence: +3 per doc, max 2 docs = +6
     evidence_score = min(6.0, evidence_count * 3.0)
 
-    # Base score (without semantic)
     base = rating + budget_score + occasion_score + distance_score + quiet_score + queue_score + evidence_score
 
-    # Semantic
     if semantic_score is not None:
         base += semantic_score * semantic_weight
 
@@ -530,20 +537,21 @@ class VariantMetrics:
     top1_accuracy: float
     constraint_violation_rate: float
     failure_attribution: Dict[str, int]
+    profile_dominance_rate: float
 
 def run_variant(
     dataset: List[AblationCase],
     shops: Dict[int, Shop],
     profiles: Dict[int, ShopProfile],
     reviews_by_shop: Dict[int, List[ReviewDocument]],
-    embeddings: Dict[str, List[float]],
+    review_embeddings: Dict[str, List[float]],  # A or B review embeddings
+    profile_embeddings: Dict[str, List[float]],  # shared Profile embeddings
     variant_name: str,
     k: int = 3,
 ) -> Tuple[List[CaseResult], VariantMetrics]:
     """Run experiment for one variant (A or B)."""
     results: List[CaseResult] = []
 
-    # Aggregate failure attribution
     all_failures: Dict[str, int] = {"CORRECT": 0, "HARD_FILTER_ERROR": 0, "SEMANTIC_RETRIEVAL_ERROR": 0,
                                       "SEMANTIC_THRESHOLD_ERROR": 0, "RANKING_ERROR": 0}
 
@@ -554,6 +562,7 @@ def run_variant(
     total_ndcg_5 = 0.0
     total_top1 = 0.0
     total_cvr = 0.0
+    total_profile_dominance = 0.0
 
     for case in dataset:
         gt_shops_grade2 = [g for g in case.ground_truth if g.relevance >= 2]
@@ -569,12 +578,13 @@ def run_variant(
         # Query embedding
         query_emb = get_embedding(case.query)
 
-        # Semantic scores via exact cosine
-        semantic_scores = compute_semantic_scores_exact(
-            query_emb, hard_matched, reviews_by_shop, embeddings, shops
+        # Semantic scores via exact cosine (Profile + Review, MAX aggregation)
+        semantic_scores, profile_dominance = compute_semantic_scores_exact(
+            query_emb, hard_matched, reviews_by_shop, review_embeddings, profile_embeddings, shops
         )
+        total_profile_dominance += profile_dominance
 
-        # Apply threshold 0.35
+        # Apply threshold 0.35 (after MAX aggregation, matching production)
         filtered_scores = {sid: score for sid, score in semantic_scores.items() if score >= 0.35}
 
         # Rank all hard-matched shops
@@ -583,12 +593,10 @@ def run_variant(
             shop = shops[sid]
             profile = profiles.get(sid)
             sem_score = filtered_scores.get(sid)
-            # Evidence count: each shop has 6 review docs
             evidence_count = len(reviews_by_shop.get(sid, []))
             score = compute_rank_score(shop, profile, case.expected_constraints, sem_score, case.latitude, case.longitude, evidence_count)
             scored.append((sid, score))
 
-        # Sort by score descending
         scored.sort(key=lambda x: -x[1])
         ranked_ids = [sid for sid, _ in scored]
 
@@ -641,33 +649,41 @@ def run_variant(
         top1_accuracy=round(total_top1 / n, 4) if n > 0 else 0.0,
         constraint_violation_rate=round(total_cvr / n, 4) if n > 0 else 0.0,
         failure_attribution=all_failures,
+        profile_dominance_rate=round(total_profile_dominance / n, 4) if n > 0 else 0.0,
     )
 
     return results, metrics
 
 
-# ── Production Anchor ──
+# ── Production Anchor (Profile + Review on both sides) ──
 def run_production_anchor(
     dataset: List[AblationCase],
     shops: Dict[int, Shop],
     profiles: Dict[int, ShopProfile],
     reviews_by_shop: Dict[int, List[ReviewDocument]],
+    profile_embeddings: Dict[str, List[float]],
     milvus_snapshot: Dict[str, List[dict]],
     k: int = 3,
 ) -> Dict:
-    """Compare B exact cosine vs B production Milvus pre-filter.
+    """Compare B exact cosine (Profile + Review) vs B production Milvus pre-filter.
 
-    For each query, compare the ranked lists from:
-    - B exact cosine (ground truth for "what exact cosine would produce")
-    - B production Milvus (from the existing snapshot, what Milvus ANN actually returns)
-
-    Metrics: ranked list overlap@K, Kendall tau-like correlation.
+    Both sides now include Profile document aggregation, matching the production pipeline.
+    The Milvus snapshot already contains both PROFILE and REVIEW documents from the pre-filter search.
     """
-    print("\n=== Production Anchor: B exact cosine vs B production Milvus ===")
+    print("\n=== Production Anchor: B exact cosine (Profile+Review) vs B production Milvus ===")
 
     total_queries = 0
     total_overlap_3 = 0.0
     total_overlap_5 = 0.0
+
+    # Load B review embeddings
+    cache_path = os.path.join(os.path.dirname(__file__), "retrieval_tags_ab_embeddings.json")
+    if not os.path.exists(cache_path):
+        print(f"  WARNING: No embedding cache found at {cache_path}")
+        return {"queries_compared": 0, "avg_overlap_at_3": 0.0, "avg_overlap_at_5": 0.0}
+    with open(cache_path, "r", encoding="utf-8") as f:
+        cache = json.load(f)
+    emb_b = cache.get("emb_b", {})
 
     for case in dataset:
         gt_shops_grade2 = [g for g in case.ground_truth if g.relevance >= 2]
@@ -675,40 +691,33 @@ def run_production_anchor(
         if not gt_ids:
             continue
 
-        # B exact cosine ranked list
+        # Hard filter
         hard_matched = compute_hard_matched_ids(case.city, case.expected_constraints, case.latitude, case.longitude, shops, profiles)
         if not hard_matched:
             continue
 
         query_emb = get_embedding(case.query)
-        # Load B embeddings from cache
-        cache_path = os.path.join(os.path.dirname(__file__), "retrieval_tags_ab_embeddings.json")
-        if os.path.exists(cache_path):
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cache = json.load(f)
-            emb_b = cache.get("emb_b", {})
-        else:
-            print(f"  WARNING: No embedding cache found at {cache_path}")
-            continue
 
-        semantic_scores = compute_semantic_scores_exact(query_emb, hard_matched, reviews_by_shop, emb_b, shops)
-        filtered_scores = {sid: score for sid, score in semantic_scores.items() if score >= 0.35}
+        # === B exact cosine (Profile + Review) ===
+        exact_scores, _ = compute_semantic_scores_exact(
+            query_emb, hard_matched, reviews_by_shop, emb_b, profile_embeddings, shops
+        )
+        exact_filtered = {sid: score for sid, score in exact_scores.items() if score >= 0.35}
 
-        scored_b = []
+        scored_exact = []
         for sid in hard_matched:
             shop = shops[sid]
             profile = profiles.get(sid)
-            sem_score = filtered_scores.get(sid)
+            sem_score = exact_filtered.get(sid)
             evidence_count = len(reviews_by_shop.get(sid, []))
             score = compute_rank_score(shop, profile, case.expected_constraints, sem_score, case.latitude, case.longitude, evidence_count)
-            scored_b.append((sid, score))
-        scored_b.sort(key=lambda x: -x[1])
-        exact_ranked = [sid for sid, _ in scored_b]
+            scored_exact.append((sid, score))
+        scored_exact.sort(key=lambda x: -x[1])
+        exact_ranked = [sid for sid, _ in scored_exact]
 
-        # Production Milvus ranked list (from existing snapshot)
+        # === B production Milvus (already contains Profile + Review docs) ===
         milvus_docs = milvus_snapshot.get(case.case_id, [])
         if not milvus_docs:
-            print(f"  {case.case_id}: No Milvus snapshot data")
             continue
 
         # Aggregate per-shop MAX score from Milvus snapshot
@@ -760,6 +769,7 @@ def run_production_anchor(
         "queries_compared": total_queries,
         "avg_overlap_at_3": avg_overlap_3,
         "avg_overlap_at_5": avg_overlap_5,
+        "method": "B exact cosine (Profile+Review) vs B production Milvus (Profile+Review)",
     }
 
 
@@ -771,17 +781,24 @@ def generate_report(
     metrics_b: VariantMetrics,
     dataset: List[AblationCase],
     anchor_result: Dict,
+    profile_dominance_a: float,
+    profile_dominance_b: float,
     output_path: str,
 ):
     report = {
         "experiment_date": "2026-08-31",
-        "experiment": "Review Embedding Content-only vs Content+Tags A/B",
+        "experiment": "Review Embedding Content-only vs Content+Tags A/B (v2 — Profile + Review)",
         "dataset_version": "ablation-v1",
         "dataset_size": len(dataset),
-        "method": "exact cosine over allowed set (not ANN)",
+        "method": "exact cosine over allowed set (Profile + Review, MAX aggregation across all document types)",
+        "profile_documents": {
+            "count": 66,
+            "text_format": "商户：{name}。菜系：{cuisine}。场景：{scene_tags}。环境：{ambience_tags}。简介：{summary}",
+            "shared_across_ab": True,
+        },
         "variants": {
             "A_content_only": {
-                "embedding_text": '商户：{name}。评价证据：{content}。标签：',
+                "embedding_text": 'Profile (production) + Review (商户：{name}。评价证据：{content}。标签：)',
                 "recall_at_3": metrics_a.recall_at_3,
                 "recall_at_5": metrics_a.recall_at_5,
                 "ndcg_at_3": metrics_a.ndcg_at_3,
@@ -789,9 +806,10 @@ def generate_report(
                 "top1_accuracy": metrics_a.top1_accuracy,
                 "constraint_violation_rate": metrics_a.constraint_violation_rate,
                 "failure_attribution": metrics_a.failure_attribution,
+                "profile_dominance_rate": profile_dominance_a,
             },
             "B_content_plus_tags": {
-                "embedding_text": '商户：{name}。评价证据：{content}。标签：{tags}',
+                "embedding_text": 'Profile (production) + Review (商户：{name}。评价证据：{content}。标签：{tags})',
                 "recall_at_3": metrics_b.recall_at_3,
                 "recall_at_5": metrics_b.recall_at_5,
                 "ndcg_at_3": metrics_b.ndcg_at_3,
@@ -799,6 +817,7 @@ def generate_report(
                 "top1_accuracy": metrics_b.top1_accuracy,
                 "constraint_violation_rate": metrics_b.constraint_violation_rate,
                 "failure_attribution": metrics_b.failure_attribution,
+                "profile_dominance_rate": profile_dominance_b,
             },
         },
         "delta_B_minus_A": {
@@ -817,6 +836,16 @@ def generate_report(
             "cvr_not_worse": metrics_b.constraint_violation_rate <= metrics_a.constraint_violation_rate + 0.01,
         },
         "production_anchor": anchor_result,
+        "previous_version": {
+            "note": "v1 only computed Review documents (no Profile). Results below are for reference only.",
+            "recall_at_3_a": 0.7932,
+            "recall_at_3_b": 0.7932,
+            "ndcg_at_3_a": 0.9828,
+            "ndcg_at_3_b": 0.9873,
+            "top1_a": 0.9655,
+            "top1_b": 0.9655,
+            "anchor_overlap_at_3": 0.8571,
+        },
         "per_case_results": [
             {
                 "case_id": r_a.case_id,
@@ -852,7 +881,7 @@ def generate_report(
 
 def print_summary(report: dict):
     print("\n" + "=" * 70)
-    print(" Review Embedding A/B Experiment Results")
+    print(" Review Embedding A/B Experiment Results (v2 — Profile + Review)")
     print("=" * 70)
     print(f" Dataset: {report['dataset_version']} ({report['dataset_size']} cases)")
     print(f" Method: {report['method']}")
@@ -864,8 +893,13 @@ def print_summary(report: dict):
         a = report["variants"]["A_content_only"][m]
         b = report["variants"]["B_content_plus_tags"][m]
         delta_key = m + "_pp"
-d = report["delta_B_minus_A"].get(delta_key, 0)
+        d = report["delta_B_minus_A"].get(delta_key, 0)
         print(f"{m:<25} {a:<20.4f} {b:<20.4f} {d:>+8.2f}pp")
+
+    print()
+    print("Profile-dominance rate:")
+    print(f"  A: {report['variants']['A_content_only'].get('profile_dominance_rate', 'N/A')}")
+    print(f"  B: {report['variants']['B_content_plus_tags'].get('profile_dominance_rate', 'N/A')}")
 
     print()
     print("Failure Attribution:")
@@ -882,9 +916,18 @@ d = report["delta_B_minus_A"].get(delta_key, 0)
         print(f"  {key}: {val}")
 
     if report.get("production_anchor"):
-        print(f"\nProduction Anchor:")
-        for key, val in report["production_anchor"].items():
-            print(f"  {key}: {val}")
+        pa = report["production_anchor"]
+        print(f"\nProduction Anchor ({pa.get('method', 'N/A')}):")
+        print(f"  Queries compared: {pa.get('queries_compared', 'N/A')}")
+        print(f"  Average overlap@3: {pa.get('avg_overlap_at_3', 'N/A')}")
+        print(f"  Average overlap@5: {pa.get('avg_overlap_at_5', 'N/A')}")
+
+    if report.get("previous_version"):
+        pv = report["previous_version"]
+        print(f"\nPrevious version (v1, Review-only) for reference:")
+        print(f"  A Recall@3: {pv.get('recall_at_3_a')}")
+        print(f"  B Recall@3: {pv.get('recall_at_3_b')}")
+        print(f"  Anchor overlap@3: {pv.get('anchor_overlap_at_3')}")
 
 
 # ── Main ──
@@ -894,7 +937,8 @@ def main():
     shops_path = os.path.join(script_dir, "retrieval_ablation_shops.csv")
     profiles_path = os.path.join(script_dir, "retrieval_ablation_profiles.csv")
     reviews_path = os.path.join(script_dir, "retrieval_ablation_reviews.csv")
-    cache_path = os.path.join(script_dir, "retrieval_tags_ab_embeddings.json")
+    review_cache_path = os.path.join(script_dir, "retrieval_tags_ab_embeddings.json")
+    profile_cache_path = os.path.join(script_dir, "retrieval_tags_ab_profile_embeddings.json")
     output_path = os.path.join(script_dir, "retrieval_tags_ab_results.json")
     milvus_snapshot_path = os.path.join(script_dir, "retrieval_ablation_milvus_snapshot.json")
 
@@ -909,38 +953,54 @@ def main():
     print(f"  Profiles: {len(profiles)}")
     print(f"  Review docs: {sum(len(v) for v in reviews_by_shop.values())}")
 
-    # Pre-compute embeddings
-    print("\nPre-computing A/B embeddings...")
-    emb_a, emb_b = precompute_embeddings(shops, reviews_by_shop, cache_path)
-    print(f"  A embeddings: {len(emb_a)}")
-    print(f"  B embeddings: {len(emb_b)}")
+    # Load profile embeddings (shared, fixed)
+    print("\nLoading Profile embeddings...")
+    if not os.path.exists(profile_cache_path):
+        print(f"  ERROR: Profile embeddings not found at {profile_cache_path}. Run _precompute_profile_embeddings.py first.")
+        return
+    profile_embeddings = load_profile_embeddings(profile_cache_path)
+    print(f"  Profile embeddings: {len(profile_embeddings)}")
 
-    # Run variant A (content-only)
-    print("\n=== Running variant A (content-only) ===")
-    results_a, metrics_a = run_variant(dataset, shops, profiles, reviews_by_shop, emb_a, "A")
+    # Load/review A/B review embeddings
+    print("\nLoading Review A/B embeddings...")
+    emb_a, emb_b = precompute_embeddings(shops, reviews_by_shop, review_cache_path)
+    print(f"  A (content-only): {len(emb_a)}")
+    print(f"  B (content+tags): {len(emb_b)}")
+
+    # Run variant A (Profile + Review content-only)
+    print("\n=== Running variant A (Profile + Review content-only) ===")
+    results_a, metrics_a = run_variant(dataset, shops, profiles, reviews_by_shop, emb_a, profile_embeddings, "A")
     print(f"  Recall@3: {metrics_a.recall_at_3:.4f}")
     print(f"  NDCG@3: {metrics_a.ndcg_at_3:.4f}")
     print(f"  Top1: {metrics_a.top1_accuracy:.4f}")
     print(f"  CVR: {metrics_a.constraint_violation_rate:.4f}")
+    print(f"  Profile-dominance: {metrics_a.profile_dominance_rate:.4f}")
 
-    # Run variant B (content+tags)
-    print("\n=== Running variant B (content+tags) ===")
-    results_b, metrics_b = run_variant(dataset, shops, profiles, reviews_by_shop, emb_b, "B")
+    # Run variant B (Profile + Review content+tags)
+    print("\n=== Running variant B (Profile + Review content+tags) ===")
+    results_b, metrics_b = run_variant(dataset, shops, profiles, reviews_by_shop, emb_b, profile_embeddings, "B")
     print(f"  Recall@3: {metrics_b.recall_at_3:.4f}")
     print(f"  NDCG@3: {metrics_b.ndcg_at_3:.4f}")
     print(f"  Top1: {metrics_b.top1_accuracy:.4f}")
     print(f"  CVR: {metrics_b.constraint_violation_rate:.4f}")
+    print(f"  Profile-dominance: {metrics_b.profile_dominance_rate:.4f}")
 
     # Production Anchor
     anchor_result = {"queries_compared": 0, "avg_overlap_at_3": 0.0, "avg_overlap_at_5": 0.0}
     if os.path.exists(milvus_snapshot_path):
         print("\n=== Running Production Anchor ===")
         milvus_snapshot = json.load(open(milvus_snapshot_path, "r", encoding="utf-8"))
-        anchor_result = run_production_anchor(dataset, shops, profiles, reviews_by_shop, milvus_snapshot)
+        anchor_result = run_production_anchor(dataset, shops, profiles, reviews_by_shop, profile_embeddings, milvus_snapshot)
 
     # Generate report
     print("\n=== Generating report ===")
-    report = generate_report(results_a, metrics_a, results_b, metrics_b, dataset, anchor_result, output_path)
+    report = generate_report(
+        results_a, metrics_a,
+        results_b, metrics_b,
+        dataset, anchor_result,
+        metrics_a.profile_dominance_rate, metrics_b.profile_dominance_rate,
+        output_path
+    )
     print_summary(report)
 
 

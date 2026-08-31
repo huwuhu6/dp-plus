@@ -1,12 +1,17 @@
 {
   "experiment_date": "2026-08-31",
-  "experiment": "Review Embedding Content-only vs Content+Tags A/B",
+  "experiment": "Review Embedding Content-only vs Content+Tags A/B (v2 — Profile + Review)",
   "dataset_version": "ablation-v1",
   "dataset_size": 35,
-  "method": "exact cosine over allowed set (not ANN)",
+  "method": "exact cosine over allowed set (Profile + Review, MAX aggregation across all document types)",
+  "profile_documents": {
+    "count": 66,
+    "text_format": "商户：{name}。菜系：{cuisine}。场景：{scene_tags}。环境：{ambience_tags}。简介：{summary}",
+    "shared_across_ab": true
+  },
   "variants": {
     "A_content_only": {
-      "embedding_text": "商户：{name}。评价证据：{content}。标签：",
+      "embedding_text": "Profile (production) + Review (商户：{name}。评价证据：{content}。标签：)",
       "recall_at_3": 0.7932,
       "recall_at_5": 0.9514,
       "ndcg_at_3": 0.9828,
@@ -19,10 +24,11 @@
         "SEMANTIC_RETRIEVAL_ERROR": 0,
         "SEMANTIC_THRESHOLD_ERROR": 0,
         "RANKING_ERROR": 36
-      }
+      },
+      "profile_dominance_rate": 0.4117
     },
     "B_content_plus_tags": {
-      "embedding_text": "商户：{name}。评价证据：{content}。标签：{tags}",
+      "embedding_text": "Profile (production) + Review (商户：{name}。评价证据：{content}。标签：{tags})",
       "recall_at_3": 0.7932,
       "recall_at_5": 0.9514,
       "ndcg_at_3": 0.9873,
@@ -35,7 +41,8 @@
         "SEMANTIC_RETRIEVAL_ERROR": 0,
         "SEMANTIC_THRESHOLD_ERROR": 0,
         "RANKING_ERROR": 36
-      }
+      },
+      "profile_dominance_rate": 0.4858
     }
   },
   "delta_B_minus_A": {
@@ -58,7 +65,18 @@
   "production_anchor": {
     "queries_compared": 28,
     "avg_overlap_at_3": 0.8571,
-    "avg_overlap_at_5": 0.7714
+    "avg_overlap_at_5": 0.7857,
+    "method": "B exact cosine (Profile+Review) vs B production Milvus (Profile+Review)"
+  },
+  "previous_version": {
+    "note": "v1 only computed Review documents (no Profile). Results below are for reference only.",
+    "recall_at_3_a": 0.7932,
+    "recall_at_3_b": 0.7932,
+    "ndcg_at_3_a": 0.9828,
+    "ndcg_at_3_b": 0.9873,
+    "top1_a": 0.9655,
+    "top1_b": 0.9655,
+    "anchor_overlap_at_3": 0.8571
   },
   "per_case_results": [
     {
@@ -140,8 +158,8 @@
       "a_ndcg_3": 1.0,
       "a_top1": 1.0,
       "b_top_k": [
-        37,
         36,
+        37,
         41
       ],
       "b_recall_3": 1.0,
@@ -471,16 +489,16 @@
       "gt_count": 5,
       "a_top_k": [
         30,
-        31,
-        28
+        28,
+        31
       ],
       "a_recall_3": 0.6,
       "a_ndcg_3": 1.0,
       "a_top1": 1.0,
       "b_top_k": [
         30,
-        31,
-        28
+        28,
+        31
       ],
       "b_recall_3": 0.6,
       "b_ndcg_3": 1.0,
@@ -688,8 +706,8 @@
       "a_ndcg_3": 1.0,
       "a_top1": 1.0,
       "b_top_k": [
-        82,
         81,
+        82,
         83
       ],
       "b_recall_3": 1.0,
@@ -715,17 +733,17 @@
       "query": "港式茶餐厅",
       "gt_count": 5,
       "a_top_k": [
-        45,
         44,
+        45,
         43
       ],
       "a_recall_3": 0.6,
       "a_ndcg_3": 1.0,
       "a_top1": 1.0,
       "b_top_k": [
-        45,
         44,
-        43
+        43,
+        45
       ],
       "b_recall_3": 0.6,
       "b_ndcg_3": 1.0,
@@ -759,8 +777,8 @@
       "a_top1": 1.0,
       "b_top_k": [
         61,
-        64,
-        66
+        66,
+        64
       ],
       "b_recall_3": 0.375,
       "b_ndcg_3": 1.0,
@@ -921,8 +939,8 @@
       "query": "福州小吃",
       "gt_count": 5,
       "a_top_k": [
-        71,
         72,
+        71,
         68
       ],
       "a_recall_3": 0.6,
