@@ -33,14 +33,14 @@ public class AgentChatClientConfig {
                 .apiKey(apiKey)
                 .completionsPath("/chat/completions")
                 .build();
-        OpenAiChatModel model = OpenAiChatModel.builder()
+        OpenAiChatModel chatModel = OpenAiChatModel.builder()
                 .openAiApi(api)
                 .defaultOptions(OpenAiChatOptions.builder()
                         .model(model)
                         .temperature(0.1)
                         .build())
                 .build();
-        return ChatClient.create(model);
+        return ChatClient.create(chatModel);
     }
 
     private String trimTrailingSlash(String value) {

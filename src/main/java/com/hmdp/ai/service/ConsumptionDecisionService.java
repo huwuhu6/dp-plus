@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.client.SpringAiTextClient;
 import com.hmdp.ai.config.AiProperties;
+import com.hmdp.ai.util.CuisineCanonicalizer;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionMetrics;
@@ -833,10 +834,16 @@ public class ConsumptionDecisionService {
     }
 
     private boolean matchesCuisine(String profileCuisine, String requestedCuisine) {
-        if (contains(profileCuisine, requestedCuisine)) return true;
-        boolean requestedGrill = requestedCuisine.contains("烧烤") || requestedCuisine.contains("烤肉");
-        boolean profileGrill = profileCuisine.contains("烧烤") || profileCuisine.contains("烤肉");
-        return requestedGrill && profileGrill;
+        if (profileCuisine == null || requestedCuisine == null || requestedCuisine.isEmpty()) return false;
+        String canonicalRequested = CuisineCanonicalizer.canonicalize(requestedCuisine);
+        if (canonicalRequested.isEmpty()) return false;
+        // Profile cuisine is a comma-separated string (e.g. "日料,寿司" or "火锅,烤肉").
+        // Split, canonicalize each token, and compare by canonical equality.
+        for (String token : profileCuisine.split(",")) {
+            String canonicalToken = CuisineCanonicalizer.canonicalize(token.trim());
+            if (canonicalToken.equals(canonicalRequested)) return true;
+        }
+        return false;
     }
 
     public boolean matchesFollowUpConstraints(Shop shop, AiShopProfile profile, DecisionRequest request,

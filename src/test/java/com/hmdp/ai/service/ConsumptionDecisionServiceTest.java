@@ -11,7 +11,6 @@ import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.entity.AiDecisionSession;
-import com.hmdp.ai.entity.AiDecisionMessage;
 import com.hmdp.ai.entity.AiDecisionMetric;
 import com.hmdp.ai.entity.AiReviewDocument;
 import com.hmdp.ai.entity.AiShopProfile;
@@ -40,7 +39,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -252,6 +250,184 @@ class ConsumptionDecisionServiceTest {
                 new DecisionRequest(), constraints);
 
         assertTrue(matched);
+    }
+
+    @Test
+    void 用户日本料理匹配商户日料() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("日本料理");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("日料");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void 用户日式料理匹配商户日料() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("日式料理");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("日料");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void 用户日本菜匹配商户日料寿司逗号分隔() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("日本菜");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("日料,寿司");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void 用户寿司匹配商户日料() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("寿司");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("日料");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void 用户日料匹配商户日本料理() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("日料");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("日本料理");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void 用户烤肉匹配商户火锅烤肉逗号分隔() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("烤肉");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("火锅,烤肉");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void 用户牛排匹配商户西餐() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("牛排");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("西餐");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void 不同菜系不应错误匹配() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("川菜");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("湘菜");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertFalse(matched);
+    }
+
+    @Test
+    void 无关菜系不应错误匹配() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("日料");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("粤菜");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertFalse(matched);
+    }
+
+    @Test
+    void 用户港式茶餐厅匹配商户港式茶餐厅() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("港式茶餐厅");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("港式茶餐厅");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void 复合cuisine的空格处理正确() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("日料");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine(" 日料 , 寿司 ");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void 用户日料匹配商户nullProfile不匹配() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("日料");
+        Shop shop = new Shop();
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, null,
+                new DecisionRequest(), constraints);
+
+        assertFalse(matched);
     }
 
     @Test

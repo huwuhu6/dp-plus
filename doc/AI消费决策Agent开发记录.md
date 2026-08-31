@@ -1448,6 +1448,56 @@ deepseek-v4-flash 在 4/8 样本中输出了禁止词（"距离""评分""价格"
 - 两个调用在模型失败时均有 fallback（叙事→默认措辞，润色→返回原始事实），不受影响
 - 主模型配置 `deepseek-v4-flash` 不变，仅影响叙事和润色
 
+## 2026-08-31：修复菜系硬过滤的 canonicalization 不对称
+
+### 问题
+
+菜系检索是分层进行的：`ConstraintExtractor` 归一化用户侧菜系（如"寿司"→"日料"），`ConsumptionDecisionService.matchesCuisine()` 判断商户肖像的菜系是否匹配用户请求。但两者使用不同的归一化算法：
+
+- `canonicalizeCuisine()`（用户侧）：`contains()` 判断，如"日本料理"→"日料"
+- `matchesCuisine()`（商户侧）：`contains()` 判断，如 `profileCuisine.contains("日料")`
+
+商户 `AiShopProfile.cuisine` 是逗号分隔字段（如 `"日料,寿司"`、`"火锅,烤肉"`、`"港式茶餐厅"`），且由初始数据导入时写入，**画像重建链路不更新菜系**。理论上两者都能正确匹配，但"寿司"用户请求会被用户侧映射为"日料"，而商户侧 `"日料,寿司".contains("日料")` 也返回 true——所以大部分场景下表面正确。问题出在：
+
+1. 非映射词需精确匹配：用户说"日本料理"→用户侧→"日料"；商户侧 `"日料,寿司".contains("日料")`→true，但"日本料理"→商户侧 `"日料,寿司".contains("日本料理")`→false，**不对称**。
+2. 商户侧未 split 逗号：`"港式茶餐厅".contains("港式茶餐厅")`→true，但若商户存为 `"港式,茶餐厅"`，`contains("港式茶餐厅")`→false
+3. 复合值无明确 mapping：`"港式茶餐厅"` 只能通过 `contains()` 匹配，无显式规范入口
+
+### 修复
+
+新建 `CuisineCanonicalizer` 共享工具类，使用 exact-match + 显式复合映射：
+
+```
+日料, 日本料理, 日式料理, 日本菜, 寿司 → 日料
+烧烤, 烤肉 → 烧烤
+西餐, 牛排 → 西餐
+港式, 茶餐厅, 港式茶餐厅 → 港式
+火锅 → 火锅
+```
+
+**设计原则**：
+- 封闭映射集，无 ontology / NER / 外部知识库
+- **仅 exact-match**，无 substring / contains 回退
+- 用户侧和商户侧共用同一套 canonicalization
+
+**变更**：
+
+| 文件 | 变更 |
+|------|------|
+| `CuisineCanonicalizer.java`（新建） | 共享 exact-match 映射，`canonicalize()` + `knownCanonicalValues()` |
+| `ConstraintExtractor.java` | `canonicalizeCuisine()` 委托给 `CuisineCanonicalizer` |
+| `ConsumptionDecisionService.java` | `matchesCuisine()` 重写为 split → 逐 token canonicalize → equals |
+| `AgentChatClientConfig.java` | 修复变量名冲突（`OpenAiChatModel model` 遮蔽 `String model` 参数） |
+| `CuisineCanonicalizerTest.java`（新建） | 20 个用例覆盖所有映射 + 幂等性 + 边界 |
+| `ConsumptionDecisionServiceTest.java` | 追加 12 个菜系匹配测试 + 恢复 `lightTasteOnlyReturnsShopsWithSupportingReviewEvidence` |
+
+### 测试结果
+
+- CuisineCanonicalizerTest：20/20 通过
+- ConstraintExtractorTest：3/3 通过
+- ConsumptionDecisionServiceTest：62/63 通过（1 个 Mockito 环境问题，非逻辑错误）
+- `AgentChatClientConfig.java` 变量名冲突修复不影响既有逻辑
+
 ### 测试
 
 `ConsumptionDecisionServiceTest` 26 项 + `AgentConversationServiceTest` 7 项：0 failure、0 新 error。1 个既有 Mockito JDK 21 错误未改动。

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.dto.DecisionConstraints;
+import com.hmdp.ai.util.CuisineCanonicalizer;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -125,14 +126,7 @@ public class ConstraintExtractor {
     }
 
     private String canonicalizeCuisine(String cuisine) {
-        if (cuisine == null || cuisine.trim().isEmpty()) return "";
-        String normalized = cuisine.trim();
-        if (normalized.contains("日料") || normalized.contains("寿司")) return "日料";
-        if (normalized.contains("火锅")) return "火锅";
-        if (normalized.contains("烧烤") || normalized.contains("烤肉")) return "烧烤";
-        if (normalized.contains("西餐") || normalized.contains("牛排")) return "西餐";
-        if (normalized.contains("港式") || normalized.contains("茶餐厅")) return "港式";
-        return normalized;
+        return CuisineCanonicalizer.canonicalize(cuisine);
     }
 
     private String canonicalizeOccasion(String occasion) {
