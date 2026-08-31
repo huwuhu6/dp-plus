@@ -1,0 +1,1056 @@
+{
+  "experiment_date": "2026-08-31",
+  "experiment": "Review Embedding Content-only vs Content+Tags A/B",
+  "dataset_version": "ablation-v1",
+  "dataset_size": 35,
+  "method": "exact cosine over allowed set (not ANN)",
+  "variants": {
+    "A_content_only": {
+      "embedding_text": "商户：{name}。评价证据：{content}。标签：",
+      "recall_at_3": 0.7932,
+      "recall_at_5": 0.9514,
+      "ndcg_at_3": 0.9828,
+      "ndcg_at_5": 0.9828,
+      "top1_accuracy": 0.9655,
+      "constraint_violation_rate": 0.0,
+      "failure_attribution": {
+        "CORRECT": 69,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 36
+      }
+    },
+    "B_content_plus_tags": {
+      "embedding_text": "商户：{name}。评价证据：{content}。标签：{tags}",
+      "recall_at_3": 0.7932,
+      "recall_at_5": 0.9514,
+      "ndcg_at_3": 0.9873,
+      "ndcg_at_5": 0.9873,
+      "top1_accuracy": 0.9655,
+      "constraint_violation_rate": 0.0,
+      "failure_attribution": {
+        "CORRECT": 69,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 36
+      }
+    }
+  },
+  "delta_B_minus_A": {
+    "recall_at_3_pp": 0.0,
+    "recall_at_5_pp": 0.0,
+    "ndcg_at_3_pp": 0.45,
+    "ndcg_at_5_pp": 0.45,
+    "top1_accuracy_pp": 0.0,
+    "constraint_violation_rate_pp": 0.0
+  },
+  "decision": {
+    "rule": "Keep B (content+tags) only if Recall@3 >= +3pp AND NDCG@3/Top1/CVR not worse",
+    "recall_3_condition_met": false,
+    "ndcg_3_not_worse": true,
+    "top1_not_worse": true,
+    "cvr_not_worse": true,
+    "keep_b": false,
+    "recommendation": "content-only (A)"
+  },
+  "production_anchor": {
+    "queries_compared": 28,
+    "avg_overlap_at_3": 0.8571,
+    "avg_overlap_at_5": 0.7714
+  },
+  "per_case_results": [
+    {
+      "case_id": "ABL_001",
+      "query": "人均200以内的日料",
+      "gt_count": 3,
+      "a_top_k": [
+        26,
+        22,
+        24
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        26,
+        22,
+        24
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_002",
+      "query": "人均100的港式茶餐厅",
+      "gt_count": 1,
+      "a_top_k": [
+        47
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        47
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_003",
+      "query": "适合约会的安静西餐厅",
+      "gt_count": 3,
+      "a_top_k": [
+        36,
+        37,
+        41
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        37,
+        36,
+        41
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_004",
+      "query": "安静的火锅，适合聊天",
+      "gt_count": 2,
+      "a_top_k": [
+        30,
+        33,
+        31
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        30,
+        33,
+        31
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 2,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 2,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_005",
+      "query": "日料",
+      "gt_count": 8,
+      "a_top_k": [
+        20,
+        26,
+        21
+      ],
+      "a_recall_3": 0.375,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        20,
+        26,
+        25
+      ],
+      "b_recall_3": 0.375,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 5
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 5
+      }
+    },
+    {
+      "case_id": "ABL_006",
+      "query": "火锅",
+      "gt_count": 8,
+      "a_top_k": [
+        30,
+        33,
+        28
+      ],
+      "a_recall_3": 0.375,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        30,
+        33,
+        28
+      ],
+      "b_recall_3": 0.375,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 5
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 5
+      }
+    },
+    {
+      "case_id": "ABL_007",
+      "query": "附近人均150的火锅",
+      "gt_count": 1,
+      "a_top_k": [
+        32
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        32
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_008",
+      "query": "西湖附近的日料",
+      "gt_count": 1,
+      "a_top_k": [
+        24
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        24
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_011",
+      "query": "烧烤",
+      "gt_count": 5,
+      "a_top_k": [
+        49,
+        48,
+        52
+      ],
+      "a_recall_3": 0.6,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        48,
+        49,
+        52
+      ],
+      "b_recall_3": 0.6,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      }
+    },
+    {
+      "case_id": "ABL_012",
+      "query": "人均200的烧烤",
+      "gt_count": 5,
+      "a_top_k": [
+        51,
+        48,
+        52
+      ],
+      "a_recall_3": 0.6,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        51,
+        48,
+        49
+      ],
+      "b_recall_3": 0.6,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      }
+    },
+    {
+      "case_id": "ABL_013",
+      "query": "福州闽侯的日料",
+      "gt_count": 4,
+      "a_top_k": [
+        76,
+        73,
+        75
+      ],
+      "a_recall_3": 0.75,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        76,
+        73,
+        74
+      ],
+      "b_recall_3": 0.75,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 1
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 1
+      }
+    },
+    {
+      "case_id": "ABL_014",
+      "query": "福州人均150的西餐",
+      "gt_count": 1,
+      "a_top_k": [
+        83
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        83
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_015",
+      "query": "晚上22:30吃火锅",
+      "gt_count": 5,
+      "a_top_k": [
+        30,
+        31,
+        28
+      ],
+      "a_recall_3": 0.6,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        30,
+        31,
+        28
+      ],
+      "b_recall_3": 0.6,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      }
+    },
+    {
+      "case_id": "ABL_017",
+      "query": "烤肉",
+      "gt_count": 4,
+      "a_top_k": [
+        52,
+        49,
+        48
+      ],
+      "a_recall_3": 0.75,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        52,
+        48,
+        49
+      ],
+      "b_recall_3": 0.75,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 1
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 1
+      }
+    },
+    {
+      "case_id": "ABL_018",
+      "query": "牛排",
+      "gt_count": 5,
+      "a_top_k": [
+        36,
+        37,
+        41
+      ],
+      "a_recall_3": 0.6,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        36,
+        37,
+        41
+      ],
+      "b_recall_3": 0.6,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      }
+    },
+    {
+      "case_id": "ABL_019",
+      "query": "福州烤肉",
+      "gt_count": 3,
+      "a_top_k": [
+        86,
+        84,
+        85
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        86,
+        84,
+        85
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_022",
+      "query": "杭州西餐",
+      "gt_count": 7,
+      "a_top_k": [
+        37,
+        36,
+        39
+      ],
+      "a_recall_3": 0.42857142857142855,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        37,
+        36,
+        39
+      ],
+      "b_recall_3": 0.42857142857142855,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 4
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 4
+      }
+    },
+    {
+      "case_id": "ABL_023",
+      "query": "找个安静不用排队的火锅，人均150以内",
+      "gt_count": 1,
+      "a_top_k": [
+        33,
+        34,
+        28
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        33,
+        34,
+        28
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_024",
+      "query": "福州适合约会的安静西餐厅",
+      "gt_count": 2,
+      "a_top_k": [
+        81,
+        82,
+        83
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        82,
+        81,
+        83
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 2,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 2,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_025",
+      "query": "港式茶餐厅",
+      "gt_count": 5,
+      "a_top_k": [
+        45,
+        44,
+        43
+      ],
+      "a_recall_3": 0.6,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        45,
+        44,
+        43
+      ],
+      "b_recall_3": 0.6,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      }
+    },
+    {
+      "case_id": "ABL_026",
+      "query": "福州闽菜",
+      "gt_count": 8,
+      "a_top_k": [
+        64,
+        66,
+        61
+      ],
+      "a_recall_3": 0.375,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        61,
+        64,
+        66
+      ],
+      "b_recall_3": 0.375,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 5
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 5
+      }
+    },
+    {
+      "case_id": "ABL_027",
+      "query": "人均100以内的烧烤",
+      "gt_count": 1,
+      "a_top_k": [
+        51
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        51
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_028",
+      "query": "杭帮菜",
+      "gt_count": 3,
+      "a_top_k": [
+        54,
+        53,
+        55
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        54,
+        53,
+        55
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_029",
+      "query": "福州人均150的火锅",
+      "gt_count": 4,
+      "a_top_k": [
+        78,
+        80,
+        77
+      ],
+      "a_recall_3": 0.75,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        78,
+        80,
+        77
+      ],
+      "b_recall_3": 0.75,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 1
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 1
+      }
+    },
+    {
+      "case_id": "ABL_030",
+      "query": "寿司",
+      "gt_count": 1,
+      "a_top_k": [
+        20,
+        22,
+        21
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 0.5,
+      "a_top1": 0.0,
+      "b_top_k": [
+        20,
+        21,
+        23
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 0.6309297535714575,
+      "b_top1": 0.0,
+      "a_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_031",
+      "query": "福州小吃",
+      "gt_count": 5,
+      "a_top_k": [
+        71,
+        72,
+        68
+      ],
+      "a_recall_3": 0.6,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        72,
+        71,
+        68
+      ],
+      "b_recall_3": 0.6,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      }
+    },
+    {
+      "case_id": "ABL_032",
+      "query": "人均200左右的西餐",
+      "gt_count": 5,
+      "a_top_k": [
+        39,
+        38,
+        40
+      ],
+      "a_recall_3": 0.6,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        39,
+        38,
+        40
+      ],
+      "b_recall_3": 0.6,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 2
+      }
+    },
+    {
+      "case_id": "ABL_033",
+      "query": "找安静的日料店",
+      "gt_count": 3,
+      "a_top_k": [
+        20,
+        25,
+        24
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        20,
+        25,
+        24
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 3,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    },
+    {
+      "case_id": "ABL_034",
+      "query": "火车东站附近的火锅",
+      "gt_count": 1,
+      "a_top_k": [
+        35
+      ],
+      "a_recall_3": 1.0,
+      "a_ndcg_3": 1.0,
+      "a_top1": 1.0,
+      "b_top_k": [
+        35
+      ],
+      "b_recall_3": 1.0,
+      "b_ndcg_3": 1.0,
+      "b_top1": 1.0,
+      "a_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      },
+      "b_failure_attribution": {
+        "CORRECT": 1,
+        "HARD_FILTER_ERROR": 0,
+        "SEMANTIC_RETRIEVAL_ERROR": 0,
+        "SEMANTIC_THRESHOLD_ERROR": 0,
+        "RANKING_ERROR": 0
+      }
+    }
+  ]
+}

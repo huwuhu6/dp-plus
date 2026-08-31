@@ -19,6 +19,12 @@ target/
 *.iml
 *.ipr
 
+# Generated data files (not source)
+retrieval_ablation_reviews.csv
+retrieval_tags_ab_embeddings.json
+.ab-baseline/
+retrieval_ablation_reports/
+
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/

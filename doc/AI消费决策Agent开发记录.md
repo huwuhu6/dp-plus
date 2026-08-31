@@ -1631,6 +1631,7 @@ v3 的 pre-filter 方案与生产等价。语义信号更有用因为 ANN 搜索
 |------|------|------|
 | ConstraintExtractor Prompt v1/v2 对比 | `constraint_experiment.py` | 已关闭（不再继续 Prompt 调优） |
 | Semantic Scoring Ablation（V_Base / V_Sem / V_Sem_2x） | `retrieval_ablation_*.py` | 已完成（生产等价 pre-filter） |
+| Review Embedding content-only vs content+tags A/B | `retrieval_tags_ab_experiment.py` | 已完成（tags 无增益，推荐 content-only） |
 | 叙事生成/答案润色 qwen-flash 降级 | 生产代码 | 已上线 |
 | 主评测 seed-v2 / holdout-v1 | `AiEvaluationService` | 持续可用 |
 
@@ -1640,6 +1641,10 @@ v3 的 pre-filter 方案与生产等价。语义信号更有用因为 ANN 搜索
 V_Base:  Recall@3=0.7291  NDCG@3=0.9355  Top1=0.9355  CVR=0
 V_Sem:   Recall@3=0.7614  NDCG@3=0.9558  Top1=0.9355  CVR=0
 V_Sem_2x:Recall@3=0.7722  NDCG@3=0.9704  Top1=0.9677  CVR=0
+
+A (content-only):  Recall@3=0.7932  NDCG@3=0.9828  Top1=0.9655  CVR=0
+B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
+Δ(B-A):            Recall@3=0.00pp  NDCG@3=+0.45pp Top1=0.00pp CVR=0
 ```
 
 **准确表述**：
@@ -1652,13 +1657,13 @@ V_Sem_2x:Recall@3=0.7722  NDCG@3=0.9704  Top1=0.9677  CVR=0
 
 ## Known Limitations
 
-### 1. AiReviewDocument.tags 未启用
+### 1. AiReviewDocument.tags 未启用（已实验验证无影响）
 
-**当前状态**：`ShopReviewService` 写入 `AiReviewDocument` 时 `tags` 恒为空（`document.setTags("")`），`SemanticShopDocumentFactory.reviewDocument()` 拼接的文本中 `"。标签："` 后无实际内容。当前 Review Embedding 实际上是 content-only。
+**当前状态**：`ShopReviewService` 写入 `AiReviewDocument` 时 `tags` 恒为空（`document.setTags("")`），但批量加载的演示数据（LOCAL_DEMO, source_revision=null）通过 SQL 直接写入，tags 非空。当前生产索引中的 Review Document 文本实际包含 tags（如 `"标签：自助,三文鱼,甜虾,补货快,性价比"`），即 content+tags。
 
-**为什么本轮不解决**：原定 `content vs content+tags` A/B 实验因变量不存在而取消。当前 content-only embedding 未观察到因缺少 tags 导致的实际检索失败案例。Review tag extraction 需要额外的 NLP 管线或模型调用，在当前阶段投入产出比不明确。
+**2026-08-31 A/B 实验验证**：通过 exact cosine 在 allowed set 内的精确对比，A（content-only）与 B（content+tags）的 Recall@3 完全一致（0.7932 vs 0.7932），Top1 Accuracy 完全一致（0.9655），NDCG@3 仅差 +0.45pp（在噪声范围内）。预注册决策规则（Recall@3 ≥ +3pp 才保留 B）未满足，结论为：**tags 在 embedding 文本中无实际检索增益**。
 
-**什么条件下值得重新考虑**：当 content-only embedding 被明确归因为 ranking 失败原因（如频繁出现语义分数无法区分相关/不相关 Review），且拥有稳定可用的 tag extraction 管线时。
+**建议**：当前 content+tags 索引无害但无必要。未来重索引可直接使用 content-only 文本，无回归风险。
 
 ### 2. Review Sentiment 当前未参与 Semantic Scoring
 
@@ -1724,7 +1729,7 @@ V_Sem_2x:Recall@3=0.7722  NDCG@3=0.9704  Top1=0.9677  CVR=0
 - **Reranker / Cross-Encoder**：大部分错误是 ranking 权重问题，而非语义信号不足
 - **NER / Entity Linking**：实体边界已通过 Prompt 基线达到 100%，Holdout 边界情况不需要 NER 管线
 - **Ontology / 知识图谱**：CuisineCanonicalizer 已用封闭映射集覆盖主要菜系，不需要外部知识库
-- **Review.tags extraction**：当前 content-only embedding 未发现因缺少 tags 导致的失败案例
+- **Review.tags embedding A/B**：Exact cosine 对比 content-only vs content+tags，Recall@3 完全一致（0.7932），Top1 完全一致（0.9655），NDCG@3 差 +0.45pp。预注册规则未满足，推荐 content-only。详见 `retrieval_tags_ab_report.md`。
 - **Semantic weight 调优**：weight=18 已显示方向性增量，当前数据规模不足以支持最优权重搜索
 - **Per-shop document cap**：当前文档分布均匀，未出现单 Shop 占据 TopK 大部分名额的情况
 - **Sentiment-aware embedding**：未观察到因忽略 sentiment 导致的实际错误案例
