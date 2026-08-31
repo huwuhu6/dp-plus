@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
-Milvus Document-Level Semantic Score Snapshot (v2).
+Milvus Document-Level Semantic Score Snapshot (v3).
 
 Production chain:
-  SQL → Hard Filter → allowedShopIds → Milvus (with filter) → raw document-level results
+  SQL → Hard Filter → allowedShopIds → Milvus pre-filter → TopK=80 raw document-level results
 
-This snapshot preserves RAW document-level results from Milvus.
+Milvus REST API v2 `filter` parameter is a PRE-filter (applied during ANN search),
+not a post-filter. This is verified against Milvus v2.5.5.
+
+  - Filter expression: metadata["shopId"] in [allowedShopIds]
   - No MAX aggregation in snapshot phase
   - No threshold filtering in snapshot phase
-  - Milvus search uses allowedShopIds (from hard filter) to match production
+
+Pre-filter vs post-filter validation:
+  Full search TopK=80 + Python filter returns only 1 doc for some queries
+  Pre-filter TopK=80 returns 80 docs for the same query
+  This proves the two approaches are NOT equivalent.
 
 Output: retrieval_ablation_milvus_snapshot.json
   {
@@ -206,15 +213,27 @@ def get_embedding(text: str) -> List[float]:
     return resp.json()["data"][0]["embedding"]
 
 
-# ── Milvus search (full collection) ──
-def search_milvus_full(vector: List[float], top_k: int = 80) -> List[dict]:
-    """Search Milvus entire collection (no filter). Returns raw results."""
+# ── Milvus search (pre-filter via REST API filter) ──
+def search_milvus_with_prefilter(vector: List[float], allowed_ids: Set[int], top_k: int = 80) -> List[dict]:
+    """Search Milvus with pre-filter matching production `allowedShopIds` filter.
+
+    Milvus REST API v2 `filter` parameter is a pre-filter (applied during ANN search),
+    NOT a post-filter. Verified against Milvus v2.5.5.
+
+    Filter expression uses JSON path syntax: metadata["shopId"] in [id1, id2, ...]
+    """
+    if not allowed_ids:
+        return []
+    ids_str = ",".join(str(sid) for sid in sorted(allowed_ids))
+    filter_expr = f'metadata["shopId"] in [{ids_str}]'
+
     url = f"{MILVUS_HOST}/v2/vectordb/entities/search"
     payload = {
         "collectionName": "hmdp_shop_evidence",
         "annsField": "embedding",
         "data": [vector],
         "limit": top_k,
+        "filter": filter_expr,
         "outputFields": ["doc_id", "metadata"],
     }
     resp = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=60)
@@ -259,17 +278,12 @@ def build_snapshot(dataset_path: str, shops_path: str, profiles_path: str, outpu
             # Step 2: Get embedding
             emb = get_embedding(query)
 
-            # Step 3: Search entire Milvus collection (no filter — REST API filter is post-filter)
-            # Production uses pre-filter (expr), REST API only supports post-filter (filter).
-            # To match production intent, search full collection then Python-filter by allowedShopIds.
-            all_docs = search_milvus_full(emb, top_k=80)
-            print(f"milvus_raw={len(all_docs)}", end=" ", flush=True)
+            # Step 3: Search Milvus with pre-filter (production-equivalent allowedShopIds filter)
+            # Milvus REST API v2 `filter` parameter is a pre-filter (applied during ANN search)
+            filtered_docs = search_milvus_with_prefilter(emb, allowed_ids, top_k=80)
+            print(f"milvus_hits={len(filtered_docs)}", end=" ", flush=True)
 
-            # Step 4: Filter by allowedShopIds in Python (mimics production pre-filter)
-            filtered_docs = [d for d in all_docs if int(json.loads(d["metadata"])["shopId"]) in allowed_ids]
-            print(f"after_filter={len(filtered_docs)}", end=" ", flush=True)
-
-            # Step 5: Save RAW document-level results (NO MAX, NO threshold)
+            # Step 4: Save RAW document-level results (NO MAX, NO threshold)
             raw_results = []
             for doc in filtered_docs:
                 meta = json.loads(doc["metadata"])

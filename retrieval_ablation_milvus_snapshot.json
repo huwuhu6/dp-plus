@@ -5,22 +5,1240 @@
       "shop_id": 26,
       "doc_type": "REVIEW",
       "score": 0.704818
+    },
+    {
+      "doc_id": "shop-review-47",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.660456
+    },
+    {
+      "doc_id": "shop-review-46",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.640002
+    },
+    {
+      "doc_id": "shop-review-51",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.627068
+    },
+    {
+      "doc_id": "shop-profile-22",
+      "shop_id": 22,
+      "doc_type": "PROFILE",
+      "score": 0.577735
+    },
+    {
+      "doc_id": "shop-review-26",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.534166
+    },
+    {
+      "doc_id": "shop-review-27",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.515377
+    },
+    {
+      "doc_id": "shop-review-25",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.510353
+    },
+    {
+      "doc_id": "shop-review-24",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.49276
+    },
+    {
+      "doc_id": "shop-review-39",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.456144
+    },
+    {
+      "doc_id": "shop-review-38",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.450802
     }
   ],
-  "ABL_002": [],
+  "ABL_002": [
+    {
+      "doc_id": "shop-review-172",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.515771
+    },
+    {
+      "doc_id": "shop-profile-47",
+      "shop_id": 47,
+      "doc_type": "PROFILE",
+      "score": 0.509398
+    },
+    {
+      "doc_id": "shop-review-173",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.483687
+    },
+    {
+      "doc_id": "shop-review-177",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.4759
+    },
+    {
+      "doc_id": "shop-review-174",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.458879
+    },
+    {
+      "doc_id": "shop-review-176",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.446817
+    },
+    {
+      "doc_id": "shop-review-175",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.440155
+    }
+  ],
   "ABL_003": [
     {
       "doc_id": "shop-review-116",
       "shop_id": 37,
       "doc_type": "REVIEW",
       "score": 0.614954
+    },
+    {
+      "doc_id": "shop-profile-37",
+      "shop_id": 37,
+      "doc_type": "PROFILE",
+      "score": 0.592371
+    },
+    {
+      "doc_id": "shop-review-113",
+      "shop_id": 37,
+      "doc_type": "REVIEW",
+      "score": 0.585831
+    },
+    {
+      "doc_id": "shop-profile-39",
+      "shop_id": 39,
+      "doc_type": "PROFILE",
+      "score": 0.584648
+    },
+    {
+      "doc_id": "shop-profile-36",
+      "shop_id": 36,
+      "doc_type": "PROFILE",
+      "score": 0.573188
+    },
+    {
+      "doc_id": "shop-review-117",
+      "shop_id": 37,
+      "doc_type": "REVIEW",
+      "score": 0.551119
+    },
+    {
+      "doc_id": "shop-review-114",
+      "shop_id": 37,
+      "doc_type": "REVIEW",
+      "score": 0.550069
+    },
+    {
+      "doc_id": "shop-review-112",
+      "shop_id": 37,
+      "doc_type": "REVIEW",
+      "score": 0.54627
+    },
+    {
+      "doc_id": "shop-profile-42",
+      "shop_id": 42,
+      "doc_type": "PROFILE",
+      "score": 0.545085
+    },
+    {
+      "doc_id": "shop-review-124",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.544714
+    },
+    {
+      "doc_id": "shop-review-125",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.544553
+    },
+    {
+      "doc_id": "shop-profile-40",
+      "shop_id": 40,
+      "doc_type": "PROFILE",
+      "score": 0.531911
+    },
+    {
+      "doc_id": "shop-review-111",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.531741
+    },
+    {
+      "doc_id": "shop-review-106",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.528251
+    },
+    {
+      "doc_id": "shop-review-126",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.517444
+    },
+    {
+      "doc_id": "shop-review-107",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.497914
+    },
+    {
+      "doc_id": "shop-review-133",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.497516
+    },
+    {
+      "doc_id": "shop-review-115",
+      "shop_id": 37,
+      "doc_type": "REVIEW",
+      "score": 0.49629
+    },
+    {
+      "doc_id": "shop-review-134",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.495335
+    },
+    {
+      "doc_id": "shop-review-129",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.479874
+    },
+    {
+      "doc_id": "shop-review-131",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.47914
+    },
+    {
+      "doc_id": "shop-review-130",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.477544
+    },
+    {
+      "doc_id": "shop-review-109",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.477192
+    },
+    {
+      "doc_id": "shop-review-145",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.472552
+    },
+    {
+      "doc_id": "shop-review-128",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.469453
+    },
+    {
+      "doc_id": "shop-review-132",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.467254
+    },
+    {
+      "doc_id": "shop-review-142",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.466121
+    },
+    {
+      "doc_id": "shop-review-135",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.463529
+    },
+    {
+      "doc_id": "shop-review-110",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.458357
+    },
+    {
+      "doc_id": "shop-review-127",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.456379
+    },
+    {
+      "doc_id": "shop-profile-38",
+      "shop_id": 38,
+      "doc_type": "PROFILE",
+      "score": 0.456242
+    },
+    {
+      "doc_id": "shop-review-146",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.455754
+    },
+    {
+      "doc_id": "shop-review-144",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.45545
+    },
+    {
+      "doc_id": "shop-review-108",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.445944
+    },
+    {
+      "doc_id": "shop-review-143",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.445132
+    },
+    {
+      "doc_id": "shop-review-147",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.436541
+    },
+    {
+      "doc_id": "shop-review-120",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.4217
+    },
+    {
+      "doc_id": "shop-review-121",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.403334
+    },
+    {
+      "doc_id": "shop-review-123",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.397385
+    },
+    {
+      "doc_id": "shop-review-118",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.388383
+    },
+    {
+      "doc_id": "shop-review-119",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.381378
+    },
+    {
+      "doc_id": "shop-review-122",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.361179
     }
   ],
-  "ABL_004": [],
-  "ABL_005": [],
-  "ABL_006": [],
-  "ABL_007": [],
-  "ABL_008": [],
+  "ABL_004": [
+    {
+      "doc_id": "shop-review-72",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.624754
+    },
+    {
+      "doc_id": "shop-profile-29",
+      "shop_id": 29,
+      "doc_type": "PROFILE",
+      "score": 0.621427
+    },
+    {
+      "doc_id": "shop-review-66",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.617832
+    },
+    {
+      "doc_id": "shop-review-79",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.610164
+    },
+    {
+      "doc_id": "shop-profile-30",
+      "shop_id": 30,
+      "doc_type": "PROFILE",
+      "score": 0.608144
+    },
+    {
+      "doc_id": "shop-review-67",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.603953
+    },
+    {
+      "doc_id": "shop-review-75",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.600281
+    },
+    {
+      "doc_id": "shop-profile-31",
+      "shop_id": 31,
+      "doc_type": "PROFILE",
+      "score": 0.599376
+    },
+    {
+      "doc_id": "shop-review-70",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.597646
+    },
+    {
+      "doc_id": "shop-review-64",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.597167
+    },
+    {
+      "doc_id": "shop-profile-32",
+      "shop_id": 32,
+      "doc_type": "PROFILE",
+      "score": 0.594791
+    },
+    {
+      "doc_id": "shop-review-87",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.587766
+    },
+    {
+      "doc_id": "shop-review-68",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.587558
+    },
+    {
+      "doc_id": "shop-review-78",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.586794
+    },
+    {
+      "doc_id": "shop-review-76",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.58341
+    },
+    {
+      "doc_id": "shop-review-65",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.57339
+    },
+    {
+      "doc_id": "shop-review-85",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.573385
+    },
+    {
+      "doc_id": "shop-review-69",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.571444
+    },
+    {
+      "doc_id": "shop-profile-28",
+      "shop_id": 28,
+      "doc_type": "PROFILE",
+      "score": 0.567379
+    },
+    {
+      "doc_id": "shop-review-82",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.565706
+    },
+    {
+      "doc_id": "shop-review-77",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.562571
+    },
+    {
+      "doc_id": "shop-review-86",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.562066
+    },
+    {
+      "doc_id": "shop-review-94",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.559051
+    },
+    {
+      "doc_id": "shop-profile-33",
+      "shop_id": 33,
+      "doc_type": "PROFILE",
+      "score": 0.558907
+    },
+    {
+      "doc_id": "shop-review-80",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.557292
+    },
+    {
+      "doc_id": "shop-review-61",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.555546
+    },
+    {
+      "doc_id": "shop-review-71",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.553344
+    },
+    {
+      "doc_id": "shop-profile-35",
+      "shop_id": 35,
+      "doc_type": "PROFILE",
+      "score": 0.551894
+    },
+    {
+      "doc_id": "shop-review-74",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.551577
+    },
+    {
+      "doc_id": "shop-review-73",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.549986
+    },
+    {
+      "doc_id": "shop-review-84",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.549268
+    },
+    {
+      "doc_id": "shop-review-81",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.544481
+    },
+    {
+      "doc_id": "shop-review-104",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.541255
+    },
+    {
+      "doc_id": "shop-review-102",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.54003
+    },
+    {
+      "doc_id": "shop-review-62",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.539814
+    },
+    {
+      "doc_id": "shop-review-83",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.536439
+    },
+    {
+      "doc_id": "shop-review-95",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.529647
+    },
+    {
+      "doc_id": "shop-review-92",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.528892
+    },
+    {
+      "doc_id": "shop-review-63",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.528801
+    },
+    {
+      "doc_id": "shop-review-100",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.527849
+    },
+    {
+      "doc_id": "shop-review-105",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.526159
+    },
+    {
+      "doc_id": "shop-review-58",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.523243
+    },
+    {
+      "doc_id": "shop-review-90",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.52293
+    },
+    {
+      "doc_id": "shop-review-96",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.522534
+    },
+    {
+      "doc_id": "shop-review-103",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.522338
+    },
+    {
+      "doc_id": "shop-review-60",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.516936
+    },
+    {
+      "doc_id": "shop-review-59",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.515217
+    },
+    {
+      "doc_id": "shop-review-101",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.512528
+    },
+    {
+      "doc_id": "shop-review-89",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.506573
+    },
+    {
+      "doc_id": "shop-review-88",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.501648
+    },
+    {
+      "doc_id": "shop-review-97",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.488486
+    },
+    {
+      "doc_id": "shop-review-93",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.482764
+    },
+    {
+      "doc_id": "shop-review-91",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.420103
+    }
+  ],
+  "ABL_005": [
+    {
+      "doc_id": "shop-review-50",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.671253
+    },
+    {
+      "doc_id": "shop-review-46",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.629645
+    },
+    {
+      "doc_id": "shop-review-47",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.627566
+    },
+    {
+      "doc_id": "shop-review-51",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.619344
+    },
+    {
+      "doc_id": "shop-profile-20",
+      "shop_id": 20,
+      "doc_type": "PROFILE",
+      "score": 0.569988
+    },
+    {
+      "doc_id": "shop-profile-21",
+      "shop_id": 21,
+      "doc_type": "PROFILE",
+      "score": 0.569837
+    },
+    {
+      "doc_id": "shop-review-18",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.562195
+    },
+    {
+      "doc_id": "shop-profile-22",
+      "shop_id": 22,
+      "doc_type": "PROFILE",
+      "score": 0.56176
+    },
+    {
+      "doc_id": "shop-review-19",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.549737
+    },
+    {
+      "doc_id": "shop-review-13",
+      "shop_id": 20,
+      "doc_type": "REVIEW",
+      "score": 0.548562
+    },
+    {
+      "doc_id": "shop-review-12",
+      "shop_id": 20,
+      "doc_type": "REVIEW",
+      "score": 0.522011
+    },
+    {
+      "doc_id": "shop-review-11",
+      "shop_id": 20,
+      "doc_type": "REVIEW",
+      "score": 0.516635
+    },
+    {
+      "doc_id": "shop-review-10",
+      "shop_id": 20,
+      "doc_type": "REVIEW",
+      "score": 0.515991
+    },
+    {
+      "doc_id": "shop-review-44",
+      "shop_id": 25,
+      "doc_type": "REVIEW",
+      "score": 0.512768
+    },
+    {
+      "doc_id": "shop-profile-23",
+      "shop_id": 23,
+      "doc_type": "PROFILE",
+      "score": 0.506298
+    },
+    {
+      "doc_id": "shop-review-27",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.494429
+    },
+    {
+      "doc_id": "shop-review-45",
+      "shop_id": 25,
+      "doc_type": "REVIEW",
+      "score": 0.492075
+    },
+    {
+      "doc_id": "shop-review-24",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.49131
+    },
+    {
+      "doc_id": "shop-review-26",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.490944
+    },
+    {
+      "doc_id": "shop-review-25",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.486697
+    },
+    {
+      "doc_id": "shop-review-33",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.480188
+    },
+    {
+      "doc_id": "shop-review-52",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.474217
+    },
+    {
+      "doc_id": "shop-review-30",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.461606
+    },
+    {
+      "doc_id": "shop-review-31",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.453665
+    },
+    {
+      "doc_id": "shop-review-53",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.450137
+    },
+    {
+      "doc_id": "shop-review-32",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.448642
+    },
+    {
+      "doc_id": "shop-review-39",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.428229
+    },
+    {
+      "doc_id": "shop-review-38",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.413411
+    }
+  ],
+  "ABL_006": [
+    {
+      "doc_id": "shop-review-74",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.593105
+    },
+    {
+      "doc_id": "shop-profile-30",
+      "shop_id": 30,
+      "doc_type": "PROFILE",
+      "score": 0.591998
+    },
+    {
+      "doc_id": "shop-profile-33",
+      "shop_id": 33,
+      "doc_type": "PROFILE",
+      "score": 0.581518
+    },
+    {
+      "doc_id": "shop-review-70",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.581254
+    },
+    {
+      "doc_id": "shop-review-71",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.579439
+    },
+    {
+      "doc_id": "shop-review-88",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.566878
+    },
+    {
+      "doc_id": "shop-review-75",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.566332
+    },
+    {
+      "doc_id": "shop-review-94",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.565986
+    },
+    {
+      "doc_id": "shop-profile-29",
+      "shop_id": 29,
+      "doc_type": "PROFILE",
+      "score": 0.556729
+    },
+    {
+      "doc_id": "shop-review-96",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.555921
+    },
+    {
+      "doc_id": "shop-review-73",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.555278
+    },
+    {
+      "doc_id": "shop-review-72",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.552894
+    },
+    {
+      "doc_id": "shop-profile-31",
+      "shop_id": 31,
+      "doc_type": "PROFILE",
+      "score": 0.552787
+    },
+    {
+      "doc_id": "shop-review-95",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.54943
+    },
+    {
+      "doc_id": "shop-review-78",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.547548
+    },
+    {
+      "doc_id": "shop-review-68",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.547201
+    },
+    {
+      "doc_id": "shop-review-64",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.547184
+    },
+    {
+      "doc_id": "shop-review-79",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.545535
+    },
+    {
+      "doc_id": "shop-review-67",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.544923
+    },
+    {
+      "doc_id": "shop-review-77",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.544051
+    },
+    {
+      "doc_id": "shop-review-89",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.542159
+    },
+    {
+      "doc_id": "shop-review-66",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.541744
+    },
+    {
+      "doc_id": "shop-review-86",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.540488
+    },
+    {
+      "doc_id": "shop-profile-28",
+      "shop_id": 28,
+      "doc_type": "PROFILE",
+      "score": 0.539736
+    },
+    {
+      "doc_id": "shop-review-62",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.539273
+    },
+    {
+      "doc_id": "shop-review-80",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.536493
+    },
+    {
+      "doc_id": "shop-review-97",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.534886
+    },
+    {
+      "doc_id": "shop-review-76",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.534524
+    },
+    {
+      "doc_id": "shop-review-84",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.534134
+    },
+    {
+      "doc_id": "shop-profile-32",
+      "shop_id": 32,
+      "doc_type": "PROFILE",
+      "score": 0.53261
+    },
+    {
+      "doc_id": "shop-review-69",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.531426
+    },
+    {
+      "doc_id": "shop-review-63",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.531342
+    },
+    {
+      "doc_id": "shop-review-61",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.530252
+    },
+    {
+      "doc_id": "shop-review-58",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.529286
+    },
+    {
+      "doc_id": "shop-profile-35",
+      "shop_id": 35,
+      "doc_type": "PROFILE",
+      "score": 0.526732
+    },
+    {
+      "doc_id": "shop-review-87",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.526593
+    },
+    {
+      "doc_id": "shop-review-104",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.526386
+    },
+    {
+      "doc_id": "shop-review-82",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.523296
+    },
+    {
+      "doc_id": "shop-review-65",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.521602
+    },
+    {
+      "doc_id": "shop-review-85",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.519017
+    },
+    {
+      "doc_id": "shop-review-105",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.518111
+    },
+    {
+      "doc_id": "shop-review-102",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.515312
+    },
+    {
+      "doc_id": "shop-review-101",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.514496
+    },
+    {
+      "doc_id": "shop-review-60",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.509804
+    },
+    {
+      "doc_id": "shop-review-100",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.507495
+    },
+    {
+      "doc_id": "shop-review-81",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.503036
+    },
+    {
+      "doc_id": "shop-review-83",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.494052
+    },
+    {
+      "doc_id": "shop-review-103",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.488818
+    },
+    {
+      "doc_id": "shop-review-59",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.487961
+    }
+  ],
+  "ABL_007": [
+    {
+      "doc_id": "shop-profile-32",
+      "shop_id": 32,
+      "doc_type": "PROFILE",
+      "score": 0.596279
+    },
+    {
+      "doc_id": "shop-review-87",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.586797
+    },
+    {
+      "doc_id": "shop-review-85",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.584728
+    },
+    {
+      "doc_id": "shop-review-82",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.577059
+    },
+    {
+      "doc_id": "shop-review-84",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.569238
+    },
+    {
+      "doc_id": "shop-review-86",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.563982
+    },
+    {
+      "doc_id": "shop-review-83",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.558466
+    }
+  ],
+  "ABL_008": [
+    {
+      "doc_id": "shop-profile-24",
+      "shop_id": 24,
+      "doc_type": "PROFILE",
+      "score": 0.554803
+    },
+    {
+      "doc_id": "shop-review-39",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.539245
+    },
+    {
+      "doc_id": "shop-review-35",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.511448
+    },
+    {
+      "doc_id": "shop-review-34",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.486181
+    },
+    {
+      "doc_id": "shop-review-37",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.484067
+    },
+    {
+      "doc_id": "shop-review-38",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.4692
+    },
+    {
+      "doc_id": "shop-review-36",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.454199
+    }
+  ],
   "ABL_009": [
     {
       "doc_id": "shop-review-64",
@@ -315,6 +1533,192 @@
       "shop_id": 33,
       "doc_type": "REVIEW",
       "score": 0.490968
+    },
+    {
+      "doc_id": "shop-review-98",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.489304
+    },
+    {
+      "doc_id": "shop-review-104",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.488845
+    },
+    {
+      "doc_id": "shop-review-164",
+      "shop_id": 45,
+      "doc_type": "REVIEW",
+      "score": 0.488085
+    },
+    {
+      "doc_id": "shop-profile-30",
+      "shop_id": 30,
+      "doc_type": "PROFILE",
+      "score": 0.48155
+    },
+    {
+      "doc_id": "shop-review-62",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.478926
+    },
+    {
+      "doc_id": "shop-review-349",
+      "shop_id": 80,
+      "doc_type": "REVIEW",
+      "score": 0.478898
+    },
+    {
+      "doc_id": "shop-profile-33",
+      "shop_id": 33,
+      "doc_type": "PROFILE",
+      "score": 0.477782
+    },
+    {
+      "doc_id": "shop-review-295",
+      "shop_id": 71,
+      "doc_type": "REVIEW",
+      "score": 0.477775
+    },
+    {
+      "doc_id": "shop-review-99",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.477232
+    },
+    {
+      "doc_id": "shop-review-61",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.476954
+    },
+    {
+      "doc_id": "shop-review-213",
+      "shop_id": 53,
+      "doc_type": "REVIEW",
+      "score": 0.476877
+    },
+    {
+      "doc_id": "shop-review-96",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.47671
+    },
+    {
+      "doc_id": "shop-review-58",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.47418
+    },
+    {
+      "doc_id": "shop-review-337",
+      "shop_id": 78,
+      "doc_type": "REVIEW",
+      "score": 0.472416
+    },
+    {
+      "doc_id": "shop-review-95",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.47133
+    },
+    {
+      "doc_id": "shop-review-75",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.470948
+    },
+    {
+      "doc_id": "shop-profile-28",
+      "shop_id": 28,
+      "doc_type": "PROFILE",
+      "score": 0.469827
+    },
+    {
+      "doc_id": "shop-profile-35",
+      "shop_id": 35,
+      "doc_type": "PROFILE",
+      "score": 0.469427
+    },
+    {
+      "doc_id": "shop-review-209",
+      "shop_id": 53,
+      "doc_type": "REVIEW",
+      "score": 0.466962
+    },
+    {
+      "doc_id": "shop-review-97",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.465513
+    },
+    {
+      "doc_id": "shop-review-73",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.465195
+    },
+    {
+      "doc_id": "shop-review-92",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.464882
+    },
+    {
+      "doc_id": "shop-review-217",
+      "shop_id": 54,
+      "doc_type": "REVIEW",
+      "score": 0.462584
+    },
+    {
+      "doc_id": "shop-review-105",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.460535
+    },
+    {
+      "doc_id": "shop-review-351",
+      "shop_id": 80,
+      "doc_type": "REVIEW",
+      "score": 0.458629
+    },
+    {
+      "doc_id": "shop-review-212",
+      "shop_id": 53,
+      "doc_type": "REVIEW",
+      "score": 0.458249
+    },
+    {
+      "doc_id": "shop-review-101",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.457869
+    },
+    {
+      "doc_id": "shop-profile-53",
+      "shop_id": 53,
+      "doc_type": "PROFILE",
+      "score": 0.457312
+    },
+    {
+      "doc_id": "shop-review-347",
+      "shop_id": 80,
+      "doc_type": "REVIEW",
+      "score": 0.45667
+    },
+    {
+      "doc_id": "shop-review-210",
+      "shop_id": 53,
+      "doc_type": "REVIEW",
+      "score": 0.45628
+    },
+    {
+      "doc_id": "shop-review-335",
+      "shop_id": 78,
+      "doc_type": "REVIEW",
+      "score": 0.456137
     }
   ],
   "ABL_010": [
@@ -383,11 +1787,806 @@
       "shop_id": 55,
       "doc_type": "REVIEW",
       "score": 0.452537
+    },
+    {
+      "doc_id": "shop-review-42",
+      "shop_id": 25,
+      "doc_type": "REVIEW",
+      "score": 0.449436
+    },
+    {
+      "doc_id": "shop-review-39",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.447619
+    },
+    {
+      "doc_id": "shop-review-74",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.44689
+    },
+    {
+      "doc_id": "shop-review-186",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.446087
+    },
+    {
+      "doc_id": "shop-review-43",
+      "shop_id": 25,
+      "doc_type": "REVIEW",
+      "score": 0.445439
+    },
+    {
+      "doc_id": "shop-review-62",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.444617
+    },
+    {
+      "doc_id": "shop-review-193",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.443268
+    },
+    {
+      "doc_id": "shop-review-24",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.442496
+    },
+    {
+      "doc_id": "shop-review-128",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.441174
+    },
+    {
+      "doc_id": "shop-review-222",
+      "shop_id": 55,
+      "doc_type": "REVIEW",
+      "score": 0.44003
+    },
+    {
+      "doc_id": "shop-review-26",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.439252
+    },
+    {
+      "doc_id": "shop-review-40",
+      "shop_id": 25,
+      "doc_type": "REVIEW",
+      "score": 0.437058
+    },
+    {
+      "doc_id": "shop-review-29",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.436297
+    },
+    {
+      "doc_id": "shop-review-105",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.435615
+    },
+    {
+      "doc_id": "shop-review-209",
+      "shop_id": 53,
+      "doc_type": "REVIEW",
+      "score": 0.434441
+    },
+    {
+      "doc_id": "shop-review-179",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.433757
+    },
+    {
+      "doc_id": "shop-review-66",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.433466
+    },
+    {
+      "doc_id": "shop-profile-46",
+      "shop_id": 46,
+      "doc_type": "PROFILE",
+      "score": 0.432208
+    },
+    {
+      "doc_id": "shop-review-93",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.430601
+    },
+    {
+      "doc_id": "shop-review-98",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.429844
+    },
+    {
+      "doc_id": "shop-review-156",
+      "shop_id": 44,
+      "doc_type": "REVIEW",
+      "score": 0.4298
+    },
+    {
+      "doc_id": "shop-profile-52",
+      "shop_id": 52,
+      "doc_type": "PROFILE",
+      "score": 0.428916
+    },
+    {
+      "doc_id": "shop-review-168",
+      "shop_id": 46,
+      "doc_type": "REVIEW",
+      "score": 0.428593
+    },
+    {
+      "doc_id": "shop-review-134",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.428356
+    },
+    {
+      "doc_id": "shop-review-207",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.427394
+    },
+    {
+      "doc_id": "shop-profile-45",
+      "shop_id": 45,
+      "doc_type": "PROFILE",
+      "score": 0.427125
+    },
+    {
+      "doc_id": "shop-review-94",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.42708
+    },
+    {
+      "doc_id": "shop-review-131",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.426999
+    },
+    {
+      "doc_id": "shop-review-223",
+      "shop_id": 55,
+      "doc_type": "REVIEW",
+      "score": 0.426109
+    },
+    {
+      "doc_id": "shop-review-216",
+      "shop_id": 54,
+      "doc_type": "REVIEW",
+      "score": 0.425805
+    },
+    {
+      "doc_id": "shop-review-164",
+      "shop_id": 45,
+      "doc_type": "REVIEW",
+      "score": 0.425345
+    },
+    {
+      "doc_id": "shop-review-183",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.424953
+    },
+    {
+      "doc_id": "shop-profile-32",
+      "shop_id": 32,
+      "doc_type": "PROFILE",
+      "score": 0.424813
+    },
+    {
+      "doc_id": "shop-review-57",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.42473
+    },
+    {
+      "doc_id": "shop-review-158",
+      "shop_id": 44,
+      "doc_type": "REVIEW",
+      "score": 0.424678
+    },
+    {
+      "doc_id": "shop-review-99",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.424211
+    },
+    {
+      "doc_id": "shop-review-34",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.423887
+    },
+    {
+      "doc_id": "shop-review-214",
+      "shop_id": 54,
+      "doc_type": "REVIEW",
+      "score": 0.423864
+    },
+    {
+      "doc_id": "shop-review-200",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.423628
+    },
+    {
+      "doc_id": "shop-review-159",
+      "shop_id": 44,
+      "doc_type": "REVIEW",
+      "score": 0.423321
+    },
+    {
+      "doc_id": "shop-review-132",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.423311
+    },
+    {
+      "doc_id": "shop-profile-47",
+      "shop_id": 47,
+      "doc_type": "PROFILE",
+      "score": 0.422902
+    },
+    {
+      "doc_id": "shop-profile-53",
+      "shop_id": 53,
+      "doc_type": "PROFILE",
+      "score": 0.422476
+    },
+    {
+      "doc_id": "shop-review-161",
+      "shop_id": 45,
+      "doc_type": "REVIEW",
+      "score": 0.421969
+    },
+    {
+      "doc_id": "shop-review-104",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.421868
+    },
+    {
+      "doc_id": "shop-review-71",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.42183
+    },
+    {
+      "doc_id": "shop-review-33",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.42116
+    },
+    {
+      "doc_id": "shop-review-82",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.420857
+    },
+    {
+      "doc_id": "shop-review-220",
+      "shop_id": 55,
+      "doc_type": "REVIEW",
+      "score": 0.420682
+    },
+    {
+      "doc_id": "shop-review-63",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.420368
+    },
+    {
+      "doc_id": "shop-review-180",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.420009
+    },
+    {
+      "doc_id": "shop-review-101",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.419912
+    },
+    {
+      "doc_id": "shop-review-22",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.419681
+    },
+    {
+      "doc_id": "shop-review-80",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.418982
+    },
+    {
+      "doc_id": "shop-review-92",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.418754
+    },
+    {
+      "doc_id": "shop-review-133",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.418703
+    },
+    {
+      "doc_id": "shop-review-65",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.417855
+    },
+    {
+      "doc_id": "shop-review-160",
+      "shop_id": 45,
+      "doc_type": "REVIEW",
+      "score": 0.417819
+    },
+    {
+      "doc_id": "shop-profile-54",
+      "shop_id": 54,
+      "doc_type": "PROFILE",
+      "score": 0.417685
+    },
+    {
+      "doc_id": "shop-review-166",
+      "shop_id": 46,
+      "doc_type": "REVIEW",
+      "score": 0.417395
+    },
+    {
+      "doc_id": "shop-review-208",
+      "shop_id": 53,
+      "doc_type": "REVIEW",
+      "score": 0.417137
+    },
+    {
+      "doc_id": "shop-profile-34",
+      "shop_id": 34,
+      "doc_type": "PROFILE",
+      "score": 0.416923
+    },
+    {
+      "doc_id": "shop-review-219",
+      "shop_id": 54,
+      "doc_type": "REVIEW",
+      "score": 0.416859
+    },
+    {
+      "doc_id": "shop-review-212",
+      "shop_id": 53,
+      "doc_type": "REVIEW",
+      "score": 0.416467
+    },
+    {
+      "doc_id": "shop-review-96",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.41602
+    },
+    {
+      "doc_id": "shop-profile-50",
+      "shop_id": 50,
+      "doc_type": "PROFILE",
+      "score": 0.415774
+    },
+    {
+      "doc_id": "shop-review-176",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.415121
+    },
+    {
+      "doc_id": "shop-review-167",
+      "shop_id": 46,
+      "doc_type": "REVIEW",
+      "score": 0.414979
+    },
+    {
+      "doc_id": "shop-review-54",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.414799
     }
   ],
-  "ABL_011": [],
-  "ABL_012": [],
-  "ABL_013": [],
+  "ABL_011": [
+    {
+      "doc_id": "shop-review-206",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.543121
+    },
+    {
+      "doc_id": "shop-profile-52",
+      "shop_id": 52,
+      "doc_type": "PROFILE",
+      "score": 0.53486
+    },
+    {
+      "doc_id": "shop-review-202",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.533701
+    },
+    {
+      "doc_id": "shop-review-207",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.52976
+    },
+    {
+      "doc_id": "shop-review-203",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.529756
+    },
+    {
+      "doc_id": "shop-review-201",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.528582
+    },
+    {
+      "doc_id": "shop-review-197",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.52838
+    },
+    {
+      "doc_id": "shop-review-198",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.527288
+    },
+    {
+      "doc_id": "shop-review-200",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.526916
+    },
+    {
+      "doc_id": "shop-profile-51",
+      "shop_id": 51,
+      "doc_type": "PROFILE",
+      "score": 0.526109
+    },
+    {
+      "doc_id": "shop-review-205",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.520203
+    },
+    {
+      "doc_id": "shop-review-196",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.519438
+    },
+    {
+      "doc_id": "shop-review-204",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.511877
+    },
+    {
+      "doc_id": "shop-review-183",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.505936
+    },
+    {
+      "doc_id": "shop-review-199",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.502673
+    },
+    {
+      "doc_id": "shop-review-180",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.490888
+    },
+    {
+      "doc_id": "shop-review-181",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.484963
+    },
+    {
+      "doc_id": "shop-review-182",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.483961
+    },
+    {
+      "doc_id": "shop-review-194",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.480787
+    },
+    {
+      "doc_id": "shop-profile-48",
+      "shop_id": 48,
+      "doc_type": "PROFILE",
+      "score": 0.478412
+    },
+    {
+      "doc_id": "shop-review-195",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.475501
+    },
+    {
+      "doc_id": "shop-review-188",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.4622
+    },
+    {
+      "doc_id": "shop-profile-49",
+      "shop_id": 49,
+      "doc_type": "PROFILE",
+      "score": 0.460517
+    },
+    {
+      "doc_id": "shop-review-189",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.413931
+    }
+  ],
+  "ABL_012": [
+    {
+      "doc_id": "shop-profile-51",
+      "shop_id": 51,
+      "doc_type": "PROFILE",
+      "score": 0.553933
+    },
+    {
+      "doc_id": "shop-review-199",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.546715
+    },
+    {
+      "doc_id": "shop-review-196",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.54662
+    },
+    {
+      "doc_id": "shop-review-204",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.538709
+    },
+    {
+      "doc_id": "shop-review-198",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.533567
+    },
+    {
+      "doc_id": "shop-review-201",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.533531
+    },
+    {
+      "doc_id": "shop-review-197",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.533166
+    },
+    {
+      "doc_id": "shop-review-180",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.53232
+    },
+    {
+      "doc_id": "shop-review-200",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.525403
+    },
+    {
+      "doc_id": "shop-profile-52",
+      "shop_id": 52,
+      "doc_type": "PROFILE",
+      "score": 0.512249
+    },
+    {
+      "doc_id": "shop-review-206",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.510024
+    },
+    {
+      "doc_id": "shop-review-205",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.504711
+    },
+    {
+      "doc_id": "shop-review-183",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.50068
+    },
+    {
+      "doc_id": "shop-review-188",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.498266
+    },
+    {
+      "doc_id": "shop-review-207",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.498142
+    },
+    {
+      "doc_id": "shop-review-203",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.494564
+    },
+    {
+      "doc_id": "shop-review-182",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.493216
+    },
+    {
+      "doc_id": "shop-review-202",
+      "shop_id": 52,
+      "doc_type": "REVIEW",
+      "score": 0.492696
+    },
+    {
+      "doc_id": "shop-review-181",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.48056
+    },
+    {
+      "doc_id": "shop-profile-48",
+      "shop_id": 48,
+      "doc_type": "PROFILE",
+      "score": 0.475447
+    },
+    {
+      "doc_id": "shop-profile-49",
+      "shop_id": 49,
+      "doc_type": "PROFILE",
+      "score": 0.454874
+    },
+    {
+      "doc_id": "shop-review-194",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.445333
+    },
+    {
+      "doc_id": "shop-review-195",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.42351
+    },
+    {
+      "doc_id": "shop-review-189",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.398776
+    }
+  ],
+  "ABL_013": [
+    {
+      "doc_id": "shop-review-327",
+      "shop_id": 76,
+      "doc_type": "REVIEW",
+      "score": 0.705601
+    },
+    {
+      "doc_id": "shop-profile-76",
+      "shop_id": 76,
+      "doc_type": "PROFILE",
+      "score": 0.703389
+    },
+    {
+      "doc_id": "shop-review-322",
+      "shop_id": 76,
+      "doc_type": "REVIEW",
+      "score": 0.69074
+    },
+    {
+      "doc_id": "shop-review-326",
+      "shop_id": 76,
+      "doc_type": "REVIEW",
+      "score": 0.683766
+    },
+    {
+      "doc_id": "shop-review-324",
+      "shop_id": 76,
+      "doc_type": "REVIEW",
+      "score": 0.67334
+    },
+    {
+      "doc_id": "shop-review-325",
+      "shop_id": 76,
+      "doc_type": "REVIEW",
+      "score": 0.648058
+    },
+    {
+      "doc_id": "shop-review-323",
+      "shop_id": 76,
+      "doc_type": "REVIEW",
+      "score": 0.642258
+    },
+    {
+      "doc_id": "shop-profile-73",
+      "shop_id": 73,
+      "doc_type": "PROFILE",
+      "score": 0.619017
+    },
+    {
+      "doc_id": "shop-review-304",
+      "shop_id": 73,
+      "doc_type": "REVIEW",
+      "score": 0.615062
+    },
+    {
+      "doc_id": "shop-review-306",
+      "shop_id": 73,
+      "doc_type": "REVIEW",
+      "score": 0.596509
+    },
+    {
+      "doc_id": "shop-review-305",
+      "shop_id": 73,
+      "doc_type": "REVIEW",
+      "score": 0.592184
+    },
+    {
+      "doc_id": "shop-review-307",
+      "shop_id": 73,
+      "doc_type": "REVIEW",
+      "score": 0.584106
+    },
+    {
+      "doc_id": "shop-review-314",
+      "shop_id": 74,
+      "doc_type": "REVIEW",
+      "score": 0.496636
+    },
+    {
+      "doc_id": "shop-profile-74",
+      "shop_id": 74,
+      "doc_type": "PROFILE",
+      "score": 0.496475
+    },
+    {
+      "doc_id": "shop-review-315",
+      "shop_id": 74,
+      "doc_type": "REVIEW",
+      "score": 0.491606
+    }
+  ],
   "ABL_014": [],
   "ABL_015": [
     {
@@ -407,6 +2606,168 @@
       "shop_id": 29,
       "doc_type": "PROFILE",
       "score": 0.53825
+    },
+    {
+      "doc_id": "shop-review-79",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.532841
+    },
+    {
+      "doc_id": "shop-review-72",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.531052
+    },
+    {
+      "doc_id": "shop-review-78",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.528021
+    },
+    {
+      "doc_id": "shop-review-77",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.527745
+    },
+    {
+      "doc_id": "shop-profile-28",
+      "shop_id": 28,
+      "doc_type": "PROFILE",
+      "score": 0.524403
+    },
+    {
+      "doc_id": "shop-review-67",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.524191
+    },
+    {
+      "doc_id": "shop-review-66",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.523012
+    },
+    {
+      "doc_id": "shop-review-76",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.517895
+    },
+    {
+      "doc_id": "shop-review-80",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.513619
+    },
+    {
+      "doc_id": "shop-review-65",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.513482
+    },
+    {
+      "doc_id": "shop-review-64",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.511261
+    },
+    {
+      "doc_id": "shop-review-70",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.510251
+    },
+    {
+      "doc_id": "shop-review-58",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.500385
+    },
+    {
+      "doc_id": "shop-review-68",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.499573
+    },
+    {
+      "doc_id": "shop-review-69",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.498538
+    },
+    {
+      "doc_id": "shop-review-71",
+      "shop_id": 30,
+      "doc_type": "REVIEW",
+      "score": 0.490926
+    },
+    {
+      "doc_id": "shop-review-81",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.487172
+    },
+    {
+      "doc_id": "shop-review-59",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.487105
+    },
+    {
+      "doc_id": "shop-review-62",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.48052
+    },
+    {
+      "doc_id": "shop-review-63",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.469213
+    },
+    {
+      "doc_id": "shop-review-61",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.464361
+    },
+    {
+      "doc_id": "shop-review-101",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.450245
+    },
+    {
+      "doc_id": "shop-review-60",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.449161
+    },
+    {
+      "doc_id": "shop-profile-35",
+      "shop_id": 35,
+      "doc_type": "PROFILE",
+      "score": 0.441501
+    },
+    {
+      "doc_id": "shop-review-100",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.438275
+    },
+    {
+      "doc_id": "shop-review-102",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.422153
+    },
+    {
+      "doc_id": "shop-review-103",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.408716
     }
   ],
   "ABL_016": [],
@@ -488,6 +2849,138 @@
       "shop_id": 48,
       "doc_type": "PROFILE",
       "score": 0.537502
+    },
+    {
+      "doc_id": "shop-review-180",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.535284
+    },
+    {
+      "doc_id": "shop-review-192",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.532009
+    },
+    {
+      "doc_id": "shop-review-186",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.528909
+    },
+    {
+      "doc_id": "shop-review-184",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.526504
+    },
+    {
+      "doc_id": "shop-review-181",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.526087
+    },
+    {
+      "doc_id": "shop-review-191",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.524027
+    },
+    {
+      "doc_id": "shop-profile-49",
+      "shop_id": 49,
+      "doc_type": "PROFILE",
+      "score": 0.519463
+    },
+    {
+      "doc_id": "shop-review-193",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.518684
+    },
+    {
+      "doc_id": "shop-review-185",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.51621
+    },
+    {
+      "doc_id": "shop-review-188",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.516157
+    },
+    {
+      "doc_id": "shop-review-182",
+      "shop_id": 48,
+      "doc_type": "REVIEW",
+      "score": 0.516092
+    },
+    {
+      "doc_id": "shop-review-197",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.511229
+    },
+    {
+      "doc_id": "shop-review-200",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.503999
+    },
+    {
+      "doc_id": "shop-profile-51",
+      "shop_id": 51,
+      "doc_type": "PROFILE",
+      "score": 0.502817
+    },
+    {
+      "doc_id": "shop-review-195",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.500903
+    },
+    {
+      "doc_id": "shop-review-189",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.498886
+    },
+    {
+      "doc_id": "shop-review-187",
+      "shop_id": 49,
+      "doc_type": "REVIEW",
+      "score": 0.497665
+    },
+    {
+      "doc_id": "shop-review-198",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.489998
+    },
+    {
+      "doc_id": "shop-review-201",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.489136
+    },
+    {
+      "doc_id": "shop-review-196",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.488835
+    },
+    {
+      "doc_id": "shop-review-194",
+      "shop_id": 50,
+      "doc_type": "REVIEW",
+      "score": 0.487659
+    },
+    {
+      "doc_id": "shop-review-199",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.47014
     }
   ],
   "ABL_018": [
@@ -682,6 +3175,108 @@
       "shop_id": 41,
       "doc_type": "REVIEW",
       "score": 0.483514
+    },
+    {
+      "doc_id": "shop-review-114",
+      "shop_id": 37,
+      "doc_type": "REVIEW",
+      "score": 0.477389
+    },
+    {
+      "doc_id": "shop-review-145",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.454675
+    },
+    {
+      "doc_id": "shop-review-128",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.447642
+    },
+    {
+      "doc_id": "shop-review-125",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.444293
+    },
+    {
+      "doc_id": "shop-review-146",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.443305
+    },
+    {
+      "doc_id": "shop-review-118",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.421464
+    },
+    {
+      "doc_id": "shop-profile-38",
+      "shop_id": 38,
+      "doc_type": "PROFILE",
+      "score": 0.415692
+    },
+    {
+      "doc_id": "shop-profile-39",
+      "shop_id": 39,
+      "doc_type": "PROFILE",
+      "score": 0.406824
+    },
+    {
+      "doc_id": "shop-review-124",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.40672
+    },
+    {
+      "doc_id": "shop-review-120",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.392099
+    },
+    {
+      "doc_id": "shop-review-122",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.389767
+    },
+    {
+      "doc_id": "shop-review-129",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.363872
+    },
+    {
+      "doc_id": "shop-review-126",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.363242
+    },
+    {
+      "doc_id": "shop-review-123",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.359741
+    },
+    {
+      "doc_id": "shop-review-127",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.352886
+    },
+    {
+      "doc_id": "shop-review-119",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.352853
+    },
+    {
+      "doc_id": "shop-review-121",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.341077
     }
   ],
   "ABL_019": [
@@ -726,6 +3321,66 @@
       "shop_id": 86,
       "doc_type": "REVIEW",
       "score": 0.642769
+    },
+    {
+      "doc_id": "shop-review-370",
+      "shop_id": 84,
+      "doc_type": "REVIEW",
+      "score": 0.55942
+    },
+    {
+      "doc_id": "shop-profile-84",
+      "shop_id": 84,
+      "doc_type": "PROFILE",
+      "score": 0.554201
+    },
+    {
+      "doc_id": "shop-review-371",
+      "shop_id": 84,
+      "doc_type": "REVIEW",
+      "score": 0.550404
+    },
+    {
+      "doc_id": "shop-review-373",
+      "shop_id": 84,
+      "doc_type": "REVIEW",
+      "score": 0.548055
+    },
+    {
+      "doc_id": "shop-review-372",
+      "shop_id": 84,
+      "doc_type": "REVIEW",
+      "score": 0.546775
+    },
+    {
+      "doc_id": "shop-review-374",
+      "shop_id": 84,
+      "doc_type": "REVIEW",
+      "score": 0.535299
+    },
+    {
+      "doc_id": "shop-profile-85",
+      "shop_id": 85,
+      "doc_type": "PROFILE",
+      "score": 0.527416
+    },
+    {
+      "doc_id": "shop-review-375",
+      "shop_id": 84,
+      "doc_type": "REVIEW",
+      "score": 0.517359
+    },
+    {
+      "doc_id": "shop-review-378",
+      "shop_id": 85,
+      "doc_type": "REVIEW",
+      "score": 0.506921
+    },
+    {
+      "doc_id": "shop-review-379",
+      "shop_id": 85,
+      "doc_type": "REVIEW",
+      "score": 0.491953
     }
   ],
   "ABL_020": [],
@@ -760,6 +3415,228 @@
       "shop_id": 37,
       "doc_type": "REVIEW",
       "score": 0.623665
+    },
+    {
+      "doc_id": "shop-review-113",
+      "shop_id": 37,
+      "doc_type": "REVIEW",
+      "score": 0.618541
+    },
+    {
+      "doc_id": "shop-profile-39",
+      "shop_id": 39,
+      "doc_type": "PROFILE",
+      "score": 0.604031
+    },
+    {
+      "doc_id": "shop-review-115",
+      "shop_id": 37,
+      "doc_type": "REVIEW",
+      "score": 0.602053
+    },
+    {
+      "doc_id": "shop-review-124",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.567255
+    },
+    {
+      "doc_id": "shop-profile-36",
+      "shop_id": 36,
+      "doc_type": "PROFILE",
+      "score": 0.566591
+    },
+    {
+      "doc_id": "shop-profile-42",
+      "shop_id": 42,
+      "doc_type": "PROFILE",
+      "score": 0.564413
+    },
+    {
+      "doc_id": "shop-review-134",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.54754
+    },
+    {
+      "doc_id": "shop-profile-40",
+      "shop_id": 40,
+      "doc_type": "PROFILE",
+      "score": 0.545744
+    },
+    {
+      "doc_id": "shop-review-106",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.544646
+    },
+    {
+      "doc_id": "shop-review-128",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.541375
+    },
+    {
+      "doc_id": "shop-review-133",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.534629
+    },
+    {
+      "doc_id": "shop-review-131",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.532226
+    },
+    {
+      "doc_id": "shop-review-132",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.520014
+    },
+    {
+      "doc_id": "shop-review-130",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.514322
+    },
+    {
+      "doc_id": "shop-review-126",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.510678
+    },
+    {
+      "doc_id": "shop-review-135",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.509973
+    },
+    {
+      "doc_id": "shop-profile-38",
+      "shop_id": 38,
+      "doc_type": "PROFILE",
+      "score": 0.503865
+    },
+    {
+      "doc_id": "shop-review-125",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.502494
+    },
+    {
+      "doc_id": "shop-review-142",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.501324
+    },
+    {
+      "doc_id": "shop-review-111",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.49752
+    },
+    {
+      "doc_id": "shop-review-146",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.495028
+    },
+    {
+      "doc_id": "shop-review-144",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.490006
+    },
+    {
+      "doc_id": "shop-review-108",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.487224
+    },
+    {
+      "doc_id": "shop-review-110",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.484801
+    },
+    {
+      "doc_id": "shop-review-143",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.484311
+    },
+    {
+      "doc_id": "shop-review-145",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.483752
+    },
+    {
+      "doc_id": "shop-review-107",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.482107
+    },
+    {
+      "doc_id": "shop-review-109",
+      "shop_id": 36,
+      "doc_type": "REVIEW",
+      "score": 0.477002
+    },
+    {
+      "doc_id": "shop-review-147",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.476901
+    },
+    {
+      "doc_id": "shop-review-127",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.471855
+    },
+    {
+      "doc_id": "shop-review-120",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.457473
+    },
+    {
+      "doc_id": "shop-review-118",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.446797
+    },
+    {
+      "doc_id": "shop-review-129",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.444397
+    },
+    {
+      "doc_id": "shop-review-119",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.441202
+    },
+    {
+      "doc_id": "shop-review-122",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.428635
+    },
+    {
+      "doc_id": "shop-review-123",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.412849
+    },
+    {
+      "doc_id": "shop-review-121",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.400865
     }
   ],
   "ABL_023": [
@@ -804,9 +3681,358 @@
       "shop_id": 34,
       "doc_type": "REVIEW",
       "score": 0.660551
+    },
+    {
+      "doc_id": "shop-profile-29",
+      "shop_id": 29,
+      "doc_type": "PROFILE",
+      "score": 0.658719
+    },
+    {
+      "doc_id": "shop-review-101",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.655344
+    },
+    {
+      "doc_id": "shop-review-59",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.654054
+    },
+    {
+      "doc_id": "shop-review-76",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.648878
+    },
+    {
+      "doc_id": "shop-review-77",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.646401
+    },
+    {
+      "doc_id": "shop-profile-34",
+      "shop_id": 34,
+      "doc_type": "PROFILE",
+      "score": 0.643122
+    },
+    {
+      "doc_id": "shop-review-83",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.641775
+    },
+    {
+      "doc_id": "shop-review-67",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.638988
+    },
+    {
+      "doc_id": "shop-review-87",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.637814
+    },
+    {
+      "doc_id": "shop-review-78",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.637198
+    },
+    {
+      "doc_id": "shop-profile-31",
+      "shop_id": 31,
+      "doc_type": "PROFILE",
+      "score": 0.636741
+    },
+    {
+      "doc_id": "shop-profile-28",
+      "shop_id": 28,
+      "doc_type": "PROFILE",
+      "score": 0.636642
+    },
+    {
+      "doc_id": "shop-review-99",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.635579
+    },
+    {
+      "doc_id": "shop-review-60",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.635345
+    },
+    {
+      "doc_id": "shop-review-104",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.634928
+    },
+    {
+      "doc_id": "shop-review-61",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.63276
+    },
+    {
+      "doc_id": "shop-review-102",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.63224
+    },
+    {
+      "doc_id": "shop-review-66",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.627283
+    },
+    {
+      "doc_id": "shop-review-96",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.624617
+    },
+    {
+      "doc_id": "shop-review-62",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.62377
+    },
+    {
+      "doc_id": "shop-review-68",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.623559
+    },
+    {
+      "doc_id": "shop-review-64",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.622779
+    },
+    {
+      "doc_id": "shop-profile-32",
+      "shop_id": 32,
+      "doc_type": "PROFILE",
+      "score": 0.620627
+    },
+    {
+      "doc_id": "shop-profile-35",
+      "shop_id": 35,
+      "doc_type": "PROFILE",
+      "score": 0.619881
+    },
+    {
+      "doc_id": "shop-review-85",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.617564
+    },
+    {
+      "doc_id": "shop-review-100",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.615885
+    },
+    {
+      "doc_id": "shop-review-105",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.615361
+    },
+    {
+      "doc_id": "shop-profile-33",
+      "shop_id": 33,
+      "doc_type": "PROFILE",
+      "score": 0.614848
+    },
+    {
+      "doc_id": "shop-review-63",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.614798
+    },
+    {
+      "doc_id": "shop-review-84",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.61043
+    },
+    {
+      "doc_id": "shop-review-98",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.610133
+    },
+    {
+      "doc_id": "shop-review-58",
+      "shop_id": 28,
+      "doc_type": "REVIEW",
+      "score": 0.606506
+    },
+    {
+      "doc_id": "shop-review-80",
+      "shop_id": 31,
+      "doc_type": "REVIEW",
+      "score": 0.605693
+    },
+    {
+      "doc_id": "shop-review-82",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.604653
+    },
+    {
+      "doc_id": "shop-review-86",
+      "shop_id": 32,
+      "doc_type": "REVIEW",
+      "score": 0.602618
+    },
+    {
+      "doc_id": "shop-review-97",
+      "shop_id": 34,
+      "doc_type": "REVIEW",
+      "score": 0.601686
+    },
+    {
+      "doc_id": "shop-review-69",
+      "shop_id": 29,
+      "doc_type": "REVIEW",
+      "score": 0.594704
+    },
+    {
+      "doc_id": "shop-review-93",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.588803
+    },
+    {
+      "doc_id": "shop-review-88",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.586136
+    },
+    {
+      "doc_id": "shop-review-89",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.580395
+    },
+    {
+      "doc_id": "shop-review-92",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.576561
+    },
+    {
+      "doc_id": "shop-review-91",
+      "shop_id": 33,
+      "doc_type": "REVIEW",
+      "score": 0.498898
     }
   ],
-  "ABL_024": [],
+  "ABL_024": [
+    {
+      "doc_id": "shop-profile-82",
+      "shop_id": 82,
+      "doc_type": "PROFILE",
+      "score": 0.637659
+    },
+    {
+      "doc_id": "shop-review-358",
+      "shop_id": 82,
+      "doc_type": "REVIEW",
+      "score": 0.615627
+    },
+    {
+      "doc_id": "shop-review-361",
+      "shop_id": 82,
+      "doc_type": "REVIEW",
+      "score": 0.614179
+    },
+    {
+      "doc_id": "shop-review-359",
+      "shop_id": 82,
+      "doc_type": "REVIEW",
+      "score": 0.599074
+    },
+    {
+      "doc_id": "shop-review-362",
+      "shop_id": 82,
+      "doc_type": "REVIEW",
+      "score": 0.574247
+    },
+    {
+      "doc_id": "shop-review-360",
+      "shop_id": 82,
+      "doc_type": "REVIEW",
+      "score": 0.553363
+    },
+    {
+      "doc_id": "shop-review-363",
+      "shop_id": 82,
+      "doc_type": "REVIEW",
+      "score": 0.548366
+    },
+    {
+      "doc_id": "shop-review-352",
+      "shop_id": 81,
+      "doc_type": "REVIEW",
+      "score": 0.544317
+    },
+    {
+      "doc_id": "shop-review-353",
+      "shop_id": 81,
+      "doc_type": "REVIEW",
+      "score": 0.521824
+    },
+    {
+      "doc_id": "shop-profile-83",
+      "shop_id": 83,
+      "doc_type": "PROFILE",
+      "score": 0.510533
+    },
+    {
+      "doc_id": "shop-review-369",
+      "shop_id": 83,
+      "doc_type": "REVIEW",
+      "score": 0.498906
+    },
+    {
+      "doc_id": "shop-review-367",
+      "shop_id": 83,
+      "doc_type": "REVIEW",
+      "score": 0.498046
+    },
+    {
+      "doc_id": "shop-review-368",
+      "shop_id": 83,
+      "doc_type": "REVIEW",
+      "score": 0.492494
+    },
+    {
+      "doc_id": "shop-review-365",
+      "shop_id": 83,
+      "doc_type": "REVIEW",
+      "score": 0.476368
+    },
+    {
+      "doc_id": "shop-review-364",
+      "shop_id": 83,
+      "doc_type": "REVIEW",
+      "score": 0.470361
+    },
+    {
+      "doc_id": "shop-review-366",
+      "shop_id": 83,
+      "doc_type": "REVIEW",
+      "score": 0.465558
+    }
+  ],
   "ABL_025": [
     {
       "doc_id": "shop-profile-45",
@@ -837,6 +4063,186 @@
       "shop_id": 43,
       "doc_type": "PROFILE",
       "score": 0.576547
+    },
+    {
+      "doc_id": "shop-review-171",
+      "shop_id": 46,
+      "doc_type": "REVIEW",
+      "score": 0.546449
+    },
+    {
+      "doc_id": "shop-profile-44",
+      "shop_id": 44,
+      "doc_type": "PROFILE",
+      "score": 0.537661
+    },
+    {
+      "doc_id": "shop-review-148",
+      "shop_id": 43,
+      "doc_type": "REVIEW",
+      "score": 0.535807
+    },
+    {
+      "doc_id": "shop-review-172",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.532446
+    },
+    {
+      "doc_id": "shop-profile-47",
+      "shop_id": 47,
+      "doc_type": "PROFILE",
+      "score": 0.529706
+    },
+    {
+      "doc_id": "shop-review-169",
+      "shop_id": 46,
+      "doc_type": "REVIEW",
+      "score": 0.524798
+    },
+    {
+      "doc_id": "shop-review-170",
+      "shop_id": 46,
+      "doc_type": "REVIEW",
+      "score": 0.513673
+    },
+    {
+      "doc_id": "shop-review-154",
+      "shop_id": 44,
+      "doc_type": "REVIEW",
+      "score": 0.511424
+    },
+    {
+      "doc_id": "shop-review-161",
+      "shop_id": 45,
+      "doc_type": "REVIEW",
+      "score": 0.511149
+    },
+    {
+      "doc_id": "shop-review-159",
+      "shop_id": 44,
+      "doc_type": "REVIEW",
+      "score": 0.50165
+    },
+    {
+      "doc_id": "shop-review-150",
+      "shop_id": 43,
+      "doc_type": "REVIEW",
+      "score": 0.499087
+    },
+    {
+      "doc_id": "shop-review-149",
+      "shop_id": 43,
+      "doc_type": "REVIEW",
+      "score": 0.488514
+    },
+    {
+      "doc_id": "shop-review-152",
+      "shop_id": 43,
+      "doc_type": "REVIEW",
+      "score": 0.484389
+    },
+    {
+      "doc_id": "shop-review-158",
+      "shop_id": 44,
+      "doc_type": "REVIEW",
+      "score": 0.483518
+    },
+    {
+      "doc_id": "shop-review-153",
+      "shop_id": 43,
+      "doc_type": "REVIEW",
+      "score": 0.483029
+    },
+    {
+      "doc_id": "shop-review-173",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.482125
+    },
+    {
+      "doc_id": "shop-review-156",
+      "shop_id": 44,
+      "doc_type": "REVIEW",
+      "score": 0.479814
+    },
+    {
+      "doc_id": "shop-review-155",
+      "shop_id": 44,
+      "doc_type": "REVIEW",
+      "score": 0.471905
+    },
+    {
+      "doc_id": "shop-review-164",
+      "shop_id": 45,
+      "doc_type": "REVIEW",
+      "score": 0.467316
+    },
+    {
+      "doc_id": "shop-review-177",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.467273
+    },
+    {
+      "doc_id": "shop-review-168",
+      "shop_id": 46,
+      "doc_type": "REVIEW",
+      "score": 0.455557
+    },
+    {
+      "doc_id": "shop-review-174",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.453996
+    },
+    {
+      "doc_id": "shop-review-151",
+      "shop_id": 43,
+      "doc_type": "REVIEW",
+      "score": 0.453341
+    },
+    {
+      "doc_id": "shop-review-167",
+      "shop_id": 46,
+      "doc_type": "REVIEW",
+      "score": 0.453277
+    },
+    {
+      "doc_id": "shop-review-157",
+      "shop_id": 44,
+      "doc_type": "REVIEW",
+      "score": 0.446727
+    },
+    {
+      "doc_id": "shop-review-165",
+      "shop_id": 45,
+      "doc_type": "REVIEW",
+      "score": 0.439471
+    },
+    {
+      "doc_id": "shop-review-162",
+      "shop_id": 45,
+      "doc_type": "REVIEW",
+      "score": 0.438195
+    },
+    {
+      "doc_id": "shop-review-163",
+      "shop_id": 45,
+      "doc_type": "REVIEW",
+      "score": 0.432319
+    },
+    {
+      "doc_id": "shop-review-175",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.431782
+    },
+    {
+      "doc_id": "shop-review-176",
+      "shop_id": 47,
+      "doc_type": "REVIEW",
+      "score": 0.424255
     }
   ],
   "ABL_026": [
@@ -875,9 +4281,322 @@
       "shop_id": 66,
       "doc_type": "PROFILE",
       "score": 0.625109
+    },
+    {
+      "doc_id": "shop-review-267",
+      "shop_id": 66,
+      "doc_type": "REVIEW",
+      "score": 0.619195
+    },
+    {
+      "doc_id": "shop-review-238",
+      "shop_id": 62,
+      "doc_type": "REVIEW",
+      "score": 0.61459
+    },
+    {
+      "doc_id": "shop-profile-60",
+      "shop_id": 60,
+      "doc_type": "PROFILE",
+      "score": 0.611065
+    },
+    {
+      "doc_id": "shop-review-242",
+      "shop_id": 62,
+      "doc_type": "REVIEW",
+      "score": 0.607261
+    },
+    {
+      "doc_id": "shop-review-233",
+      "shop_id": 61,
+      "doc_type": "REVIEW",
+      "score": 0.606746
+    },
+    {
+      "doc_id": "shop-review-262",
+      "shop_id": 66,
+      "doc_type": "REVIEW",
+      "score": 0.602236
+    },
+    {
+      "doc_id": "shop-review-251",
+      "shop_id": 64,
+      "doc_type": "REVIEW",
+      "score": 0.597526
+    },
+    {
+      "doc_id": "shop-review-226",
+      "shop_id": 60,
+      "doc_type": "REVIEW",
+      "score": 0.591595
+    },
+    {
+      "doc_id": "shop-review-255",
+      "shop_id": 64,
+      "doc_type": "REVIEW",
+      "score": 0.591511
+    },
+    {
+      "doc_id": "shop-profile-61",
+      "shop_id": 61,
+      "doc_type": "PROFILE",
+      "score": 0.589225
+    },
+    {
+      "doc_id": "shop-review-240",
+      "shop_id": 62,
+      "doc_type": "REVIEW",
+      "score": 0.584133
+    },
+    {
+      "doc_id": "shop-review-241",
+      "shop_id": 62,
+      "doc_type": "REVIEW",
+      "score": 0.583207
+    },
+    {
+      "doc_id": "shop-review-230",
+      "shop_id": 60,
+      "doc_type": "REVIEW",
+      "score": 0.583102
+    },
+    {
+      "doc_id": "shop-review-239",
+      "shop_id": 62,
+      "doc_type": "REVIEW",
+      "score": 0.579347
+    },
+    {
+      "doc_id": "shop-review-264",
+      "shop_id": 66,
+      "doc_type": "REVIEW",
+      "score": 0.572354
+    },
+    {
+      "doc_id": "shop-review-232",
+      "shop_id": 61,
+      "doc_type": "REVIEW",
+      "score": 0.570967
+    },
+    {
+      "doc_id": "shop-review-254",
+      "shop_id": 64,
+      "doc_type": "REVIEW",
+      "score": 0.567163
+    },
+    {
+      "doc_id": "shop-review-263",
+      "shop_id": 66,
+      "doc_type": "REVIEW",
+      "score": 0.563505
+    },
+    {
+      "doc_id": "shop-review-235",
+      "shop_id": 61,
+      "doc_type": "REVIEW",
+      "score": 0.563429
+    },
+    {
+      "doc_id": "shop-review-243",
+      "shop_id": 62,
+      "doc_type": "REVIEW",
+      "score": 0.561219
+    },
+    {
+      "doc_id": "shop-profile-67",
+      "shop_id": 67,
+      "doc_type": "PROFILE",
+      "score": 0.559252
+    },
+    {
+      "doc_id": "shop-review-234",
+      "shop_id": 61,
+      "doc_type": "REVIEW",
+      "score": 0.558195
+    },
+    {
+      "doc_id": "shop-review-266",
+      "shop_id": 66,
+      "doc_type": "REVIEW",
+      "score": 0.54717
+    },
+    {
+      "doc_id": "shop-review-270",
+      "shop_id": 67,
+      "doc_type": "REVIEW",
+      "score": 0.542061
+    },
+    {
+      "doc_id": "shop-review-259",
+      "shop_id": 65,
+      "doc_type": "REVIEW",
+      "score": 0.536393
+    },
+    {
+      "doc_id": "shop-review-236",
+      "shop_id": 61,
+      "doc_type": "REVIEW",
+      "score": 0.53113
+    },
+    {
+      "doc_id": "shop-review-258",
+      "shop_id": 65,
+      "doc_type": "REVIEW",
+      "score": 0.528666
+    },
+    {
+      "doc_id": "shop-review-268",
+      "shop_id": 67,
+      "doc_type": "REVIEW",
+      "score": 0.527724
+    },
+    {
+      "doc_id": "shop-review-237",
+      "shop_id": 61,
+      "doc_type": "REVIEW",
+      "score": 0.527128
+    },
+    {
+      "doc_id": "shop-review-228",
+      "shop_id": 60,
+      "doc_type": "REVIEW",
+      "score": 0.526724
+    },
+    {
+      "doc_id": "shop-review-261",
+      "shop_id": 65,
+      "doc_type": "REVIEW",
+      "score": 0.526305
+    },
+    {
+      "doc_id": "shop-review-272",
+      "shop_id": 67,
+      "doc_type": "REVIEW",
+      "score": 0.525772
+    },
+    {
+      "doc_id": "shop-review-231",
+      "shop_id": 60,
+      "doc_type": "REVIEW",
+      "score": 0.522429
+    },
+    {
+      "doc_id": "shop-review-273",
+      "shop_id": 67,
+      "doc_type": "REVIEW",
+      "score": 0.517384
+    },
+    {
+      "doc_id": "shop-review-260",
+      "shop_id": 65,
+      "doc_type": "REVIEW",
+      "score": 0.51649
+    },
+    {
+      "doc_id": "shop-profile-65",
+      "shop_id": 65,
+      "doc_type": "PROFILE",
+      "score": 0.516091
+    },
+    {
+      "doc_id": "shop-review-271",
+      "shop_id": 67,
+      "doc_type": "REVIEW",
+      "score": 0.511567
+    },
+    {
+      "doc_id": "shop-review-229",
+      "shop_id": 60,
+      "doc_type": "REVIEW",
+      "score": 0.506772
+    },
+    {
+      "doc_id": "shop-review-256",
+      "shop_id": 65,
+      "doc_type": "REVIEW",
+      "score": 0.503349
+    },
+    {
+      "doc_id": "shop-profile-63",
+      "shop_id": 63,
+      "doc_type": "PROFILE",
+      "score": 0.502567
+    },
+    {
+      "doc_id": "shop-review-257",
+      "shop_id": 65,
+      "doc_type": "REVIEW",
+      "score": 0.499255
+    },
+    {
+      "doc_id": "shop-review-269",
+      "shop_id": 67,
+      "doc_type": "REVIEW",
+      "score": 0.498317
+    },
+    {
+      "doc_id": "shop-review-227",
+      "shop_id": 60,
+      "doc_type": "REVIEW",
+      "score": 0.48822
+    },
+    {
+      "doc_id": "shop-review-265",
+      "shop_id": 66,
+      "doc_type": "REVIEW",
+      "score": 0.476551
+    },
+    {
+      "doc_id": "shop-review-245",
+      "shop_id": 63,
+      "doc_type": "REVIEW",
+      "score": 0.422222
+    },
+    {
+      "doc_id": "shop-review-247",
+      "shop_id": 63,
+      "doc_type": "REVIEW",
+      "score": 0.418338
+    },
+    {
+      "doc_id": "shop-review-244",
+      "shop_id": 63,
+      "doc_type": "REVIEW",
+      "score": 0.414775
+    },
+    {
+      "doc_id": "shop-review-246",
+      "shop_id": 63,
+      "doc_type": "REVIEW",
+      "score": 0.409585
+    },
+    {
+      "doc_id": "shop-review-249",
+      "shop_id": 63,
+      "doc_type": "REVIEW",
+      "score": 0.406507
+    },
+    {
+      "doc_id": "shop-review-248",
+      "shop_id": 63,
+      "doc_type": "REVIEW",
+      "score": 0.390118
     }
   ],
-  "ABL_027": [],
+  "ABL_027": [
+    {
+      "doc_id": "shop-review-196",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.584523
+    },
+    {
+      "doc_id": "shop-review-197",
+      "shop_id": 51,
+      "doc_type": "REVIEW",
+      "score": 0.562515
+    }
+  ],
   "ABL_028": [
     {
       "doc_id": "shop-review-220",
@@ -992,9 +4711,100 @@
       "shop_id": 53,
       "doc_type": "REVIEW",
       "score": 0.491033
+    },
+    {
+      "doc_id": "shop-review-217",
+      "shop_id": 54,
+      "doc_type": "REVIEW",
+      "score": 0.458432
+    },
+    {
+      "doc_id": "shop-review-219",
+      "shop_id": 54,
+      "doc_type": "REVIEW",
+      "score": 0.427925
     }
   ],
-  "ABL_029": [],
+  "ABL_029": [
+    {
+      "doc_id": "shop-review-339",
+      "shop_id": 78,
+      "doc_type": "REVIEW",
+      "score": 0.655522
+    },
+    {
+      "doc_id": "shop-profile-78",
+      "shop_id": 78,
+      "doc_type": "PROFILE",
+      "score": 0.580213
+    },
+    {
+      "doc_id": "shop-review-338",
+      "shop_id": 78,
+      "doc_type": "REVIEW",
+      "score": 0.575349
+    },
+    {
+      "doc_id": "shop-review-345",
+      "shop_id": 79,
+      "doc_type": "REVIEW",
+      "score": 0.558178
+    },
+    {
+      "doc_id": "shop-review-329",
+      "shop_id": 77,
+      "doc_type": "REVIEW",
+      "score": 0.54812
+    },
+    {
+      "doc_id": "shop-profile-77",
+      "shop_id": 77,
+      "doc_type": "PROFILE",
+      "score": 0.52494
+    },
+    {
+      "doc_id": "shop-profile-79",
+      "shop_id": 79,
+      "doc_type": "PROFILE",
+      "score": 0.523648
+    },
+    {
+      "doc_id": "shop-review-331",
+      "shop_id": 77,
+      "doc_type": "REVIEW",
+      "score": 0.522545
+    },
+    {
+      "doc_id": "shop-review-328",
+      "shop_id": 77,
+      "doc_type": "REVIEW",
+      "score": 0.511859
+    },
+    {
+      "doc_id": "shop-review-344",
+      "shop_id": 79,
+      "doc_type": "REVIEW",
+      "score": 0.508085
+    },
+    {
+      "doc_id": "shop-review-332",
+      "shop_id": 77,
+      "doc_type": "REVIEW",
+      "score": 0.503236
+    },
+    {
+      "doc_id": "shop-review-330",
+      "shop_id": 77,
+      "doc_type": "REVIEW",
+      "score": 0.496666
+    },
+    {
+      "doc_id": "shop-review-333",
+      "shop_id": 77,
+      "doc_type": "REVIEW",
+      "score": 0.493983
+    }
+  ],
   "ABL_030": [
     {
       "doc_id": "shop-review-22",
@@ -1043,6 +4853,252 @@
       "shop_id": 21,
       "doc_type": "REVIEW",
       "score": 0.514338
+    },
+    {
+      "doc_id": "shop-review-23",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.511573
+    },
+    {
+      "doc_id": "shop-review-50",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.506832
+    },
+    {
+      "doc_id": "shop-review-46",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.504693
+    },
+    {
+      "doc_id": "shop-review-28",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.502957
+    },
+    {
+      "doc_id": "shop-review-51",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.502777
+    },
+    {
+      "doc_id": "shop-profile-22",
+      "shop_id": 22,
+      "doc_type": "PROFILE",
+      "score": 0.502636
+    },
+    {
+      "doc_id": "shop-review-13",
+      "shop_id": 20,
+      "doc_type": "REVIEW",
+      "score": 0.501475
+    },
+    {
+      "doc_id": "shop-profile-26",
+      "shop_id": 26,
+      "doc_type": "PROFILE",
+      "score": 0.500292
+    },
+    {
+      "doc_id": "shop-profile-20",
+      "shop_id": 20,
+      "doc_type": "PROFILE",
+      "score": 0.49909
+    },
+    {
+      "doc_id": "shop-review-30",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.496921
+    },
+    {
+      "doc_id": "shop-profile-23",
+      "shop_id": 23,
+      "doc_type": "PROFILE",
+      "score": 0.494394
+    },
+    {
+      "doc_id": "shop-review-24",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.493522
+    },
+    {
+      "doc_id": "shop-review-48",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.493489
+    },
+    {
+      "doc_id": "shop-review-18",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.492537
+    },
+    {
+      "doc_id": "shop-profile-21",
+      "shop_id": 21,
+      "doc_type": "PROFILE",
+      "score": 0.492388
+    },
+    {
+      "doc_id": "shop-review-25",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.489384
+    },
+    {
+      "doc_id": "shop-review-17",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.488036
+    },
+    {
+      "doc_id": "shop-review-34",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.487901
+    },
+    {
+      "doc_id": "shop-review-47",
+      "shop_id": 26,
+      "doc_type": "REVIEW",
+      "score": 0.485813
+    },
+    {
+      "doc_id": "shop-profile-24",
+      "shop_id": 24,
+      "doc_type": "PROFILE",
+      "score": 0.484389
+    },
+    {
+      "doc_id": "shop-review-21",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.478756
+    },
+    {
+      "doc_id": "shop-review-26",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.477377
+    },
+    {
+      "doc_id": "shop-review-31",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.476393
+    },
+    {
+      "doc_id": "shop-review-35",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.472762
+    },
+    {
+      "doc_id": "shop-review-29",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.472443
+    },
+    {
+      "doc_id": "shop-review-33",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.471557
+    },
+    {
+      "doc_id": "shop-review-32",
+      "shop_id": 23,
+      "doc_type": "REVIEW",
+      "score": 0.471141
+    },
+    {
+      "doc_id": "shop-review-37",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.465675
+    },
+    {
+      "doc_id": "shop-review-19",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.465386
+    },
+    {
+      "doc_id": "shop-review-52",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.44793
+    },
+    {
+      "doc_id": "shop-review-38",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.444634
+    },
+    {
+      "doc_id": "shop-review-54",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.444428
+    },
+    {
+      "doc_id": "shop-review-39",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.438406
+    },
+    {
+      "doc_id": "shop-review-57",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.437981
+    },
+    {
+      "doc_id": "shop-review-53",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.433903
+    },
+    {
+      "doc_id": "shop-review-55",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.43211
+    },
+    {
+      "doc_id": "shop-review-44",
+      "shop_id": 25,
+      "doc_type": "REVIEW",
+      "score": 0.419367
+    },
+    {
+      "doc_id": "shop-review-36",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.419358
+    },
+    {
+      "doc_id": "shop-profile-27",
+      "shop_id": 27,
+      "doc_type": "PROFILE",
+      "score": 0.417529
+    },
+    {
+      "doc_id": "shop-review-56",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.404926
+    },
+    {
+      "doc_id": "shop-review-45",
+      "shop_id": 25,
+      "doc_type": "REVIEW",
+      "score": 0.393146
     }
   ],
   "ABL_031": [
@@ -1057,9 +5113,232 @@
       "shop_id": 72,
       "doc_type": "REVIEW",
       "score": 0.627558
+    },
+    {
+      "doc_id": "shop-profile-70",
+      "shop_id": 70,
+      "doc_type": "PROFILE",
+      "score": 0.613062
+    },
+    {
+      "doc_id": "shop-review-302",
+      "shop_id": 72,
+      "doc_type": "REVIEW",
+      "score": 0.612717
+    },
+    {
+      "doc_id": "shop-review-300",
+      "shop_id": 72,
+      "doc_type": "REVIEW",
+      "score": 0.607112
+    },
+    {
+      "doc_id": "shop-review-289",
+      "shop_id": 70,
+      "doc_type": "REVIEW",
+      "score": 0.606136
+    },
+    {
+      "doc_id": "shop-review-291",
+      "shop_id": 70,
+      "doc_type": "REVIEW",
+      "score": 0.604435
+    },
+    {
+      "doc_id": "shop-review-301",
+      "shop_id": 72,
+      "doc_type": "REVIEW",
+      "score": 0.597142
+    },
+    {
+      "doc_id": "shop-profile-69",
+      "shop_id": 69,
+      "doc_type": "PROFILE",
+      "score": 0.593786
+    },
+    {
+      "doc_id": "shop-review-274",
+      "shop_id": 68,
+      "doc_type": "REVIEW",
+      "score": 0.587889
+    },
+    {
+      "doc_id": "shop-profile-68",
+      "shop_id": 68,
+      "doc_type": "PROFILE",
+      "score": 0.57953
+    },
+    {
+      "doc_id": "shop-review-299",
+      "shop_id": 72,
+      "doc_type": "REVIEW",
+      "score": 0.576428
+    },
+    {
+      "doc_id": "shop-review-278",
+      "shop_id": 68,
+      "doc_type": "REVIEW",
+      "score": 0.57376
+    },
+    {
+      "doc_id": "shop-review-303",
+      "shop_id": 72,
+      "doc_type": "REVIEW",
+      "score": 0.57134
+    },
+    {
+      "doc_id": "shop-review-292",
+      "shop_id": 71,
+      "doc_type": "REVIEW",
+      "score": 0.569813
+    },
+    {
+      "doc_id": "shop-review-286",
+      "shop_id": 70,
+      "doc_type": "REVIEW",
+      "score": 0.56492
+    },
+    {
+      "doc_id": "shop-review-288",
+      "shop_id": 70,
+      "doc_type": "REVIEW",
+      "score": 0.553823
+    },
+    {
+      "doc_id": "shop-review-277",
+      "shop_id": 68,
+      "doc_type": "REVIEW",
+      "score": 0.546373
+    },
+    {
+      "doc_id": "shop-review-281",
+      "shop_id": 69,
+      "doc_type": "REVIEW",
+      "score": 0.544395
+    },
+    {
+      "doc_id": "shop-review-293",
+      "shop_id": 71,
+      "doc_type": "REVIEW",
+      "score": 0.541252
+    },
+    {
+      "doc_id": "shop-review-275",
+      "shop_id": 68,
+      "doc_type": "REVIEW",
+      "score": 0.53571
+    },
+    {
+      "doc_id": "shop-review-276",
+      "shop_id": 68,
+      "doc_type": "REVIEW",
+      "score": 0.527992
+    },
+    {
+      "doc_id": "shop-review-279",
+      "shop_id": 68,
+      "doc_type": "REVIEW",
+      "score": 0.52509
+    },
+    {
+      "doc_id": "shop-review-287",
+      "shop_id": 70,
+      "doc_type": "REVIEW",
+      "score": 0.523444
+    },
+    {
+      "doc_id": "shop-review-290",
+      "shop_id": 70,
+      "doc_type": "REVIEW",
+      "score": 0.517007
+    },
+    {
+      "doc_id": "shop-review-285",
+      "shop_id": 69,
+      "doc_type": "REVIEW",
+      "score": 0.466283
+    },
+    {
+      "doc_id": "shop-review-284",
+      "shop_id": 69,
+      "doc_type": "REVIEW",
+      "score": 0.451439
     }
   ],
-  "ABL_032": [],
+  "ABL_032": [
+    {
+      "doc_id": "shop-profile-42",
+      "shop_id": 42,
+      "doc_type": "PROFILE",
+      "score": 0.492057
+    },
+    {
+      "doc_id": "shop-profile-40",
+      "shop_id": 40,
+      "doc_type": "PROFILE",
+      "score": 0.466207
+    },
+    {
+      "doc_id": "shop-review-134",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.452836
+    },
+    {
+      "doc_id": "shop-review-135",
+      "shop_id": 40,
+      "doc_type": "REVIEW",
+      "score": 0.443523
+    },
+    {
+      "doc_id": "shop-review-128",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.438924
+    },
+    {
+      "doc_id": "shop-review-142",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.437427
+    },
+    {
+      "doc_id": "shop-review-143",
+      "shop_id": 42,
+      "doc_type": "REVIEW",
+      "score": 0.42305
+    },
+    {
+      "doc_id": "shop-review-123",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.415602
+    },
+    {
+      "doc_id": "shop-review-129",
+      "shop_id": 39,
+      "doc_type": "REVIEW",
+      "score": 0.38942
+    },
+    {
+      "doc_id": "shop-review-121",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.388467
+    },
+    {
+      "doc_id": "shop-review-120",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.377905
+    },
+    {
+      "doc_id": "shop-review-122",
+      "shop_id": 38,
+      "doc_type": "REVIEW",
+      "score": 0.351088
+    }
+  ],
   "ABL_033": [
     {
       "doc_id": "shop-review-50",
@@ -1114,9 +5393,238 @@
       "shop_id": 21,
       "doc_type": "REVIEW",
       "score": 0.633803
+    },
+    {
+      "doc_id": "shop-profile-22",
+      "shop_id": 22,
+      "doc_type": "PROFILE",
+      "score": 0.630656
+    },
+    {
+      "doc_id": "shop-profile-21",
+      "shop_id": 21,
+      "doc_type": "PROFILE",
+      "score": 0.617715
+    },
+    {
+      "doc_id": "shop-review-17",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.607732
+    },
+    {
+      "doc_id": "shop-review-10",
+      "shop_id": 20,
+      "doc_type": "REVIEW",
+      "score": 0.600165
+    },
+    {
+      "doc_id": "shop-review-12",
+      "shop_id": 20,
+      "doc_type": "REVIEW",
+      "score": 0.59912
+    },
+    {
+      "doc_id": "shop-review-13",
+      "shop_id": 20,
+      "doc_type": "REVIEW",
+      "score": 0.597995
+    },
+    {
+      "doc_id": "shop-review-18",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.596688
+    },
+    {
+      "doc_id": "shop-profile-24",
+      "shop_id": 24,
+      "doc_type": "PROFILE",
+      "score": 0.596309
+    },
+    {
+      "doc_id": "shop-review-19",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.588635
+    },
+    {
+      "doc_id": "shop-review-16",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.58679
+    },
+    {
+      "doc_id": "shop-review-22",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.578723
+    },
+    {
+      "doc_id": "shop-review-23",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.572294
+    },
+    {
+      "doc_id": "shop-review-20",
+      "shop_id": 21,
+      "doc_type": "REVIEW",
+      "score": 0.571554
+    },
+    {
+      "doc_id": "shop-review-27",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.567174
+    },
+    {
+      "doc_id": "shop-review-25",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.548067
+    },
+    {
+      "doc_id": "shop-review-26",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.546639
+    },
+    {
+      "doc_id": "shop-review-11",
+      "shop_id": 20,
+      "doc_type": "REVIEW",
+      "score": 0.542541
+    },
+    {
+      "doc_id": "shop-review-24",
+      "shop_id": 22,
+      "doc_type": "REVIEW",
+      "score": 0.540155
+    },
+    {
+      "doc_id": "shop-review-35",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.532144
+    },
+    {
+      "doc_id": "shop-review-54",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.530292
+    },
+    {
+      "doc_id": "shop-profile-27",
+      "shop_id": 27,
+      "doc_type": "PROFILE",
+      "score": 0.528176
+    },
+    {
+      "doc_id": "shop-review-53",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.526909
+    },
+    {
+      "doc_id": "shop-review-56",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.514392
+    },
+    {
+      "doc_id": "shop-review-55",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.508017
+    },
+    {
+      "doc_id": "shop-review-52",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.506923
+    },
+    {
+      "doc_id": "shop-review-34",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.495437
+    },
+    {
+      "doc_id": "shop-review-57",
+      "shop_id": 27,
+      "doc_type": "REVIEW",
+      "score": 0.493186
+    },
+    {
+      "doc_id": "shop-review-37",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.489366
+    },
+    {
+      "doc_id": "shop-review-38",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.479357
+    },
+    {
+      "doc_id": "shop-review-39",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.47813
+    },
+    {
+      "doc_id": "shop-review-36",
+      "shop_id": 24,
+      "doc_type": "REVIEW",
+      "score": 0.467141
     }
   ],
-  "ABL_034": [],
+  "ABL_034": [
+    {
+      "doc_id": "shop-profile-35",
+      "shop_id": 35,
+      "doc_type": "PROFILE",
+      "score": 0.495484
+    },
+    {
+      "doc_id": "shop-review-100",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.494948
+    },
+    {
+      "doc_id": "shop-review-104",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.480619
+    },
+    {
+      "doc_id": "shop-review-102",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.475371
+    },
+    {
+      "doc_id": "shop-review-105",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.468511
+    },
+    {
+      "doc_id": "shop-review-101",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.462489
+    },
+    {
+      "doc_id": "shop-review-103",
+      "shop_id": 35,
+      "doc_type": "REVIEW",
+      "score": 0.447733
+    }
+  ],
   "ABL_035": [
     {
       "doc_id": "shop-profile-73",
@@ -1369,6 +5877,48 @@
       "shop_id": 81,
       "doc_type": "REVIEW",
       "score": 0.633005
+    },
+    {
+      "doc_id": "shop-review-321",
+      "shop_id": 75,
+      "doc_type": "REVIEW",
+      "score": 0.544227
+    },
+    {
+      "doc_id": "shop-review-319",
+      "shop_id": 75,
+      "doc_type": "REVIEW",
+      "score": 0.536549
+    },
+    {
+      "doc_id": "shop-profile-75",
+      "shop_id": 75,
+      "doc_type": "PROFILE",
+      "score": 0.53367
+    },
+    {
+      "doc_id": "shop-review-320",
+      "shop_id": 75,
+      "doc_type": "REVIEW",
+      "score": 0.5328
+    },
+    {
+      "doc_id": "shop-review-317",
+      "shop_id": 75,
+      "doc_type": "REVIEW",
+      "score": 0.524875
+    },
+    {
+      "doc_id": "shop-review-316",
+      "shop_id": 75,
+      "doc_type": "REVIEW",
+      "score": 0.520445
+    },
+    {
+      "doc_id": "shop-review-318",
+      "shop_id": 75,
+      "doc_type": "REVIEW",
+      "score": 0.505602
     }
   ]
 }

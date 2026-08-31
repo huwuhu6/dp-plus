@@ -1521,9 +1521,16 @@ deepseek-v4-flash 在 4/8 样本中输出了禁止词（"距离""评分""价格"
 
 1. **Milvus Snapshot 恢复为 document-level 原始结果**：原始实现错误地在 snapshot 阶段做了 MAX 聚合和 threshold 过滤。修正后 snapshot 保存完整的 document-level 原始结果，MAX 聚合和 threshold 交由实验阶段处理。
 
-2. **Snapshot 使用 allowedShopIds 过滤**：原始实现直接搜索全库。修正后先计算 Hard Filter 得到候选池，再搜索全库 Milvus top80，然后在 Python 中按 allowedShopIds 过滤。注：Milvus REST API 的 `filter` 参数是 post-filter（与生产代码的 pre-filter 不同），因此采用全库搜索 + Python 过滤的方案。
+2. **Snapshot 使用生产等价 pre-filter**：原始实现使用全库搜索 + Python 过滤，但这两者不等价。修正后使用 Milvus REST API v2 的 `filter` 参数（JSON 路径语法 `metadata["shopId"] in [...]`），该参数是真正的 pre-filter。
 
 3. **Evidence Score 与生产对齐**：原始实现使用固定 3.0。修正后检查生产 `toRecommendation()` 代码，确认证据分数为 3 分/条、最多 2 条 = 6 分。所有演示商户均有 6 条以上评价文档，因此证据分数统一为 6.0。
+
+### Pre-filter 验证
+
+Milvus REST API v2 的 `filter` 参数是 pre-filter（非 post-filter）。验证方法：同一查询（"人均150的日料"）对比 pre-filter 与全库搜索 + Python 过滤：
+- Pre-filter: 80 条结果，来自 24 家 shop
+- 全库搜索 + Python 过滤: 1 条结果，来自 1 家 shop
+- 结论：全库搜索 + Python 过滤不等价于 pre-filter
 
 ### 数据集
 
@@ -1533,8 +1540,8 @@ deepseek-v4-flash 在 4/8 样本中输出了禁止词（"距离""评分""价格"
 
 | Metric | V_Base | V_Sem | V_Sem_2x |
 |--------|:------:|:-----:|:---------:|
-| Recall@3 | 0.7291 | 0.7507 | 0.7722 |
-| NDCG@3 | 0.9355 | 0.9483 | 0.9684 |
+| Recall@3 | 0.7291 | 0.7614 | 0.7722 |
+| NDCG@3 | 0.9355 | 0.9558 | 0.9704 |
 | Top1 Accuracy | 0.9355 | 0.9355 | 0.9677 |
 | Constraint Violation Rate | 0.0000 | 0.0000 | 0.0000 |
 
@@ -1542,17 +1549,28 @@ deepseek-v4-flash 在 4/8 样本中输出了禁止词（"距离""评分""价格"
 
 | Layer | V_Base | V_Sem | V_Sem_2x |
 |-------|:------:|:-----:|:---------:|
-| CORRECT | 21 | 29 | 31 |
-| RANKING_ERROR | 14 | 6 | 4 |
-| SEMANTIC_RETRIEVAL_ERROR | 77 | 77 | 77 |
+| CORRECT | 66 | 69 | 71 |
+| RANKING_ERROR | 39 | 36 | 34 |
+| SEMANTIC_RETRIEVAL_ERROR | 7 | 7 | 7 |
 | SEMANTIC_THRESHOLD_ERROR | 0 | 0 | 0 |
 
 ### 关键发现
 
-1. 语义分数减少 57% 的 ranking 错误（14→6），但 69% 的 GT shop 没有语义信号
-2. Top1 Accuracy 不受 weight=18 影响，仅 weight=36 时改善
+1. 语义分数减少 8% 的 ranking 错误（39→36），但 Top1 Accuracy 不受 weight=18 影响
+2. 仅 6% 的 GT shop 没有语义信号（从 v2 的 69% 大幅下降）
 3. 基础 ranking 已实现 0.9355 NDCG@3，语义分数是 refinement 而非 replacement
 4. 无 SEMANTIC_THRESHOLD_ERROR（所有进入 Milvus top80 的 shop 都能达到 0.35 阈值）
+
+### v2 → v3 变化
+
+| 变化 | v2（全库搜索 + Python 过滤） | v3（pre-filter） |
+|------|:---:|:---:|
+| SEMANTIC_RETRIEVAL_ERROR | 77（69%） | 7（6%） |
+| V_Sem Recall@3 | 0.7507 | 0.7614 |
+| V_Sem NDCG@3 | 0.9483 | 0.9558 |
+| 总文档数 | 220 | 976 |
+
+v3 的 pre-filter 方案与生产等价。语义信号更有用因为 ANN 搜索被限制在 allowed shop 集合内。
 
 ### 实验文件
 
@@ -1560,12 +1578,12 @@ deepseek-v4-flash 在 4/8 样本中输出了禁止词（"距离""评分""价格"
 |------|------|
 | `retrieval_ablation_dataset.py` | 数据集定义 + JSON 导出 |
 | `retrieval_ablation_experiment.py` | 实验框架（V_Base/V_Sem/V_Sem_2x） |
-| `retrieval_ablation_milvus_snapshot.py` | Milvus 语义分数快照（document-level 原始结果） |
+| `retrieval_ablation_milvus_snapshot.py` | Milvus 语义分数快照（document-level 原始结果，pre-filter） |
 | `retrieval_ablation_report.md` | 完整实验报告 |
 | `retrieval_ablation_reports/` | 实验结果 JSON 输出 |
 
 ### 建议
 
 - 保持 semantic weight=18 为默认值
-- 调查 69% 的 SEMANTIC_RETRIEVAL_ERROR 率
+- 调查剩余 6% 的 SEMANTIC_RETRIEVAL_ERROR 率
 - 基础 ranking 已实现 0.9355 NDCG@3，语义分数是 refinement 而非 replacement
