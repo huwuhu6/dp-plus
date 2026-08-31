@@ -1587,3 +1587,159 @@ v3 的 pre-filter 方案与生产等价。语义信号更有用因为 ANN 搜索
 - 保持 semantic weight=18 为默认值
 - 调查剩余 6% 的 SEMANTIC_RETRIEVAL_ERROR 率
 - 基础 ranking 已实现 0.9355 NDCG@3，语义分数是 refinement 而非 replacement
+
+---
+
+## 最终架构总结
+
+### Retrieval 主线
+
+```
+用户 Query
+→ ConstraintExtraction（自然语言 → 结构化约束 + 语义查询）
+→ Hard Filter（MySQL: 城市、预算、菜系、距离、营业时间）
+→ Candidate Pool（确定性候选集）
+→ Milvus Semantic Retrieval（pre-filter 在候选集内 TopK=80 document-level similarity）
+→ Shop-level MAX Aggregation（document → shop 级 semanticScore）
+→ Deterministic Ranking（rating + budget + occasion + distance + quiet + queue + evidence + semanticScore × 18）
+→ Recommendation（Top-N 候选）
+→ Natural Language Output（Narrative/Polish，只负责表达，不参与事实决策）
+```
+
+### 各层职责
+
+| 层 | 职责 | 关键约束 |
+|----|------|---------|
+| **ConstraintExtraction** | 将自然语言 Query 转为结构化约束（budget, cuisine, radius, quiet, avoidQueue, occasion）和语义查询文本 | 不修改生产 Java 业务逻辑；Prompt 微调基线已稳定（Baseline 100%） |
+| **Hard Filter** | 确定性约束：城市 SQL 过滤 → budget/菜品/距离/营业时间逐项检查 | 使用 `CuisineCanonicalizer` 共享 exact-match 映射，无 substring 回退 |
+| **Milvus Semantic Retrieval** | 在合法候选池内提供语义 scoring signal | pre-filter 模式（`metadata["shopId"] in [...]`），TopK=80，semantic-min-score=0.35 |
+| **MAX Aggregation** | 将多个 document 的 similarity 聚合为 shop-level semanticScore | 取最高分；当前无 per-shop cap |
+| **Deterministic Ranking** | 融合业务因素 + semantic score | Total = min(100, rating + budget + occasion + distance + quiet + queue + evidence + semanticScore × 18) |
+| **Narrative/Polish** | 自然语言表达，不参与事实决策 | 使用 qwen-flash（轻量模型），降级后不影响推荐链路 |
+
+### 已解决问题
+
+1. **菜系 canonicalization 不对称**：用户侧和商户侧共用 `CuisineCanonicalizer` exact-match 映射，无 substring 回退
+2. **常量加分干扰排序**：删除 `score += 20D`（菜系匹配）和 `score += 12D`（清淡证据），保留 `matchedReasons` 输出
+3. **地理 Query 语义 fallback 缺陷**：纯地理查询不再产生无意义语义检索，空查询由 guard clause 降级为 `unavailable`
+4. **Query Entity Boundary**：Prompt 微调 Baseline 100%，Holdout 87.5%，按策略不再继续补 Prompt
+5. **Review.tags 未启用**：当前无生产填充路径，取消原定 A/B 实验，正式记录为已知限制
+
+### 已完成实验
+
+| 实验 | 文件 | 状态 |
+|------|------|------|
+| ConstraintExtractor Prompt v1/v2 对比 | `constraint_experiment.py` | 已关闭（不再继续 Prompt 调优） |
+| Semantic Scoring Ablation（V_Base / V_Sem / V_Sem_2x） | `retrieval_ablation_*.py` | 已完成（生产等价 pre-filter） |
+| 叙事生成/答案润色 qwen-flash 降级 | 生产代码 | 已上线 |
+| 主评测 seed-v2 / holdout-v1 | `AiEvaluationService` | 持续可用 |
+
+### 最终实验数字
+
+```
+V_Base:  Recall@3=0.7291  NDCG@3=0.9355  Top1=0.9355  CVR=0
+V_Sem:   Recall@3=0.7614  NDCG@3=0.9558  Top1=0.9355  CVR=0
+V_Sem_2x:Recall@3=0.7722  NDCG@3=0.9704  Top1=0.9677  CVR=0
+```
+
+**准确表述**：
+- semanticScore × 18 相比 Base 有正向方向性增量
+- 主要改善 Recall@3 (+3.2pp) 和 NDCG@3 (+2.0pp)
+- Top1 在当前数据集上 weight=18 无变化，weight=36 有改善但不证明 36 是最优
+- 不能声称"Milvus 提升了候选召回"——Milvus 在 Hard Filter 候选域中提供 semantic scoring signal，并对最终 ranking 带来方向性增量
+- 不声称统计显著，不声称模型在行业数据上已被充分证明
+- 7 个 SEMANTIC_RETRIEVAL_ERROR 只是在当前 35 Query、当前 Candidate Pool、当前 Embedding/TopK 配置下观察到的失败，不等价于"Embedding 模型召回率为 94%"
+
+## Known Limitations
+
+### 1. AiReviewDocument.tags 未启用
+
+**当前状态**：`ShopReviewService` 写入 `AiReviewDocument` 时 `tags` 恒为空（`document.setTags("")`），`SemanticShopDocumentFactory.reviewDocument()` 拼接的文本中 `"。标签："` 后无实际内容。当前 Review Embedding 实际上是 content-only。
+
+**为什么本轮不解决**：原定 `content vs content+tags` A/B 实验因变量不存在而取消。当前 content-only embedding 未观察到因缺少 tags 导致的实际检索失败案例。Review tag extraction 需要额外的 NLP 管线或模型调用，在当前阶段投入产出比不明确。
+
+**什么条件下值得重新考虑**：当 content-only embedding 被明确归因为 ranking 失败原因（如频繁出现语义分数无法区分相关/不相关 Review），且拥有稳定可用的 tag extraction 管线时。
+
+### 2. Review Sentiment 当前未参与 Semantic Scoring
+
+**当前状态**：`AiReviewDocument.sentiment` 字段存在（0/1 表示正面/负面），但未纳入 `SemanticShopDocumentFactory` 的文档拼接文本，因此不影响 embedding 相似度。
+
+**为什么本轮不解决**：当前未观察到因忽略 sentiment 导致的实际错误案例。sentiment 参与 semantic scoring 需要额外的实验验证其对 ranking 的影响方向。
+
+**什么条件下值得重新考虑**：当出现频繁因负面评价被误认为正面语义信号而排名异常时。
+
+### 3. MAX Aggregation 可能放大单条异常高相似度 Review
+
+**当前状态**：`MilvusSemanticShopRetriever` 对每个 Shop 的多个 document 使用 `scoreByShopId.merge(shopId, score, Math::max)`，即取最高分。如果某条 Review 因文本巧合与 Query 语义高度相似，其 score 会被直接用作该 Shop 的 semanticScore。
+
+**为什么本轮不解决**：当前未观察到因单条异常 Review 导致 ranking 明显异常的案例。MAX 聚合在语义信号稀疏时反而能捕捉到最相关的匹配。更复杂的聚合策略（均值、加权、分位数）需要实验验证其效果。
+
+**什么条件下值得重新考虑**：当出现因单条不相关 Review 被语义匹配为高分，导致不相关 Shop 排名异常靠前的复现案例时。
+
+### 4. 当前 TopK=80 下没有对单 Shop Document 数做 per-shop cap
+
+**当前状态**：Milvus 搜索 `limit=80`，但未限制单个 Shop 最多返回的 document 数。如果某 Shop 有 50 条 Review 且全部与 Query 语义相似，它可能占据 Top80 的大部分名额。
+
+**为什么本轮不解决**：当前 66 个 demo shop 平均每个 6-7 条 document，总计 480 条，分布均匀，未出现单 Shop 占据 Top80 大部分名额的情况。增加 per-shop cap 需要额外实验验证其效果。
+
+**什么条件下值得重新考虑**：当商户 Review 数量差异显著增大，且高频商户因文档数量优势在语义召回中系统性占据过多名额时。
+
+### 5. Semantic Weight=18 只经过小规模方向性验证
+
+**当前状态**：weight=18 的设定源自 Ablation 实验（35 Query，112 GT shops），仅在小规模数据集上验证了方向性增量。这不是生产级大规模评测。
+
+**为什么本轮不解决**：当前实验框架已就绪，weight 是可配置参数（`ai.retrieval.semantic-weight`），未来可以在更大数据集上重新调参。在当前规模下，18 已显示正向方向性，没有必要进一步调优。
+
+**什么条件下值得重新考虑**：当拥有更大规模、更多样化的标注数据集，或生产环境实际效果反馈需要调整权重时。
+
+### 6. 当前评测集规模有限
+
+**当前状态**：主评测集 15 条 + 保留集 4 条 + Ablation 集 35 条，总计 54 条标注查询。覆盖 14 个场景，但每个场景的样本量很小（2-4 条）。
+
+**为什么本轮不解决**：评测集构建是持续过程，当前规模已覆盖主要场景并支持方向性验证。扩大评测集需要持续标注投入，且当前未遇到因评测集不足而无法决策的情况。
+
+**什么条件下值得重新考虑**：当核心链路发生变化，或现有评测集在区分不同方案时置信度不足时。
+
+### 7. BM25 / Reranker / Cross-Encoder 未引入
+
+**当前状态**：当前检索架构仅依赖硬约束 + 向量语义 scoring。未引入 BM25 全文检索、Reranker 或 Cross-Encoder。
+
+**为什么本轮不解决**：当前失败归因分析显示：大部分错误是 RANKING_ERROR（39/39/36/34），而非 SEMANTIC_RETRIEVAL_ERROR（7）。ranking 错误的主要来源是 Deterministic Ranking 因子间的相对权重，而非语义信号不足。在当前数据规模下，引入 Reranker 的成本（额外模型调用、延迟、复杂度）与预期收益不匹配。
+
+**什么条件下值得重新考虑**：当 SEMANTIC_RETRIEVAL_ERROR 成为主要失败类型（占 50% 以上），且有明确证据表明当前 embedding 无法区分语义差异时。
+
+### 8. Query Entity Boundary 的模型泛化存在少量边界情况
+
+**当前状态**：ConstraintExtractor Prompt v2 在 Baseline 达到 100%，Holdout 仍有 87.5%。剩余 1 例（"搜索西安肉夹馍店"）属于模型泛化边界，不再继续通过 few-shot 穷举修复。
+
+**为什么本轮不解决**：按先前策略约定，Baseline 100% 即停止 Prompt 调优。剩余边界情况属于模型能力天花板，穷举式修复收益递减。
+
+**什么条件下值得重新考虑**：当用户实际反馈中实体边界误判频繁出现，且有明确生产数据支撑优先级时。
+
+### 明确"不做清单"
+
+以下方向已评估，当前阶段不引入：
+
+- **BM25 / 全文检索**：当前 SEMANTIC_RETRIEVAL_ERROR 仅 7/112，不足以支撑引入
+- **Reranker / Cross-Encoder**：大部分错误是 ranking 权重问题，而非语义信号不足
+- **NER / Entity Linking**：实体边界已通过 Prompt 基线达到 100%，Holdout 边界情况不需要 NER 管线
+- **Ontology / 知识图谱**：CuisineCanonicalizer 已用封闭映射集覆盖主要菜系，不需要外部知识库
+- **Review.tags extraction**：当前 content-only embedding 未发现因缺少 tags 导致的失败案例
+- **Semantic weight 调优**：weight=18 已显示方向性增量，当前数据规模不足以支持最优权重搜索
+- **Per-shop document cap**：当前文档分布均匀，未出现单 Shop 占据 TopK 大部分名额的情况
+- **Sentiment-aware embedding**：未观察到因忽略 sentiment 导致的实际错误案例
+
+## 封板状态
+
+**本项目已进入封板状态。**
+
+以后发现新问题，默认进入 Known Limitations，不再自动新增任务。
+
+只有满足以下全部条件时，才允许重新开启：
+
+1. 能稳定复现
+2. 明确影响核心正确性或业务质量
+3. 现有架构无法解释
+4. 修复成本与收益明确匹配
+
+当前代码、实验、文档已全部提交，文档一致性已通过静态检查。
