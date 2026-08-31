@@ -1665,7 +1665,35 @@ B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
 - Profile 文档在 A/B 间共享，是 MAX 聚合的主要贡献者（Profile-dominance 41-49%）
 - 文档级分数变化在 Shop 级 MAX 聚合中被平滑
 
-**3. Production Anchor 修正归因**：exact Top80 与生产 Milvus Top80 在文档级差异显著（avg 59.7 exact-only + 7.5 prod-only per query），但 Shop 级 overlap@3 仍为 0.8571。这意味着 overlap 指标是多个因素的聚合结果（TopK=80 截断、ANN 近似误差、文档级重叠性），**不可分解为单一因素的诊断**。该指标在 A/B 比较中仍然有效，因为两个变体看到相同的生产 snapshot。
+**3. Shop-level ranking margin vs tags perturbation**：在最终 deterministic ranking 中，对 22 个有 ≥4 个候选商户的查询计算 Top3 边界（score@3 - score@4）：
+- Min margin = 0.0877, Median = 0.3129, Max = 13.3509
+- 18 × max epsilon = 0.7175
+- 结果：min shop margin (0.0877) ≤ 18×max epsilon (0.7175)
+- 当前数据无法建立严格的 ranking robustness certificate。但这是保守上界，实际 A/B 实验 Recall@3 和 Top1 为 0 变化。
+
+**4. Fingerprint 对账**：`documentFingerprint` 不在 Milvus metadata 中存储。`SemanticShopDocumentFactory.document()` 写入 metadata map 但 Spring AI 的 MilvusVectorStore 不持久化该字段。已通过文本契约重构确认当前数据源与生产 factory 一致。
+
+**5. Production Anchor 归因修正**：
+- ANN 近似行为（主要因素，exact vs ANN Top80 不保证一致）
+- Embedding 文本契约（无法验证，fingerprint 不存在）
+- 边界 tie-break 效应（次要因素）
+- Shop 级 MAX 掩码（解释文档级差异大但 shop 级 overlap 仍为 0.8571@3）
+- 这些因素不独立分解，overlap@3/overlap@5 是聚合指标。
+
+**6. 最终语义边界**：
+- 已证明：tags 改变 Review embedding 表示，但在 exact semantic pipeline 中无 Recall@3/Top1 增量
+- 未直接证明：content-only 进入生产 Milvus ANN 后 Top80/ranking 与当前 content+tags 不发生实质变化
+- 结论：content-only 作为未来 Review embedding 文本契约决策，当前生产索引保持不变，下一次自然重建时执行 production qualification。
+
+**7. Production Re-index Runbook**：
+- 当前索引 content+tags 不修改
+- 下一次自然全量 Review re-index 时：
+  1. Review embedding text 切换为 content-only
+  2. 使用现有 sync/reconciliation 机制重建
+  3. 对冻结的 35 Query 运行 retrieval evaluation harness
+  4. 与 V_Sem baseline (Recall@3=0.7614, NDCG@3=0.9558, Top1=0.9355, CVR=0) 比较
+  5. 预注册规则：Recall@3 ≥ baseline - 2pp AND CVR=0 AND 无新 SEMANTIC_THRESHOLD_ERROR
+  6. 通过则接受 content-only，不通过则回退并记录 Known Limitation
 
 **最终结论**：Retrieval 主线所有实验已完成。封板。
 
@@ -1745,7 +1773,7 @@ B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
 - **Reranker / Cross-Encoder**：大部分错误是 ranking 权重问题，而非语义信号不足
 - **NER / Entity Linking**：实体边界已通过 Prompt 基线达到 100%，Holdout 边界情况不需要 NER 管线
 - **Ontology / 知识图谱**：CuisineCanonicalizer 已用封闭映射集覆盖主要菜系，不需要外部知识库
-- **Review.tags embedding A/B**：Exact cosine 对比 content-only vs content+tags，Recall@3 完全一致（0.7932），Top1 完全一致（0.9655），NDCG@3 差 +0.45pp。预注册规则未满足，推荐 content-only。最终审计确认：cache 完整（396/396），epsilon 分布（P95=0.014）虽大于 Top80 边界（median=0.00047），但文档级扰动在 Shop 级 MAX 聚合中被平滑，不影响最终结论。详见 `retrieval_tags_ab_report.md`。
+- **Review.tags embedding A/B**：Exact cosine 对比 content-only vs content+tags，Recall@3 完全一致（0.7932），Top1 完全一致（0.9655），NDCG@3 差 +0.45pp。预注册规则未满足，推荐 content-only。最终审计确认：cache 完整（396/396），epsilon 分布（P95=0.014）虽大于 Top80 边界（median=0.00047），但文档级扰动在 Shop 级 MAX 聚合中被平滑，不影响最终结论。Shop-level margin 分析：min margin=0.0877 小于 18×max epsilon=0.7175，无法建立严格 robustness certificate，但 A/B 实验 Recall@3 和 Top1 为 0 变化。Fingerprint 不在 Milvus metadata 中存储，无法做逐指纹对账。见 `retrieval_tags_ab_report.md` 和 `_tags_ab_final_audit.py`。
 - **Semantic weight 调优**：weight=18 已显示方向性增量，当前数据规模不足以支持最优权重搜索
 - **Per-shop document cap**：当前文档分布均匀，未出现单 Shop 占据 TopK 大部分名额的情况
 - **Sentiment-aware embedding**：未观察到因忽略 sentiment 导致的实际错误案例

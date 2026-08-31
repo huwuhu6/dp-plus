@@ -153,36 +153,106 @@ Epsilon = |cos_A - cos_B| for each (query, review_document) pair. Measures how m
 
 **However**, this does not contradict the null A/B result. The epsilon is a signed difference — adding tags raises some document scores and lowers others. The MAX aggregation across Profile + Review documents smooths these individual changes. Since Profile embeddings are identical across A/B, the shop-level ranking is largely preserved.
 
-### 3. Production Anchor Deep-Dive
+### 3. Shop-level Ranking Margin vs Tags Perturbation
 
-Document-level Top80 comparison between exact cosine and production Milvus snapshot:
+Examines whether the maximum possible tags-induced perturbation at the semantic score level (18 × max epsilon = 0.7175) could cross the Top3 shop boundary in the final deterministic ranking.
 
 | Metric | Value |
 |--------|:-----:|
-| Queries analyzed | 35 |
-| Exact-only docs (avg/query) | 59.7 |
-| Prod-only docs (avg/query) | 7.5 |
+| Queries with ≥4 shops for margin analysis | 22/35 |
+| Queries with <4 shops (insufficient) | 13/35 |
+| Min shop margin (score@3 - score@4) | 0.0877 |
+| Median shop margin | 0.3129 |
+| Max shop margin | 13.3509 |
+| 18 × max epsilon | 0.7175 |
+| Queries with margin > 0.7175 | 8/22 |
 
-The document-level difference is large (avg 59.7 docs in exact Top80 but not in production), yet the shop-level overlap@3 remains 0.8571. This confirms that the **shop-level MAX aggregation masks document-level differences**: as long as at least one document per shop is in both Top80s, the shop-level overlap is preserved.
+**Result**: Min shop margin (0.0877) ≤ 18×max epsilon (0.7175). **Current data cannot establish a strict ranking robustness certificate.** Only 8/22 queries have margin > the maximum possible perturbation.
 
-### 4. Corrected Production Anchor Interpretation
+However, this is a conservative bound. The epsilon is the *maximum possible* signed perturbation, not the *actual* perturbation for any given document. The actual A/B experiment showed zero Recall@3 and Top1 change, indicating that the perturbation direction happened to not cross the ranking boundary in practice.
 
-The overlap@3=0.8571 and overlap@5=0.7857 are **aggregate indicators** reflecting multiple factors:
+**No tie-break events detected** (no queries with equal scores at position 3 or 4+).
 
-1. **TopK=80 truncation**: Production Milvus only returns Top80 documents. Exact cosine scores ALL documents. Documents ranked 81+ in exact are invisible to production, and vice versa.
-2. **ANN approximation**: Milvus uses HNSW approximate search, which is not guaranteed to return the exact Top80.
-3. **Document-level proximity**: The exact Top80 and production Top80 may differ at the document level even when the shop-level overlap is high.
-4. **Tie-break effects**: Near-equal scores near the Top80 boundary can flip membership between exact and ANN search.
+### 4. Fingerprint / Text Contract Reconciliation
 
-**These factors are not decomposed independently.** The overlap@3/overlap@5 are sufficient for the A/B comparison (both variants see the same production anchor), but not a diagnostic of any single factor.
+| Check | Result |
+|-------|:------:|
+| Fingerprint stored in Milvus metadata? | **No** |
+| Snapshot metadata fields | doc_id, shop_id, doc_type, score |
+| Factory metadata fields | shopId, documentType, reviewId, sourceType, sourceRevision, **documentFingerprint** |
 
-### 5. Final Qualification
+**`documentFingerprint` is NOT persisted in Milvus metadata.** `SemanticShopDocumentFactory.document()` adds it to the metadata map, but Spring AI's `MilvusVectorStore` does not store it in the metadata JSON field. Fingerprint-based contract verification is not possible from the existing Milvus snapshot.
+
+**Text contract reconstruction**: Production factory text templates (`SemanticShopDocumentFactory.profileDocument()`, `reviewDocument()`) match the current data sources (CSV exports). No text/metadata drift detected between current data sources and the production factory contract.
+
+### 5. Corrected Production Anchor Attribution
+
+The difference between exact cosine Top80 and production Milvus Top80 is attributed to the following factors, **not decomposed independently**:
+
+| Factor | Role |
+|--------|:----:|
+| **Filtered ANN retrieval behavior** | **Primary factor.** Production uses Milvus ANN (HNSW/COSINE) with pre-filter. Exact cosine evaluates ALL documents exhaustively. ANN approximation does not guarantee exact Top80. |
+| **Embedding source / contract** | **Cannot verify.** Fingerprint not stored in Milvus metadata. Text contract reconstruction matches current source, but cannot prove production vectors were generated from the same text at index time. |
+| **Boundary / tie-break effects** | **Minor factor.** Near-equal similarity near the Top80 boundary can flip membership. |
+| **Shop-level MAX masking** | **Explains shop-level overlap.** Document-level differences (avg 59.7 exact-only + 7.5 prod-only per query) do not propagate to shop-level Top3 (overlap@3=0.8571) because MAX aggregation across Profile + Review preserves shop overlap. |
+
+**The overlap@3/overlap@5 are aggregate indicators, not a diagnostic of any single factor.**
+
+### 6. Final Qualification
 
 | Question | Answer |
 |----------|:------:|
 | Is the A/B conclusion valid? | **Yes.** Tags are redundant with review content. No recall or Top1 improvement. |
 | Is the cache complete? | **Yes.** 396/396 entries for relevant shops. A==B key sets. |
-| Do tags perturb ranking? | **Yes, at the document level.** But the effect washes out at the shop level due to MAX aggregation and shared Profile embeddings. |
-| Is the production anchor reliable? | **As an aggregate indicator, yes.** It is not a single-factor diagnostic, but it is stable across variants. |
+| Do tags perturb ranking? | **Yes, at the document level.** But the effect washes out at the shop level. |
+| Is the production anchor reliable? | **As an aggregate indicator, yes.** Not a single-factor diagnostic, but stable across variants. |
+| Can we prove ranking robustness? | **No.** Min shop margin (0.0877) ≤ 18×max epsilon (0.7175). No strict certificate possible. |
+| Can we verify fingerprint? | **No.** Fingerprint not stored in Milvus metadata. |
 
-**Final verdict**: Keep content-only (A) for review embedding text. No engineering action required on the current production index (content+tags). Switch to content-only at the next natural re-indexing event.
+### 7. Final Semantic Boundary
+
+**Proven**:
+- `A`: Tags change the Review embedding representation.
+- `B`: In the Profile + Review + MAX + threshold + ranking exact semantic pipeline, tags produce no Recall@3 or Top1 improvement above the pre-registered threshold.
+
+**Not directly proven**:
+- `C`: content-only re-indexed into Production Milvus ANN will produce identical Top80 / ranking to current content+tags index.
+
+**Decision**: content-only is adopted as the formal text contract for future Review embedding. The current production index (content+tags) remains unchanged. A production qualification runbook is defined for the next natural re-indexing event.
+
+### 8. Production Re-index Runbook
+
+**Current index**: content+tags (no action required).
+
+**Next natural full Review re-index**:
+
+1. Switch Review embedding text to content-only (A variant) in `SemanticShopDocumentFactory.reviewDocument()`.
+2. Rebuild Review embeddings using the existing vector sync/reconciliation mechanism.
+3. Run the existing retrieval evaluation harness on the frozen 35-query ablation dataset:
+
+   **Baseline** (current V_Sem production):
+   ```
+   Recall@3 = 0.7614
+   NDCG@3   = 0.9558
+   Top1     = 0.9355
+   CVR      = 0
+   ```
+
+4. Compare content-only ANN results against baseline:
+
+   **Pre-registered qualification rule**:
+   ```
+   Recall@3 >= baseline - 2pp
+   AND CVR = 0
+   AND no new SEMANTIC_THRESHOLD_ERROR mode
+   ```
+
+5. Monitor:
+   - Allowed set shops with zero Top80 documents (should not increase relative to B baseline)
+   - New `SEMANTIC_THRESHOLD_ERROR` emergence
+   - Shop-level ranking distribution changes
+
+6. **If qualification passes**: Accept content-only production ANN behavior.
+7. **If qualification fails**: Revert Review embedding text to content+tags, record as Known Limitation, do not create a second experiment cycle.
+
+**Note**: This runbook is for the next natural re-indexing event. Do not create a temporary Milvus collection, do not modify `SemanticShopDocumentFactory`, do not trigger a production re-index for this purpose alone.

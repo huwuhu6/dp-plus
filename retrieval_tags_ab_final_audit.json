@@ -1,0 +1,242 @@
+{
+  "step1_shop_margin": {
+    "description": "Shop-level Top3 ranking boundary vs 18×max epsilon perturbation",
+    "max_epsilon": 0.039863,
+    "weighted_perturbation_18x": 0.7175,
+    "margin_summary": {
+      "min": 0.0877,
+      "median": 0.3129,
+      "max": 13.3509,
+      "mean": 1.5189,
+      "total_queries": 22,
+      "weighted_max_perturbation_18x": 0.7175,
+      "robustness_certificate": false,
+      "safe_queries": 8
+    },
+    "per_query_margins": [
+      {
+        "case_id": "ABL_003",
+        "total_shops": 7,
+        "rank3_shop": 41,
+        "rank3_score": 57.9634,
+        "rank4_shop": 42,
+        "rank4_score": 44.6125,
+        "margin": 13.3509
+      },
+      {
+        "case_id": "ABL_004",
+        "total_shops": 8,
+        "rank3_shop": 31,
+        "rank3_score": 34.9819,
+        "rank4_shop": 29,
+        "rank4_score": 34.7844,
+        "margin": 0.1975
+      },
+      {
+        "case_id": "ABL_005",
+        "total_shops": 8,
+        "rank3_shop": 25,
+        "rank3_score": 34.4332,
+        "rank4_shop": 21,
+        "rank4_score": 34.3455,
+        "margin": 0.0877
+      },
+      {
+        "case_id": "ABL_006",
+        "total_shops": 8,
+        "rank3_shop": 28,
+        "rank3_score": 34.1169,
+        "rank4_shop": 31,
+        "rank4_score": 33.9537,
+        "margin": 0.1632
+      },
+      {
+        "case_id": "ABL_009",
+        "total_shops": 66,
+        "rank3_shop": 31,
+        "rank3_score": 34.2198,
+        "rank4_shop": 29,
+        "rank4_score": 34.1158,
+        "margin": 0.104
+      },
+      {
+        "case_id": "ABL_010",
+        "total_shops": 36,
+        "rank3_shop": 30,
+        "rank3_score": 33.2459,
+        "rank4_shop": 53,
+        "rank4_score": 32.972,
+        "margin": 0.2739
+      },
+      {
+        "case_id": "ABL_011",
+        "total_shops": 5,
+        "rank3_shop": 52,
+        "rank3_score": 32.5791,
+        "rank4_shop": 50,
+        "rank4_score": 32.2998,
+        "margin": 0.2793
+      },
+      {
+        "case_id": "ABL_012",
+        "total_shops": 5,
+        "rank3_shop": 49,
+        "rank3_score": 48.1188,
+        "rank4_shop": 52,
+        "rank4_score": 47.9982,
+        "margin": 0.1206
+      },
+      {
+        "case_id": "ABL_013",
+        "total_shops": 4,
+        "rank3_shop": 74,
+        "rank3_score": 32.7253,
+        "rank4_shop": 75,
+        "rank4_score": 32.6022,
+        "margin": 0.1231
+      },
+      {
+        "case_id": "ABL_015",
+        "total_shops": 5,
+        "rank3_shop": 31,
+        "rank3_score": 33.8145,
+        "rank4_shop": 29,
+        "rank4_score": 33.2881,
+        "margin": 0.5264
+      },
+      {
+        "case_id": "ABL_017",
+        "total_shops": 5,
+        "rank3_shop": 49,
+        "rank3_score": 33.9212,
+        "rank4_shop": 50,
+        "rank4_score": 32.8922,
+        "margin": 1.029
+      },
+      {
+        "case_id": "ABL_018",
+        "total_shops": 7,
+        "rank3_shop": 41,
+        "rank3_score": 33.674,
+        "rank4_shop": 42,
+        "rank4_score": 32.7061,
+        "margin": 0.9679
+      },
+      {
+        "case_id": "ABL_022",
+        "total_shops": 7,
+        "rank3_shop": 39,
+        "rank3_score": 34.4722,
+        "rank4_shop": 42,
+        "rank4_score": 32.9611,
+        "margin": 1.5111
+      },
+      {
+        "case_id": "ABL_023",
+        "total_shops": 7,
+        "rank3_shop": 28,
+        "rank3_score": 51.4853,
+        "rank4_shop": 35,
+        "rank4_score": 51.1724,
+        "margin": 0.3129
+      },
+      {
+        "case_id": "ABL_025",
+        "total_shops": 5,
+        "rank3_shop": 45,
+        "rank3_score": 35.0328,
+        "rank4_shop": 46,
+        "rank4_score": 34.0447,
+        "margin": 0.988
+      },
+      {
+        "case_id": "ABL_026",
+        "total_shops": 8,
+        "rank3_shop": 64,
+        "rank3_score": 35.6492,
+        "rank4_shop": 60,
+        "rank4_score": 35.3982,
+        "margin": 0.2509
+      },
+      {
+        "case_id": "ABL_029",
+        "total_shops": 4,
+        "rank3_shop": 77,
+        "rank3_score": 49.0717,
+        "rank4_shop": 79,
+        "rank4_score": 48.6463,
+        "margin": 0.4255
+      },
+      {
+        "case_id": "ABL_030",
+        "total_shops": 8,
+        "rank3_shop": 23,
+        "rank3_score": 33.4535,
+        "rank4_shop": 22,
+        "rank4_score": 33.3417,
+        "margin": 0.1119
+      },
+      {
+        "case_id": "ABL_031",
+        "total_shops": 5,
+        "rank3_shop": 68,
+        "rank3_score": 33.384,
+        "rank4_shop": 69,
+        "rank4_score": 33.0887,
+        "margin": 0.2953
+      },
+      {
+        "case_id": "ABL_032",
+        "total_shops": 5,
+        "rank3_shop": 40,
+        "rank3_score": 47.7487,
+        "rank4_shop": 42,
+        "rank4_score": 46.5595,
+        "margin": 1.1891
+      },
+      {
+        "case_id": "ABL_033",
+        "total_shops": 8,
+        "rank3_shop": 24,
+        "rank3_score": 45.9366,
+        "rank4_shop": 26,
+        "rank4_score": 35.6331,
+        "margin": 10.3035
+      },
+      {
+        "case_id": "ABL_035",
+        "total_shops": 7,
+        "rank3_shop": 81,
+        "rank3_score": 57.9883,
+        "rank4_shop": 84,
+        "rank4_score": 57.1844,
+        "margin": 0.8038
+      }
+    ],
+    "tie_notes": []
+  },
+  "step2_fingerprint": {
+    "fingerprint_in_snapshot": false,
+    "snapshot_metadata_fields": [
+      "doc_id",
+      "shop_id",
+      "doc_type",
+      "score"
+    ],
+    "reason": "documentFingerprint is not persisted in Milvus metadata by Spring AI's MilvusVectorStore. SemanticShopDocumentFactory.document() adds it to the metadata map, but it is not stored in the metadata JSON field in Milvus.",
+    "text_contract_reconstruction": "Production factory text templates match current data sources. No drift detected.",
+    "metadata_contract": "Milvus metadata has 5 fields (shopId, documentType, reviewId, sourceType, sourceRevision). Factory adds 6th (documentFingerprint) but it is not persisted."
+  },
+  "step3_production_anchor": {
+    "overlap_3": 0.8571,
+    "overlap_5": 0.7857,
+    "exact_only_avg": 59.7,
+    "prod_only_avg": 7.5,
+    "attribution": {
+      "filtered_ann_retrieval": "Primary factor. ANN vs exact cosine produces different Top80 document sets.",
+      "embedding_contract": "Cannot verify. Fingerprint not stored in Milvus metadata.",
+      "boundary_tie_break": "Minor factor. Near-equal scores near boundary.",
+      "shop_level_max_masking": "Explains mismatch between document-level difference and shop-level overlap."
+    }
+  }
+}
