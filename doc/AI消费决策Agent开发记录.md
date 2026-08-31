@@ -1501,3 +1501,61 @@ deepseek-v4-flash 在 4/8 样本中输出了禁止词（"距离""评分""价格"
 ### 测试
 
 `ConsumptionDecisionServiceTest` 26 项 + `AgentConversationServiceTest` 7 项：0 failure、0 新 error。1 个既有 Mockito JDK 21 错误未改动。
+
+## 2026-08-31：Semantic Scoring Ablation 实验
+
+### 背景
+
+评估 `semanticScore × 18` 在 ranking 中的实际贡献。核心问题：
+1. 语义分数是否改善 ranking（Recall@K、NDCG、Top1）？
+2. 权重加倍（18→36）是否进一步改善？
+3. 失败发生在哪一层？
+
+### 实验设计
+
+- **V_Base**: Hard Filter + full ranking，**不含** `semanticScore`（即 `semanticWeight=0`）
+- **V_Sem**: Hard Filter + full ranking + `semanticScore × 18`（当前生产行为）
+- **V_Sem_2x**: Hard Filter + full ranking + `semanticScore × 36`（sanity check）
+
+三版本共享完全相同的查询、约束、hard filter 候选池、Milvus 快照和语义分数。
+
+### 数据集
+
+`retrieval_ablation_dataset.py` 定义了 35 条查询（31 条活跃 + 4 条 relaxation），覆盖 14 个场景：
+- 结构化约束（菜系+预算）、结构化+语义偏好（场景/环境）、仅菜系、地理+菜系
+- 地名嵌入菜品名、营业时间边界、烤肉/牛排/寿司/港式 canonicalization
+- 福州数据覆盖、零结果
+
+共 112 个 ground truth（105 个 grade 2，7 个 grade 1）。
+
+### 核心结果
+
+| Metric | V_Base | V_Sem | V_Sem_2x |
+|--------|:------:|:-----:|:---------:|
+| Recall@3 | 0.7291 | 0.7507 | 0.7722 |
+| NDCG@3 | 0.9355 | 0.9483 | 0.9684 |
+| Top1 Accuracy | 0.9355 | 0.9355 | 0.9677 |
+| Constraint Violation Rate | 0.0000 | 0.0000 | 0.0000 |
+
+### 关键发现
+
+1. **语义分数减少 57% 的 ranking 错误**（14→6），但 69% 的 GT shop 没有语义信号（SEMANTIC_RETRIEVAL_ERROR）
+2. **Top1 Accuracy 不受 weight=18 影响**，只有 weight=36 时才改善
+3. **存在 regression 案例**：ABL_033（安静的日料店）V_Base Recall=1.00 → V_Sem Recall=0.67
+4. **Zero constraint violation**：三个版本的硬约束过滤均正确
+
+### 实验文件
+
+| 文件 | 用途 |
+|------|------|
+| `retrieval_ablation_dataset.py` | 数据集定义 + JSON 导出 |
+| `retrieval_ablation_experiment.py` | 实验框架（V_Base/V_Sem/V_Sem_2x） |
+| `retrieval_ablation_milvus_snapshot.py` | Milvus 语义分数快照 |
+| `retrieval_ablation_report.md` | 完整实验报告 |
+| `retrieval_ablation_reports/` | 实验结果 JSON 输出 |
+
+### 建议
+
+- 保持 semantic weight=18 为默认值，weight=36 有边际收益但增加 regression 风险
+- 调查 69% 的 SEMANTIC_RETRIEVAL_ERROR 率：考虑增加 topK、查询扩展或改进文档质量
+- 基础 ranking（V_Base）已实现 0.9355 NDCG@3，语义分数是 refinement 而非 replacement

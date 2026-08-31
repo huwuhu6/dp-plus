@@ -1,0 +1,1199 @@
+[
+  {
+    "case_id": "ABL_001",
+    "query": "人均200以内的日料",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "日料",
+      "budgetPerPerson": 200,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 22,
+        "relevance": 2,
+        "note": "小林刺身 180元 日料居酒屋，符合预算; 场景朋友聚餐/独自"
+      },
+      {
+        "shop_id": 24,
+        "relevance": 2,
+        "note": "鳗诚屋 160元 日料鳗鱼饭，符合预算; 安静"
+      },
+      {
+        "shop_id": 26,
+        "relevance": 2,
+        "note": "大江户日料 195元 日料自助，符合预算; 热闹"
+      }
+    ],
+    "scenario": "结构化约束",
+    "notes": "日料+预算200, 3家符合",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_002",
+    "query": "人均100的港式茶餐厅",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "港式",
+      "budgetPerPerson": 100,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 47,
+        "relevance": 2,
+        "note": "敏华冰厅 90元 港式茶餐厅，符合预算; 独自/热闹"
+      }
+    ],
+    "scenario": "结构化约束",
+    "notes": "港式+预算100, 仅敏华符合; 太兴125❌超预算",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_003",
+    "query": "适合约会的安静西餐厅",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "西餐",
+      "occasion": "约会",
+      "quiet": true,
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 36,
+        "relevance": 2,
+        "note": "王品牛排 350元 约会+商务 安静+浪漫"
+      },
+      {
+        "shop_id": 37,
+        "relevance": 2,
+        "note": "西堤牛排 220元 约会+朋友聚餐 安静+浪漫"
+      },
+      {
+        "shop_id": 41,
+        "relevance": 2,
+        "note": "斗牛士牛排 185元 约会+商务 安静+包间"
+      }
+    ],
+    "scenario": "结构化+语义偏好",
+    "notes": "西餐+约会+安静, 3家强匹配",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_004",
+    "query": "安静的火锅，适合聊天",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "火锅",
+      "quiet": true,
+      "nearby": false,
+      "radiusKm": -1,
+      "budgetPerPerson": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 30,
+        "relevance": 2,
+        "note": "凑凑火锅 165元 安静+浪漫，适合约会聊天"
+      },
+      {
+        "shop_id": 33,
+        "relevance": 2,
+        "note": "捞王锅物料理 155元 安静+包间，适合安静聊天"
+      }
+    ],
+    "scenario": "结构化+语义偏好",
+    "notes": "火锅+安静, 2家",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_005",
+    "query": "日料",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "日料",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 20,
+        "relevance": 2,
+        "note": "鮨一日本料理 380元 高端日料"
+      },
+      {
+        "shop_id": 21,
+        "relevance": 2,
+        "note": "三上日本料理 220元 日料寿司"
+      },
+      {
+        "shop_id": 22,
+        "relevance": 2,
+        "note": "小林刺身 180元 日料居酒屋"
+      },
+      {
+        "shop_id": 23,
+        "relevance": 2,
+        "note": "七福神居酒屋 280元 日料烧鸟"
+      },
+      {
+        "shop_id": 24,
+        "relevance": 2,
+        "note": "鳗诚屋 160元 日料鳗鱼饭"
+      },
+      {
+        "shop_id": 25,
+        "relevance": 2,
+        "note": "和味亭日式料理 320元"
+      },
+      {
+        "shop_id": 26,
+        "relevance": 2,
+        "note": "大江户日料 195元 日料自助"
+      },
+      {
+        "shop_id": 27,
+        "relevance": 2,
+        "note": "樱屋日式烧肉 260元"
+      }
+    ],
+    "scenario": "仅菜系",
+    "notes": "全部8家杭州日料",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_006",
+    "query": "火锅",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "火锅",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 28,
+        "relevance": 2,
+        "note": "川味观火锅 125元"
+      },
+      {
+        "shop_id": 29,
+        "relevance": 2,
+        "note": "大渝火锅 135元"
+      },
+      {
+        "shop_id": 30,
+        "relevance": 2,
+        "note": "凑凑火锅 165元"
+      },
+      {
+        "shop_id": 31,
+        "relevance": 2,
+        "note": "蜀大侠火锅 145元"
+      },
+      {
+        "shop_id": 32,
+        "relevance": 2,
+        "note": "小龙坎老火锅 138元"
+      },
+      {
+        "shop_id": 33,
+        "relevance": 2,
+        "note": "捞王锅物料理 155元"
+      },
+      {
+        "shop_id": 34,
+        "relevance": 2,
+        "note": "德庄火锅 128元"
+      },
+      {
+        "shop_id": 35,
+        "relevance": 2,
+        "note": "巴奴毛肚火锅 150元"
+      }
+    ],
+    "scenario": "仅菜系",
+    "notes": "全部8家杭州火锅",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_007",
+    "query": "附近人均150的火锅",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "火锅",
+      "budgetPerPerson": 150,
+      "nearby": true,
+      "radiusKm": 5
+    },
+    "ground_truth": [
+      {
+        "shop_id": 32,
+        "relevance": 2,
+        "note": "小龙坎 138元 城西银泰, 距中心3.3km, 符合预算+半径"
+      }
+    ],
+    "scenario": "地理+菜系",
+    "notes": "武林附近火锅+预算150+半径5km, 仅小龙坎3.3km符合",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_008",
+    "query": "西湖附近的日料",
+    "latitude": 30.3252,
+    "longitude": 120.1505,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "日料",
+      "nearby": true,
+      "radiusKm": 5,
+      "budgetPerPerson": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 24,
+        "relevance": 2,
+        "note": "鳗诚屋 160元 城西银泰, 距西湖约4.8km, 日料"
+      }
+    ],
+    "scenario": "地理+菜系",
+    "notes": "西湖附近日料+半径5km, 仅鳗诚屋4.8km符合",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_009",
+    "query": "重庆鸡公煲",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "",
+    "expected_constraints": {
+      "cuisine": "",
+      "keyword": "重庆鸡公煲",
+      "targetCity": "",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 29,
+        "relevance": 1,
+        "note": "大渝火锅 重庆火锅，语义相关但非鸡公煲"
+      },
+      {
+        "shop_id": 32,
+        "relevance": 1,
+        "note": "小龙坎 重庆火锅，语义相关"
+      }
+    ],
+    "scenario": "地名嵌入菜品名",
+    "notes": "重庆鸡公煲是菜品名，不提取城市；仅语义相关",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_010",
+    "query": "有什么好吃的",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [],
+    "scenario": "无明显语义偏好",
+    "notes": "全量查询，排名完全由评分决定",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_011",
+    "query": "烧烤",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "烧烤",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 48,
+        "relevance": 2,
+        "note": "九田家黑牛烤肉 155元 烧烤"
+      },
+      {
+        "shop_id": 49,
+        "relevance": 2,
+        "note": "姜虎东白丁烤肉 175元 烧烤"
+      },
+      {
+        "shop_id": 50,
+        "relevance": 2,
+        "note": "聚十三烤肉 135元 烧烤"
+      },
+      {
+        "shop_id": 51,
+        "relevance": 2,
+        "note": "小串烧烤 85元 烧烤"
+      },
+      {
+        "shop_id": 52,
+        "relevance": 2,
+        "note": "高丽炉韩国烤肉 150元 烧烤"
+      }
+    ],
+    "scenario": "仅菜系",
+    "notes": "5家杭州烧烤",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_012",
+    "query": "人均200的烧烤",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "烧烤",
+      "budgetPerPerson": 200,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 48,
+        "relevance": 2,
+        "note": "九田家 155元 烧烤"
+      },
+      {
+        "shop_id": 49,
+        "relevance": 2,
+        "note": "姜虎东 175元 烧烤"
+      },
+      {
+        "shop_id": 50,
+        "relevance": 2,
+        "note": "聚十三 135元 烧烤"
+      },
+      {
+        "shop_id": 51,
+        "relevance": 2,
+        "note": "小串烧烤 85元 烧烤"
+      },
+      {
+        "shop_id": 52,
+        "relevance": 2,
+        "note": "高丽炉 150元 烧烤"
+      }
+    ],
+    "scenario": "无语义证据",
+    "notes": "烧烤+预算200, 5家全部符合; 纯结构化查询",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_013",
+    "query": "福州闽侯的日料",
+    "latitude": 26.0789,
+    "longitude": 119.1945,
+    "city": "福州",
+    "expected_constraints": {
+      "cuisine": "日料",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 73,
+        "relevance": 2,
+        "note": "花潮日料 230元 仓山万达"
+      },
+      {
+        "shop_id": 74,
+        "relevance": 2,
+        "note": "筑地日本料理 165元 上街"
+      },
+      {
+        "shop_id": 75,
+        "relevance": 2,
+        "note": "一番居酒屋 140元 金山"
+      },
+      {
+        "shop_id": 76,
+        "relevance": 2,
+        "note": "樱之恋日料 190元 闽侯万家"
+      }
+    ],
+    "scenario": "福州数据",
+    "notes": "福州4家日料",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_014",
+    "query": "福州人均150的西餐",
+    "latitude": 26.0456,
+    "longitude": 119.2734,
+    "city": "福州",
+    "expected_constraints": {
+      "cuisine": "西餐",
+      "budgetPerPerson": 150,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 83,
+        "relevance": 2,
+        "note": "漫咖啡西餐 85元 符合预算"
+      }
+    ],
+    "scenario": "福州数据",
+    "notes": "福州西餐+预算150, 仅漫咖啡85元符合; 西堤195❌超预算",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_015",
+    "query": "晚上22:30吃火锅",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "火锅",
+      "arrivalTime": "22:30",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 28,
+        "relevance": 2,
+        "note": "川味观 营业至02:00"
+      },
+      {
+        "shop_id": 30,
+        "relevance": 2,
+        "note": "凑凑火锅 营业至02:00"
+      },
+      {
+        "shop_id": 31,
+        "relevance": 2,
+        "note": "蜀大侠火锅 营业至00:00"
+      },
+      {
+        "shop_id": 35,
+        "relevance": 2,
+        "note": "巴奴毛肚火锅 营业至23:00"
+      },
+      {
+        "shop_id": 29,
+        "relevance": 2,
+        "note": "大渝火锅 营业至22:30"
+      }
+    ],
+    "scenario": "营业时间边界",
+    "notes": "22:30到店, 5家营业时间覆盖",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_016",
+    "query": "人均100的杭帮菜",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "杭帮菜",
+      "budgetPerPerson": 100,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [],
+    "scenario": "零结果",
+    "notes": "杭帮菜预算100, 无符合; 零结果场景",
+    "is_relaxation": true
+  },
+  {
+    "case_id": "ABL_017",
+    "query": "烤肉",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "烧烤",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 48,
+        "relevance": 2,
+        "note": "九田家黑牛烤肉 烧烤"
+      },
+      {
+        "shop_id": 49,
+        "relevance": 2,
+        "note": "姜虎东白丁烤肉 烧烤"
+      },
+      {
+        "shop_id": 50,
+        "relevance": 2,
+        "note": "聚十三烤肉 烧烤"
+      },
+      {
+        "shop_id": 52,
+        "relevance": 2,
+        "note": "高丽炉韩国烤肉 烧烤"
+      }
+    ],
+    "scenario": "烤肉规范",
+    "notes": "验证 烤肉→烧烤 canonicalization; 排除 51 小串烧烤(烤串)",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_018",
+    "query": "牛排",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "西餐",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 36,
+        "relevance": 2,
+        "note": "王品牛排 西餐"
+      },
+      {
+        "shop_id": 37,
+        "relevance": 2,
+        "note": "西堤牛排 西餐"
+      },
+      {
+        "shop_id": 40,
+        "relevance": 2,
+        "note": "菲兹牛排 西餐"
+      },
+      {
+        "shop_id": 41,
+        "relevance": 2,
+        "note": "斗牛士牛排 西餐"
+      },
+      {
+        "shop_id": 42,
+        "relevance": 2,
+        "note": "MR. STEAK 西餐"
+      }
+    ],
+    "scenario": "牛排规范",
+    "notes": "验证 牛排→西餐 canonicalization; 蓝蛙(美式)不一定是牛排",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_019",
+    "query": "福州烤肉",
+    "latitude": 26.0456,
+    "longitude": 119.2734,
+    "city": "福州",
+    "expected_constraints": {
+      "cuisine": "烧烤",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 84,
+        "relevance": 2,
+        "note": "九田家黑牛烤肉 仓山万达"
+      },
+      {
+        "shop_id": 85,
+        "relevance": 2,
+        "note": "姜虎东白丁烤肉 上街"
+      },
+      {
+        "shop_id": 86,
+        "relevance": 2,
+        "note": "韩式炭火烤肉 闽侯万家"
+      }
+    ],
+    "scenario": "福州数据",
+    "notes": "福州3家烧烤",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_020",
+    "query": "人均10的日料",
+    "latitude": 30.3252,
+    "longitude": 120.1505,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "日料",
+      "budgetPerPerson": 10,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [],
+    "scenario": "零结果",
+    "notes": "预算10元, 无候选",
+    "is_relaxation": true
+  },
+  {
+    "case_id": "ABL_021",
+    "query": "福州人均100的火锅",
+    "latitude": 26.0456,
+    "longitude": 119.2734,
+    "city": "福州",
+    "expected_constraints": {
+      "cuisine": "火锅",
+      "budgetPerPerson": 100,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [],
+    "scenario": "零结果",
+    "notes": "福州火锅预算100, 无符合",
+    "is_relaxation": true
+  },
+  {
+    "case_id": "ABL_022",
+    "query": "杭州西餐",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "西餐",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 36,
+        "relevance": 2,
+        "note": "王品牛排 西餐"
+      },
+      {
+        "shop_id": 37,
+        "relevance": 2,
+        "note": "西堤牛排 西餐"
+      },
+      {
+        "shop_id": 38,
+        "relevance": 2,
+        "note": "J.S. Burgers 西餐汉堡"
+      },
+      {
+        "shop_id": 39,
+        "relevance": 2,
+        "note": "蓝蛙 西餐美式"
+      },
+      {
+        "shop_id": 40,
+        "relevance": 2,
+        "note": "菲兹牛排 西餐"
+      },
+      {
+        "shop_id": 41,
+        "relevance": 2,
+        "note": "斗牛士牛排 西餐"
+      },
+      {
+        "shop_id": 42,
+        "relevance": 2,
+        "note": "MR. STEAK 西餐"
+      }
+    ],
+    "scenario": "仅菜系",
+    "notes": "全部7家杭州西餐",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_023",
+    "query": "找个安静不用排队的火锅，人均150以内",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "火锅",
+      "quiet": true,
+      "avoidQueue": true,
+      "budgetPerPerson": 160,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 33,
+        "relevance": 2,
+        "note": "捞王 155元 安静+包间, 排队状况未知"
+      }
+    ],
+    "scenario": "结构化+语义偏好",
+    "notes": "火锅+安静+不排队+预算150, 仅捞王可能符合",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_024",
+    "query": "福州适合约会的安静西餐厅",
+    "latitude": 26.0456,
+    "longitude": 119.2734,
+    "city": "福州",
+    "expected_constraints": {
+      "cuisine": "西餐",
+      "occasion": "约会",
+      "quiet": true,
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 81,
+        "relevance": 2,
+        "note": "王品牛排 320元 仓山万达 约会+商务 安静+浪漫"
+      },
+      {
+        "shop_id": 82,
+        "relevance": 2,
+        "note": "西堤牛排 195元 台江万达 约会+朋友聚餐 安静+浪漫"
+      }
+    ],
+    "scenario": "福州数据",
+    "notes": "福州西餐+约会+安静, 2家",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_025",
+    "query": "港式茶餐厅",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "港式",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 43,
+        "relevance": 2,
+        "note": "翠园 280元 港式粤菜"
+      },
+      {
+        "shop_id": 44,
+        "relevance": 2,
+        "note": "利苑酒家 350元 港式粤菜"
+      },
+      {
+        "shop_id": 45,
+        "relevance": 2,
+        "note": "稻香 155元 港式粤菜"
+      },
+      {
+        "shop_id": 46,
+        "relevance": 2,
+        "note": "太兴餐厅 125元 港式茶餐厅"
+      },
+      {
+        "shop_id": 47,
+        "relevance": 2,
+        "note": "敏华冰厅 90元 港式茶餐厅"
+      }
+    ],
+    "scenario": "港式规范",
+    "notes": "验证 港式茶餐厅→港式 canonicalization, 5家",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_026",
+    "query": "福州闽菜",
+    "latitude": 26.0789,
+    "longitude": 119.2989,
+    "city": "福州",
+    "expected_constraints": {
+      "cuisine": "闽菜",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 60,
+        "relevance": 2,
+        "note": "聚春园闽菜馆 120元 闽菜海鲜"
+      },
+      {
+        "shop_id": 61,
+        "relevance": 2,
+        "note": "老福州海鲜 185元 闽菜海鲜"
+      },
+      {
+        "shop_id": 62,
+        "relevance": 2,
+        "note": "闽味轩 闽菜"
+      },
+      {
+        "shop_id": 63,
+        "relevance": 2,
+        "note": "海中鲜海鲜城 海鲜"
+      },
+      {
+        "shop_id": 64,
+        "relevance": 2,
+        "note": "福州大酒楼 闽菜"
+      },
+      {
+        "shop_id": 65,
+        "relevance": 2,
+        "note": "闽都海鲜舫 闽菜海鲜"
+      },
+      {
+        "shop_id": 66,
+        "relevance": 2,
+        "note": "榕城春 闽菜"
+      },
+      {
+        "shop_id": 67,
+        "relevance": 2,
+        "note": "潮江春海鲜 海鲜"
+      }
+    ],
+    "scenario": "福州数据",
+    "notes": "福州闽菜/海鲜, 8家",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_027",
+    "query": "人均100以内的烧烤",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "烧烤",
+      "budgetPerPerson": 100,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 51,
+        "relevance": 2,
+        "note": "小串烧烤 85元 符合预算"
+      }
+    ],
+    "scenario": "结构化约束",
+    "notes": "烧烤+预算100, 仅小串85元符合",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_028",
+    "query": "杭帮菜",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "杭帮菜",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 53,
+        "relevance": 2,
+        "note": "杭州酒家 120元 杭帮菜"
+      },
+      {
+        "shop_id": 54,
+        "relevance": 2,
+        "note": "山外山菜馆 185元 杭帮菜"
+      },
+      {
+        "shop_id": 55,
+        "relevance": 2,
+        "note": "杭儿风 110元 杭帮菜"
+      }
+    ],
+    "scenario": "仅菜系",
+    "notes": "3家杭州杭帮菜",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_029",
+    "query": "福州人均150的火锅",
+    "latitude": 26.0456,
+    "longitude": 119.2734,
+    "city": "福州",
+    "expected_constraints": {
+      "cuisine": "火锅",
+      "budgetPerPerson": 150,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 77,
+        "relevance": 2,
+        "note": "朝天门火锅 110元 符合预算"
+      },
+      {
+        "shop_id": 78,
+        "relevance": 2,
+        "note": "德庄火锅 130元 符合预算"
+      },
+      {
+        "shop_id": 79,
+        "relevance": 2,
+        "note": "小龙坎火锅 135元 符合预算"
+      },
+      {
+        "shop_id": 80,
+        "relevance": 2,
+        "note": "蜀九香火锅 120元 符合预算"
+      }
+    ],
+    "scenario": "福州数据",
+    "notes": "福州4家火锅预算150以内",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_030",
+    "query": "寿司",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "日料",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 21,
+        "relevance": 2,
+        "note": "三上日本料理 日料寿司"
+      }
+    ],
+    "scenario": "寿司规范",
+    "notes": "验证 寿司→日料 canonicalization; 三上主营寿司",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_031",
+    "query": "福州小吃",
+    "latitude": 26.0789,
+    "longitude": 119.2989,
+    "city": "福州",
+    "expected_constraints": {
+      "cuisine": "福州小吃",
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 68,
+        "relevance": 2,
+        "note": "同利肉燕"
+      },
+      {
+        "shop_id": 69,
+        "relevance": 2,
+        "note": "永和鱼丸"
+      },
+      {
+        "shop_id": 70,
+        "relevance": 2,
+        "note": "耳聋伯元宵"
+      },
+      {
+        "shop_id": 71,
+        "relevance": 2,
+        "note": "达道牛肉"
+      },
+      {
+        "shop_id": 72,
+        "relevance": 2,
+        "note": "福屿海鲜锅边"
+      }
+    ],
+    "scenario": "福州数据",
+    "notes": "福州小吃5家",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_032",
+    "query": "人均200左右的西餐",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "西餐",
+      "budgetPerPerson": 200,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 38,
+        "relevance": 2,
+        "note": "J.S. Burgers 95元 西餐"
+      },
+      {
+        "shop_id": 39,
+        "relevance": 2,
+        "note": "蓝蛙 145元 西餐"
+      },
+      {
+        "shop_id": 40,
+        "relevance": 2,
+        "note": "菲兹牛排 110元 西餐"
+      },
+      {
+        "shop_id": 41,
+        "relevance": 2,
+        "note": "斗牛士牛排 185元 西餐"
+      },
+      {
+        "shop_id": 42,
+        "relevance": 2,
+        "note": "MR. STEAK 170元 西餐"
+      }
+    ],
+    "scenario": "结构化约束",
+    "notes": "西餐+预算200, 5家符合; 西堤220❌, 王品350❌超预算",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_033",
+    "query": "找安静的日料店",
+    "latitude": 30.3127,
+    "longitude": 120.1467,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "日料",
+      "quiet": true,
+      "budgetPerPerson": -1,
+      "nearby": false,
+      "radiusKm": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 20,
+        "relevance": 2,
+        "note": "鮨一日本料理 安静+景观"
+      },
+      {
+        "shop_id": 24,
+        "relevance": 2,
+        "note": "鳗诚屋 简约+安静"
+      },
+      {
+        "shop_id": 25,
+        "relevance": 2,
+        "note": "和味亭日式料理 安静+包间"
+      }
+    ],
+    "scenario": "结构化+语义偏好",
+    "notes": "日料+安静, 3家",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_034",
+    "query": "火车东站附近的火锅",
+    "latitude": 30.293,
+    "longitude": 120.21,
+    "city": "杭州",
+    "expected_constraints": {
+      "cuisine": "火锅",
+      "nearby": true,
+      "radiusKm": 5,
+      "budgetPerPerson": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 35,
+        "relevance": 2,
+        "note": "巴奴毛肚火锅 庆春银泰, 距东站约4.7km"
+      }
+    ],
+    "scenario": "地理+菜系",
+    "notes": "东站附近火锅+半径5km, 仅巴奴4.7km符合",
+    "is_relaxation": false
+  },
+  {
+    "case_id": "ABL_035",
+    "query": "仓山万达附近有什么吃的",
+    "latitude": 26.0456,
+    "longitude": 119.2734,
+    "city": "福州",
+    "expected_constraints": {
+      "cuisine": "",
+      "nearby": true,
+      "radiusKm": 1,
+      "budgetPerPerson": -1
+    },
+    "ground_truth": [
+      {
+        "shop_id": 78,
+        "relevance": 1,
+        "note": "德庄火锅 130元 仓山万达内"
+      },
+      {
+        "shop_id": 81,
+        "relevance": 1,
+        "note": "王品牛排 320元 仓山万达内"
+      },
+      {
+        "shop_id": 73,
+        "relevance": 1,
+        "note": "花潮日料 230元 仓山万达内"
+      },
+      {
+        "shop_id": 84,
+        "relevance": 1,
+        "note": "九田家黑牛烤肉 150元 仓山万达附近"
+      },
+      {
+        "shop_id": 61,
+        "relevance": 1,
+        "note": "老福州海鲜 185元 仓山万达附近"
+      }
+    ],
+    "scenario": "福州数据",
+    "notes": "仓山万达附近1km, 5家",
+    "is_relaxation": false
+  }
+]
