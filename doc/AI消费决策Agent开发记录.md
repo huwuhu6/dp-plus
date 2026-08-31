@@ -1662,7 +1662,7 @@ V_Sem_2x:Recall@3=0.7722  NDCG@3=0.9704  Top1=0.9677  CVR=0
 
 ### 2. Review Sentiment 当前未参与 Semantic Scoring
 
-**当前状态**：`AiReviewDocument.sentiment` 字段存在（0/1 表示正面/负面），但未纳入 `SemanticShopDocumentFactory` 的文档拼接文本，因此不影响 embedding 相似度。
+**当前状态**：`AiReviewDocument.sentiment` 字段存在（-1 / 0 / 1 三态，分别对应负面/中性/正面），但未纳入 `SemanticShopDocumentFactory` 的文档拼接文本，因此不影响 embedding 相似度。
 
 **为什么本轮不解决**：当前未观察到因忽略 sentiment 导致的实际错误案例。sentiment 参与 semantic scoring 需要额外的实验验证其对 ranking 的影响方向。
 
