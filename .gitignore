@@ -20,12 +20,12 @@ target/
 *.ipr
 
 # Generated data files (not source)
-retrieval_ablation_reviews.csv
-retrieval_tags_ab_embeddings.json
-retrieval_tags_ab_profile_embeddings.json
 .ab-baseline/
-retrieval_ablation_reports/
-retrieval_tags_ab_query_embeddings.json
+experiments/retrieval-ablation/retrieval_ablation_reviews.csv
+experiments/retrieval-ablation/reports/
+experiments/tags-ab/retrieval_tags_ab_embeddings.json
+experiments/tags-ab/retrieval_tags_ab_profile_embeddings.json
+experiments/tags-ab/retrieval_tags_ab_query_embeddings.json
 
 ### NetBeans ###
 /nbproject/private/
