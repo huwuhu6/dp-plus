@@ -48,7 +48,9 @@ MCP 不可用、解析为空或用户不确认候选时，不会猜测城市或�
 ## 本地启动
 
 前端由 Nginx 提供，访问 `http://localhost:8080/`；Agent 调试页为
-`http://localhost:8080/agent-console.html`。`8081` 是 Spring Boot 后端 API 端口，
+`http://localhost:8080/agent-console.html`
+
+`8081` 是 Spring Boot 后端 API 端口，
 不提供首页且会受到业务登录拦截，不能作为前端访问地址。
 
 ### 1. 前置条件

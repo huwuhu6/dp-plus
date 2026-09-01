@@ -40,6 +40,9 @@ build/
 ### VS Code ###
 .vscode/
 
+### ai 工具 ###
+.claude
+
 ### others ###
 nginx-1.18.0.zip
 dp.sql

@@ -1671,11 +1671,11 @@ B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
 - 结果：min shop margin (0.0877) ≤ 18×max epsilon (0.7175)
 - 当前数据无法建立严格的 ranking robustness certificate。但这是保守上界，实际 A/B 实验 Recall@3 和 Top1 为 0 变化。
 
-**4. Fingerprint 对账**：`documentFingerprint` 不在 Milvus metadata 中存储。`SemanticShopDocumentFactory.document()` 写入 metadata map 但 Spring AI 的 MilvusVectorStore 不持久化该字段。已通过文本契约重构确认当前数据源与生产 factory 一致。
+**4. Fingerprint 对账**：`documentFingerprintfingerprint 已持久化；存量文档缺失是索引陈旧（写入早于字段引入），已由新写入文档实测验证；
 
 **5. Production Anchor 归因修正**：
 - ANN 近似行为（主要因素，exact vs ANN Top80 不保证一致）
-- Embedding 文本契约（无法验证，fingerprint 不存在）
+- Embedding 文本契约
 - 边界 tie-break 效应（次要因素）
 - Shop 级 MAX 掩码（解释文档级差异大但 shop 级 overlap 仍为 0.8571@3）
 - 这些因素不独立分解，overlap@3/overlap@5 是聚合指标。
@@ -1764,6 +1764,24 @@ B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
 **为什么本轮不解决**：按先前策略约定，Baseline 100% 即停止 Prompt 调优。剩余边界情况属于模型能力天花板，穷举式修复收益递减。
 
 **什么条件下值得重新考虑**：当用户实际反馈中实体边界误判频繁出现，且有明确生产数据支撑优先级时。
+
+### **9. Reconciliation 契约断裂（根因已全部实证）**
+
+① 索引陈旧：revision/fingerprint 于 8/29 加入 factory，晚于 collection 最后全量写入（8/16），存量 976 条文档 metadata 仅有 documentType/shopId；框架无嫌疑（Spring AI 整体持久化 metadata，新写入文档四字段实测齐全）。
+
+② review 类文档的 sourceRevision 数据源侧未维护。后果：inspect() 对存量文档全量 STALE_REVISION 误报，reconcile() 存在无限重嵌入风险。处置：reconcile() 禁用。修复前置条件：revision 递增机制 + 全量重建（或实施已设计的零 embedding 成本 metadata 迁移方案），复验漂移归零后解禁。
+
+### **10. 开发记录与代码存在正常时滞**
+
+经代码考古抽查（load_history 工具、review 文档双写入路径、blog_comments 隔离边界），代码与文档的偏差均为文档漏记或设计边界未展开，无业务正确性问题。偏差处理方式：登记于本文档，不触发重开。
+
+### **11. SSE 断连与幂等的窗口**
+
+流式输出中断连时幂等记录停留 PROCESSING，自愈窗口 = SSE 超时（75s）。演进方向：参照 recoverExpiredLeases 机制为 PROCESSING 记录增加过期恢复。
+
+### **12. Working Memory 版本链无 TTL**
+
+append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version DESC) 索引）。演进方向：按最后活跃时间归档历史版本。
 
 ### 明确"不做清单"
 
