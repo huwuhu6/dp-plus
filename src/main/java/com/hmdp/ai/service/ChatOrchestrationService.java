@@ -209,6 +209,14 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             context.setUsedModel(false);
             return;
         }
+        // 非餐饮领域守卫（#29 修复）：无餐饮强信号且命中非餐饮领域词表 → 强制 GENERAL_CHAT，
+        // 在正向规则与 LLM 路由之前拦截，避免"附近+看看"等规则盲区误入餐饮决策。
+        if (isNonDiningDomain(context.getOriginalMessage())) {
+            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT);
+            context.setRoutingReason("non_dining_domain_guard");
+            log.info("[AI][chat] event=DOMAIN_GUARD_BLOCKED chatId={} message={}", context.getChatId(), compact(context.getOriginalMessage()));
+            return;
+        }
         if (!assessment.isConflictDetected()
                 && (isNewRecommendationIntent(message)
                 || isSearchRefinement(context.getOriginalMessage(), context.getEffectiveMessage()))) {
@@ -887,7 +895,10 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         boolean mealPlanChanged = message.contains("取消") || message.contains("改吃") || message.contains("我自己")
                 || message.contains("一个人吃") || message.contains("单人");
         boolean locationSearchContinuation = message.contains("附近")
-                && (message.contains("找") || message.contains("推荐") || message.contains("看看"));
+                && (message.contains("找") || message.contains("推荐") || message.contains("看看"))
+                // 领域守卫：仅"附近+看看"不足以判定餐饮推荐，需同时带餐饮语义（店/餐厅/地方/吃饭 或 菜系 或 场景词），
+                // 避免"帮我看看附近有没有羽毛球馆"被正向规则短路误判 START_DECISION（2026-09-02 修复 #29）
+                && (asksForPlace || hasDiningSignal(message) || hasScene);
         return (asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory))
                 || (hasDiningCategory && (explicitSearchVerb || mealPlanChanged)) || (refinement && hasDiningCategory)
                 || locationSearchContinuation;
@@ -1085,10 +1096,38 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         response.setPolicyReason(policy.getReason());
     }
 
-    private boolean isRestaurantSearch(String message) {
-        String[] keywords = {"吃", "餐厅", "餐馆", "饭店", "饭", "菜", "烧烤", "烤肉", "火锅", "日料", "料理", "小吃", "咖啡", "奶茶"};
+    /** 餐饮强信号判断（原 isRestaurantSearch 死代码，现被 isNonDiningDomain 复用，2026-09-02 修复 #29）。 */
+    private boolean hasDiningSignal(String message) {
+        if (message == null) return false;
+        String[] keywords = {"吃", "餐厅", "餐馆", "饭店", "点餐", "订餐", "外卖", "饭", "菜", "烧烤", "烤肉", "火锅", "日料",
+                "料理", "小吃", "咖啡", "奶茶", "聚餐", "美食", "麻辣烫", "串串", "面条", "汉堡", "披萨", "甜品", "夜宵"};
         for (String keyword : keywords) {
             if (message.contains(keyword)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 非餐饮领域守卫（OOS gate）：命中非餐饮领域词表且无餐饮强信号时判定为领域外需求。
+     * 领域边界是确定性业务约束，不应依赖 LLM 概率判断（AGENTS.md 铁律）；
+     * "无餐饮强信号"保护复合句（"打完羽毛球去吃火锅"含"吃/火锅"→ 不拦截）。
+     * 词表是强信号拦截，未覆盖的新说法自然回落到 LLM 兜底。
+     */
+    private boolean isNonDiningDomain(String message) {
+        if (message == null || hasDiningSignal(message)) return false;
+        String[] outOfScope = {
+                "羽毛球", "篮球", "足球", "排球", "乒乓球", "网球", "游泳", "健身", "健身房", "运动", "体育", "球场",
+                "跑步", "瑜伽", "台球", "高尔夫", "滑冰", "滑雪", "攀岩", "射箭",
+                "医院", "诊所", "体检", "牙科", "眼科", "药店", "挂号", "看病", "就医", "门诊", "急诊",
+                "住宿", "酒店", "宾馆", "民宿", "旅馆", "客栈", "青旅",
+                "打车", "出租车", "滴滴", "交通", "公交", "地铁", "高铁", "火车", "机票", "航班", "机场", "车站", "停车场", "加油",
+                "景点", "景区", "公园", "游乐园", "游乐场", "动物园", "博物馆", "图书馆", "电影院", "电影", "KTV", "ktv",
+                "演出", "演唱会", "密室", "剧本杀", "网吧", "电竞",
+                "理发", "美容", "美甲", "洗车", "修车", "家政", "保洁", "搬家", "快递", "超市", "商场", "购物", "买衣服",
+                "服装店", "家电", "手机店", "维修", "银行", "办证", "宠物", "宠物店", "拍照", "照相"
+        };
+        for (String token : outOfScope) {
+            if (message.contains(token)) return true;
         }
         return false;
     }

@@ -770,4 +770,71 @@ class ChatOrchestrationServiceTest {
         verify(decisionService).continueDecision(org.mockito.Mockito.eq(100L), any());
         verify(decisionService).decide(any(), any(), any(), any());
     }
+
+    @Test
+    void nonDiningDomainGuardBlocksBadmintonRequest() {
+        // 修复 #29：无餐饮强信号 + 命中非餐饮领域词表（羽毛球）→ 判定领域外
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        Boolean blocked = ReflectionTestUtils.invokeMethod(service, "isNonDiningDomain", "帮我看看附近有没有羽毛球馆");
+        assertTrue(Boolean.TRUE.equals(blocked));
+    }
+
+    @Test
+    void nonDiningDomainGuardDoesNotBlockCompoundDiningRequest() {
+        // 修复 #29：复合句含餐饮强信号（吃/火锅）→ 不应被领域守卫拦截
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        Boolean blocked = ReflectionTestUtils.invokeMethod(service, "isNonDiningDomain", "打完羽毛球去吃火锅");
+        assertFalse(Boolean.TRUE.equals(blocked));
+    }
+
+    @Test
+    void locationSearchContinuationRequiresDiningSignal() {
+        // 修复 #29（方案A）："附近+看看" 无餐饮语义 → 不再判定为新推荐意图
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        Boolean badminton = ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "帮我看看附近有没有羽毛球馆");
+        assertFalse(Boolean.TRUE.equals(badminton));
+        // 带菜系（火锅）仍命中
+        Boolean hotpot = ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "帮我看看附近有没有火锅");
+        assertTrue(Boolean.TRUE.equals(hotpot));
+        // 方案A升级为 hasDiningSignal 后，"好吃的"（含"吃"）仍命中，避免 case28 误伤（2026-09-02）
+        Boolean tasty = ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "帮我看看附近有没有什么好吃的");
+        assertTrue(Boolean.TRUE.equals(tasty));
+    }
+
+    @Test
+    void nonDiningRequestIsRoutedToGeneralChatWithoutDecision() throws Exception {
+        // 修复 #29（端到端）：非餐饮请求被领域守卫拦截为 GENERAL_CHAT，不进入餐饮决策
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        SpringAiTextClient textClient = mock(SpringAiTextClient.class);
+        AiProperties properties = new AiProperties();
+        properties.setApiKey("test-key");
+        ReflectionTestUtils.setField(service, "aiProperties", properties);
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "springAiTextClient", textClient);
+        ReflectionTestUtils.setField(service, "contextRewriter", new ConversationContextRewriter());
+        ReflectionTestUtils.setField(service, "constraintExtractor", mock(ConstraintExtractor.class));
+        ReflectionTestUtils.setField(service, "criteriaMerger", new ConversationCriteriaMerger());
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        when(stateService.agentContext(state)).thenReturn(new com.hmdp.ai.dto.AgentSessionContext());
+        when(textClient.chatText(any(), any())).thenReturn("运动场馆类需求暂时不在支持范围内，我可以帮你推荐餐厅。");
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("帮我看看附近有没有羽毛球馆");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("GENERAL_CHAT", response.getRoute());
+        // 未进入餐饮决策链路
+        verifyNoInteractions(decisionService);
+    }
 }

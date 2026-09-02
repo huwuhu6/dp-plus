@@ -1783,6 +1783,18 @@ B (content+tags):  Recall@3=0.7932  NDCG@3=0.9873  Top1=0.9655  CVR=0
 
 append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version DESC) 索引）。演进方向：按最后活跃时间归档历史版本。
 
+### **13. 非餐饮需求穿透餐饮决策链路（#29，P0，2026-09-02 封板后例外修复）**
+
+**问题**：`isNewRecommendationIntent()` 的 `locationSearchContinuation` 分支（`contains("附近") && (contains("找")||contains("推荐")||contains("看看"))`）把"帮我看看附近有没有羽毛球馆"在 LLM 路由之前就短路判定为 `START_DECISION`，LLM 无机会按 system prompt 拦截；随后 POLICY `CLARIFY_LOCATION` → 用户提交定位 → keyword="羽毛球馆" 不参与硬过滤（#30）→ 从附近 3km 全部 5 家餐饮店语义召回 3 家推荐（semanticScore 仅 0.37-0.41）。**评测 `NON_DINING_GENERAL_CHAT` 在 run#49-62 连续 6 次 route_matched=0 全部失败，评测早已抓到但未修**。
+
+**根因分类**：正向规则盲区（硬编码词表无法覆盖所有领域）+ `isRestaurantSearch()` 死代码未接入路由。这暴露了"LLM 只做理解、确定性约束由代码保证"原则里"确定性词表"本身的覆盖边界问题。
+
+**修复（A+B 双保险）**：A) `locationSearchContinuation` 收窄为"附近 + 找/推荐/看看 + 餐饮信号(`asksForPlace||hasDiningSignal(message)||hasScene`)"，仅修已知 bug；B) 新增 `isNonDiningDomain()` OOS 负向守卫（运动/医疗/住宿/交通/景点娱乐/生活服务 6 大类词表，`hasDiningSignal` 保护复合句如"打完羽毛球去吃火锅"），立通用机制；C) embedding OOS 层为远期（依赖 #18 评测）。对应业界三层漏斗路由（L1 规则命中即截断→L2 向量语义→L3 LLM 兜底）与 IntentGuard ALLOW/DENY/ABSTAIN 共识。
+
+**验证**：新增 4 单测（羽毛球馆→GENERAL_CHAT、好吃的→START_DECISION、复合句→START_DECISION、EXIT 不误伤）+ 全量 242 测试通过。conversation-v1 评测 run67(17/19)→run68(17/19, case3 修复但 **case28"好吃的"误伤**，因方案 A 用 `hasDiningCategory` 不含"吃")→run69(**18/19**, case3&28 全过，18 个既有用例无回归)。**踩坑教训**：方案 A 的词表必须与守卫词表一致（`hasDiningCategory` 是 `hasDiningSignal` 的窄子集），且方法调用要带参数（`hasDiningSignal(message)`），否则 javac 按变量解析报 cannot find symbol。
+
+**演进方向**：#30（keyword 参与硬过滤/目标品类缺失判 ZERO_RESULT）待修；词表 OOS 守卫仍是启发式，长尾新领域靠 LLM 兜底，未来可用轻量 embedding 分类器（Saram Domain Guardrails）替代词表。
+
 ### 明确"不做清单"
 
 以下方向已评估，当前阶段不引入：
