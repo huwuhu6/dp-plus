@@ -153,7 +153,7 @@ public class AiConversationEvaluationService {
 
     private String resolveGitCommit() {
         try {
-            Process p = new ProcessBuilder("git", "rev-parse", "HEAD")
+            Process p = new ProcessBuilder("git", "describe", "--always", "--dirty")
                     .directory(new java.io.File(System.getProperty("user.dir")))
                     .redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).trim();
