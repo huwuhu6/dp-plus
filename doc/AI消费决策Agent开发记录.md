@@ -1877,6 +1877,32 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 - **Per-shop document cap**：当前文档分布均匀，未出现单 Shop 占据 TopK 大部分名额的情况
 - **Sentiment-aware embedding**：未观察到因忽略 sentiment 导致的实际错误案例
 
+### 19. "看看有没有别的吃的"换需求被 LLM 误判 BUSINESS_FOLLOW_UP（step2 修复，2026-09-03）
+
+**现象**：已有推荐（COMPLETED）后用户说"看看有没有别的吃的"，第二轮路由被 LLM 误判成 BUSINESS_FOLLOW_UP（追问候选池），而不是 START_DECISION（换需求重决策）。case47 实测 `["START_DECISION","BUSINESS_FOLLOW_UP"]`。
+
+**根因定位（双层）**：
+1. **词表缺口（表象）**：`isAlternativeRecommendationPhrase` 只有"还有别的"，没有"有没有别的/别的吃的"；`isNewRecommendationIntent.asksForPlace` 不含"吃的"——规则全 miss 后落 LLM 兜底。
+2. **LLM 兜底契约缺陷（本质）**：route() prompt 没给每个路由选项判别标准，且 chatHistory 塞了带旧推荐结果的上文——上下文偏置把模型拉向"追问候选池"。GLM 评审定性："规则 miss 之后，LLM 兜底层不是一个设计过的兜底，只是最后碰运气的兜底。"
+
+**修复（词表治标 + 契约治本，分开度量）**：
+- **2.1 词表**：并入换需求表述族（有没有别的/有别的/别的吃的/别的店/别的菜/其他吃的/换点别的/换个别的/换换）；**ShopInquiry 强词排除**（评价/优惠/代金券/团购/营业/排队/地址/预约命中即不判换需求）——防"这家店有没有别的优惠"撞 START_DECISION（isShopInquiry 只在 resolveContextualFollowUpRoute L579 判定、晚于 L229 正向规则，必须在词表内防御）。
+- **2.2 prompt 重构（验收标准：零状态条件指令）**：删除陈旧位置指令"我附近→必须 START_DECISION"（B 修复后 WAITING_RELAXATION 态由规则层拦截，此指令在该态已是错误答案，检查项③）与 EXPLAIN_SUSPENDED 状态条件；新增 6 路由选项判别标准 + 反偏置指令（"忽略历史旧推荐结果倾向"）+ few-shot 边界反例（"看看有没有别的吃的"→START_DECISION /"这家店评价怎么样"→BUSINESS_FOLLOW_UP /"换一家餐厅"→START_DECISION /"算了不吃了"→EXIT_DECISION）。
+- **2.3 评测补齐**：新增 case52 DEMAND_SWITCH_LOOKS_AT_OTHER_FOOD（第一轮火锅 COMPLETED→第二轮"看看有没有别的吃的"→期望 START_DECISION/START_DECISION）。原评测集无 #34 场景（case47 已停用），词表改动对 run77 占比无影响——这本身暴露评测集缺口。
+
+**验证结果**：
+- 单测 260/0/0（+2：词表纯函数含反例 `demandSwitchVocabularyExcludesShopInquiry` + COMPLETED 态端到端 `completedStateDemandSwitchStartsNewDecision`）。
+- run76(baseline)/run77(词表)/run78(词表+prompt)：23/23 → 23/23 → 24/24 全绿。case52 第二轮由 **RULE 命中 START_DECISION**（词表接住，不再落 LLM）。
+- LLM 兜底占比：run76 20.5%（9/44）→ run78 19.6%（9/46）；**存量 MODEL 9 与 run76 完全相同**（case3/8/8/10/10/14/24/31/32），证明 prompt 重构零回归（没破坏存量 LLM 路由）。
+- git_commit 锚定机制化：`tbl_ai_conversation_evaluation_run` 加 git_commit 列，run76-78 均锚 3dbf7bf。**已知局限**：HEAD 不代表工作区 dirty 状态（run77/78 的改动未提交），待修 #42。
+
+**关键设计决策**：
+- **为什么词表要带反例测试**：历史 bug 模式是"补词表→打碎邻域 case"（"有没有别的"是子串，"这家店有没有别的优惠"语义是 ShopInquiry）。反例用例 `demandSwitchVocabularyExcludesShopInquiry` 是防回归疫苗。
+- **为什么 prompt 要零状态条件指令**：规则判过的事不该出现在 prompt（铁律"LLM 不负责确定性业务约束"在路由层的映射）；状态合法性全部回归规则层 + 转移表。陈旧位置指令就是状态条件指令的活案例——规则层已拦截，prompt 里再写就是双真相。
+- **为什么分开度量词表和 prompt**：面试叙事"词表治标、契约治本分别度量"。本案实际：词表贡献由 case52 RULE 命中证明；prompt 贡献=存量 LLM 路由零回归 + 判别标准就位。严格"改前改后同题集 LLM 路由对比"未单独跑（评测集原无 #34 场景），记待修。
+
+**后续演进**：LLM 兜底占比 19.6% 仍在 20% 健康线附近；若继续升高，评估 embedding 意图例句库（词表→例句库种子→RULE→embedding→LLM 级联）作为 step 2.5。
+
 ## 封板状态
 
 **本项目已进入封板状态。**

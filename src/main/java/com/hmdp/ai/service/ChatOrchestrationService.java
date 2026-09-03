@@ -492,10 +492,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (!aiProperties.isConfigured()) return fallbackRoute(message, decisionStatus);
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
-            messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求或需求不完整；START_DECISION=用户明确要找餐厅、吃饭、菜品、订餐或餐饮消费推荐；BUSINESS_FOLLOW_UP=围绕已推荐餐饮商户问优惠券、评价、备选或比较；EXIT_DECISION=用户明确说算了、不找了、结束或不需要了。‘附近有啥’、‘有什么推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
+            messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择唯一路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求、需求不完整，或无法归类到其他路由；START_DECISION=用户明确要求新餐饮推荐（找餐厅/吃饭/菜品/订餐）或表达换一个品类重新推荐；BUSINESS_FOLLOW_UP=围绕已推荐的具体餐饮商户追问评价、优惠券、营业时间、排队、地址或备选比较，对象是候选池中的某一家店；EXIT_DECISION=用户明确结束或放弃本次餐饮推荐；EXPLAIN_SUSPENDED_DECISION=用户询问当前无结果/暂停推荐的原因或下一步如何处理，该路由不发起新搜索也不查询商户详情。领域边界：‘附近有啥’、‘有什么推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
             messages.add(message("system", "当前决策状态=" + decisionStatus));
-            messages.add(message("system", "优先规则：若前序对话已处于餐饮推荐上下文，或状态为 ZERO_RESULT_NO_DATA、WAITING_RELAXATION，用户说“我附近”“当前位置”“当前定位”“换个地方”或“其他商圈”时，必须继承餐饮推荐意图并选择 START_DECISION；不要把它当作 GENERAL_CHAT。"));
-            messages.add(message("system", "若当前状态为 WAITING_RELAXATION 或 ZERO_RESULT_NO_DATA，用户是在追问暂停原因、已确认地点、可放宽项或下一步如何处理时，选择 EXPLAIN_SUSPENDED_DECISION；该路由不发起新搜索，也不查询商户详情。"));
+            messages.add(message("system", "反偏置：当用户表述指向更换需求、换品类或重新开始时，忽略对话历史里旧推荐结果的倾向，选择 START_DECISION，不要把它当成追问候选池。边界示例：'看看有没有别的吃的'→START_DECISION；'这家店评价怎么样'→BUSINESS_FOLLOW_UP；'换一家餐厅'→START_DECISION；'算了不吃了'→EXIT_DECISION；'这家店几点关门'→BUSINESS_FOLLOW_UP。"));
             messages.addAll(chatHistory);
             messages.add(message("user", message));
             JsonNode result = aiProperties.getRouting() != null && aiProperties.getRouting().isConfigured()
@@ -604,10 +603,23 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private boolean isAlternativeRecommendationPhrase(String message) {
         if (message == null) return false;
         String normalized = message.replaceAll("\\s+", "");
-        return normalized.contains("换几家") || normalized.contains("换一家") || normalized.contains("换一批")
+        boolean demandSwitch = normalized.contains("换几家") || normalized.contains("换一家") || normalized.contains("换一批")
                 || normalized.contains("再推荐几家") || normalized.contains("多推荐几家") || normalized.contains("再来几家")
                 || normalized.contains("还有别的")
-                || normalized.contains("还有其他") || normalized.contains("换个条件");
+                || normalized.contains("还有其他") || normalized.contains("换个条件")
+                // #34：换需求表述族——"看看有没有别的吃的"此前规则全 miss 落到 LLM 被误判 BUSINESS_FOLLOW_UP。
+                || normalized.contains("有没有别的") || normalized.contains("有别的")
+                || normalized.contains("别的吃的") || normalized.contains("别的店") || normalized.contains("别的菜")
+                || normalized.contains("其他吃的") || normalized.contains("换点别的") || normalized.contains("换个别的")
+                || normalized.contains("换换");
+        if (!demandSwitch) return false;
+        // 防 ShopInquiry 碰撞（第 5 处双真相的规则层防御）：聚焦商户的"这家店还有没有别的评价/优惠/营业时间"
+        // 是商户追问（BUSINESS_FOLLOW_UP）而非换需求，含这些词的一律不判 demand switch。
+        String[] shopInquiryStrongWords = {"评价", "优惠", "代金券", "团购", "营业", "排队", "地址", "预约"};
+        for (String word : shopInquiryStrongWords) {
+            if (normalized.contains(word)) return false;
+        }
+        return true;
     }
 
     private boolean isSearchRefinement(String originalMessage, String effectiveMessage) {

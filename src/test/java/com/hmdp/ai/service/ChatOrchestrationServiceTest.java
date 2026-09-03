@@ -1040,4 +1040,65 @@ class ChatOrchestrationServiceTest {
         assertEquals("END_DECISION", cancellation.getValue().getSelectedOptionId());
         verifyNoInteractions(aiClient);
     }
+    @Test
+    void demandSwitchVocabularyExcludesShopInquiry() {
+        // #34 词表级反例疫苗：新增「有没有别的/别的吃的/换点别的」命中换需求，
+        // 但聚焦商户的「评价/优惠」是 ShopInquiry（BUSINESS_FOLLOW_UP）而非换需求，必须排除。
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isAlternativeRecommendationPhrase", "看看有没有别的吃的"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isAlternativeRecommendationPhrase", "有没有别的菜"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isAlternativeRecommendationPhrase", "换点别的"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isAlternativeRecommendationPhrase", "还有别的"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isAlternativeRecommendationPhrase", "再推荐几家"));
+        // 反例：ShopInquiry 强词存在时不判换需求
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isAlternativeRecommendationPhrase", "这家店有没有别的优惠"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isAlternativeRecommendationPhrase", "这家店还有没有别的评价"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isAlternativeRecommendationPhrase", "找家评价好的店"));
+    }
+
+    @Test
+    void completedStateDemandSwitchStartsNewDecision() {
+        // #34 端到端：已有推荐（COMPLETED）后「看看有没有别的吃的」→ START_DECISION 重决策，
+        // 而非落入 LLM 被误判 BUSINESS_FOLLOW_UP 追问候选池。
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        AgentConversationService conversationService = mock(AgentConversationService.class);
+        AmapMcpLocationResolutionService locationResolutionService = mock(AmapMcpLocationResolutionService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", conversationService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(service, "locationResolutionService", locationResolutionService);
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        DecisionResponse completed = new DecisionResponse();
+        completed.setSessionId(100L);
+        completed.setStatus("COMPLETED");
+        when(decisionService.getDecision(100L)).thenReturn(completed);
+        DecisionResponse cancelled = new DecisionResponse();
+        cancelled.setSessionId(100L);
+        cancelled.setStatus("CANCELLED");
+        when(decisionService.continueDecision(org.mockito.Mockito.eq(100L), any())).thenReturn(cancelled);
+        DecisionResponse started = new DecisionResponse();
+        started.setSessionId(101L);
+        started.setStatus("COMPLETED");
+        when(decisionService.decide(any())).thenReturn(started);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("看看有没有别的吃的");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("START_DECISION", response.getRoute());
+        verifyNoInteractions(aiClient);
+    }
 }
