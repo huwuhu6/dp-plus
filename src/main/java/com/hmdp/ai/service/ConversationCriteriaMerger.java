@@ -26,6 +26,7 @@ public class ConversationCriteriaMerger {
         String text = query == null ? "" : query.replaceAll("\\s+", "");
 
         inherit(result, previous);
+        applyClearedFields(result, merged, delta, text);
         if (isDemandReplacement(text, previous, delta)) {
             clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
             clear(result, "hardConstraints", () -> merged.setHardConstraints(new ArrayList<String>()));
@@ -153,6 +154,45 @@ public class ConversationCriteriaMerger {
         target.setMissingInformation(new ArrayList<String>(source.getMissingInformation() == null ? new ArrayList<String>() : source.getMissingInformation()));
         target.setLockedConstraints(new java.util.HashSet<String>(source.getLockedConstraints() == null ? new java.util.HashSet<String>() : source.getLockedConstraints()));
         return target;
+    }
+
+    /** Executes the LLM-extracted cleared fields (semantic judgment moved out of rule text matching),
+     *  plus a conservative rule fallback for the reproduced "换别的品类" blind spot. */
+    private void applyClearedFields(CriteriaMergeResult result, DecisionConstraints merged,
+                                    DecisionConstraints delta, String text) {
+        java.util.List<String> cleared = delta == null ? null : delta.getClearedFields();
+        if (cleared != null) {
+            for (String field : cleared) {
+                if (field == null) continue;
+                if ("cuisine".equals(field) && hasText(merged.getCuisine())) {
+                    clear(result, "cuisine", () -> merged.setCuisine(""));
+                } else if ("keyword".equals(field) && hasText(merged.getKeyword())) {
+                    clear(result, "keyword", () -> merged.setKeyword(""));
+                } else if ("budgetPerPerson".equals(field) && merged.getBudgetPerPerson() != null && merged.getBudgetPerPerson() > 0) {
+                    clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
+                } else if ("radiusKm".equals(field) && merged.getRadiusKm() != null && merged.getRadiusKm() > 0) {
+                    clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
+                } else if ("nearby".equals(field) && Boolean.TRUE.equals(merged.getNearby())) {
+                    clear(result, "nearby", () -> merged.setNearby(false));
+                } else if ("quiet".equals(field) && Boolean.TRUE.equals(merged.getQuiet())) {
+                    clear(result, "quiet", () -> merged.setQuiet(false));
+                } else if ("avoidQueue".equals(field) && Boolean.TRUE.equals(merged.getAvoidQueue())) {
+                    clear(result, "avoidQueue", () -> merged.setAvoidQueue(false));
+                } else if ("targetCity".equals(field) && hasText(merged.getTargetCity())) {
+                    clear(result, "targetCity", () -> merged.setTargetCity(""));
+                } else if ("targetArea".equals(field) && hasText(merged.getTargetArea())) {
+                    clear(result, "targetArea", () -> merged.setTargetArea(""));
+                } else if ("occasion".equals(field) && hasText(merged.getOccasion())) {
+                    clear(result, "occasion", () -> merged.setOccasion(""));
+                } else if ("arrivalTime".equals(field) && hasText(merged.getArrivalTime())) {
+                    clear(result, "arrivalTime", () -> merged.setArrivalTime(""));
+                }
+            }
+        }
+        if (containsAny(text, "看看有没有别的吃的", "看看有没有别的", "换个别的", "换种", "别的餐厅", "别的店", "别的吃的", "别的菜品")) {
+            if (hasText(merged.getCuisine())) clear(result, "cuisine", () -> merged.setCuisine(""));
+            if (hasText(merged.getKeyword())) clear(result, "keyword", () -> merged.setKeyword(""));
+        }
     }
 
     private void inherit(CriteriaMergeResult result, DecisionConstraints previous) {

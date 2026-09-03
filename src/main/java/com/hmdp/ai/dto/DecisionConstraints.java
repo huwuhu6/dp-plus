@@ -28,4 +28,6 @@ public class DecisionConstraints {
     private List<String> softPreferences = new ArrayList<>();
     private List<String> missingInformation = new ArrayList<>();
     private Set<String> lockedConstraints = new HashSet<>();
+    /** Constraint fields the user explicitly abandons (e.g. "看看有没有别的吃的" clears cuisine/keyword). */
+    private List<String> clearedFields = new ArrayList<>();
 }

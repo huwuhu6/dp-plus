@@ -1795,6 +1795,18 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **演进方向**：#30（keyword 参与硬过滤/目标品类缺失判 ZERO_RESULT）待修；词表 OOS 守卫仍是启发式，长尾新领域靠 LLM 兜底，未来可用轻量 embedding 分类器（Saram Domain Guardrails）替代词表。
 
+### **14. "看看有没有别的吃的"不清旧菜系 + keyword 边界（#32，P0，2026-09-03 封板后例外修复）**
+
+**问题**：现场会话回放（9-03，chatId web-1788396918339-1sj55nmj）：用户"有没有沙县？"→ 硬过滤 0 结果 → WAITING_RELAXATION → "看看有没有别的吃的"→ 系统仍按沙县过滤 → 依然 0 结果。根因：`ConversationCriteriaMerger.isDemandReplacement`（L213-219）触发条件过窄（需"算了/不吃了/重新来/换个需求"+ delta 有新品，8-26 commit `3ee849f` 为区分"需求替换 vs 条件微调"收窄而来），"看看有没有别的吃的"两条件均不满足 → 旧 cuisine="沙县小吃" 静默继承 → 硬过滤按菜系 0 结果。**收窄词表引入新盲区——"有限词表必有盲区（封闭世界假设 vs 自然语言开集）"的典型，危险不在盲区本身，而在确定性层失败时的静默错传（无兜底）**。
+
+**根因（三层叠加，均需修才能闭环）**：A) 提取层——keyword/cuisine schema 边界重叠（keyword schema 允许"cuisine keyword"），"沙县小吃"提取不稳定（真实会话 1228→cuisine、评测 run70→keyword）；B) 检索层（#30）——keyword 不参与硬过滤，数据无沙县时向量只能给"最像的"（东北菜 semanticScore 0.47 极低却 SUFFICIENT）→ 错误推荐；C) 路由层（#34）——已有推荐态"看看有没有别的吃的"被 LLM 路由成 BUSINESS_FOLLOW_UP 而非 START_DECISION。
+
+**修复（#32 本次已修）**：语义判断上移、确定性执行下放——`DecisionConstraints` 新增 `List<String> clearedFields`；`ConstraintExtractor` 的 LLM 额外输出 clearedFields（仅"明确放弃旧约束"时加入）+ rule fallback（"看看有没有别的吃的/换个别的/别的店/不要沙县"→ add cuisine+keyword）；`ConversationCriteriaMerger` 新增 `applyClearedFields`（在 inherit 之后、isDemandReplacement 之前，逐字段 clear 且**仅 prior 非空才 clear 防误清**），isDemandReplacement 词表降级为规则兜底。4 个源码文件 + 4 单测（clearedFields 清除 / 规则兜底 / 仅 prior 非空才 clear / 保留模型 clearedFields）。
+
+**验证**：全量 `mvn -q test` 246 测试通过；conversation-v1 评测 run70 提交（caseCount=20）：既有 18/19 无回归（唯一失败 EXPLICIT_DESTINATION_OVERRIDES_DEVICE_LOCATION 为 run69 既有问题），case47 新用例 route_matched=0。**case47 深挖暴露评测用例缺陷**：第一轮 LLM 把沙县放 keyword（cuisine 空）→ 有结果，未复现真实 bug 的 hard=0 无结果场景；memory_matched=1 假阳性（cuisine 本就空串恒真）。教训：**评测用例应断言"确定性行为"（hard_matched=0 → WAITING_RELAXATION）而非"LLM 提取的偶然结果"，否则假阳性放行回归**（见待修 #36）。
+
+**演进方向**：#33（keyword 参与确定性精确匹配 shopName/cuisine/review 子串，无命中→hard=0→WAITING_RELAXATION；远期下推 ES/Milvus sparse + Hybrid Search dense+sparse+metadata filter+RRF——业界 Redis/Azure/MongoDB 一致）；#34（路由收窄：dialogPhase=RECOMMENDING + "换品类/别的吃的" → 强制 START_DECISION）；#36（重构评测构造真实无结果场景）。softPreferences 双轨来源（LLM 提取弱 + `reconcileRequestFacts` 系统规则注入，是"解释笔记"非"软约束执行器"，软口味偏好仅"清淡"被消费）= 已知空白（见待修 #35）。
+
 ### 明确"不做清单"
 
 以下方向已评估，当前阶段不引入：

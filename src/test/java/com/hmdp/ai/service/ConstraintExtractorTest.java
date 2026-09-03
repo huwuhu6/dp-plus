@@ -65,4 +65,21 @@ class ConstraintExtractorTest {
         assertEquals("", constraints.getTargetCity());
         assertEquals("", constraints.getTargetArea());
     }
+
+    @Test
+    void preservesModelExtractedClearedFields() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\": [{\"message\": {\"tool_calls\": [{\"function\": {\"arguments\": \"{\\\"targetCity\\\": \\\"\\\", \\\"targetArea\\\": \\\"\\\", \\\"locationIntent\\\": \\\"UNSPECIFIED\\\", \\\"keyword\\\": \\\"\\\", \\\"cuisine\\\": \\\"\\\", \\\"budgetPerPerson\\\": -1, \\\"radiusKm\\\": -1, \\\"nearby\\\": false, \\\"arrivalTime\\\": \\\"\\\", \\\"occasion\\\": \\\"\\\", \\\"quiet\\\": false, \\\"avoidQueue\\\": false, \\\"hardConstraints\\\": [], \\\"softPreferences\\\": [], \\\"missingInformation\\\": [], \\\"clearedFields\\\": [\\\"cuisine\\\", \\\"keyword\\\"]}\"}}]}}]}");
+
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("\u770b\u770b\u6709\u6ca1\u6709\u522b\u7684\u5403\u7684");
+
+        assertEquals(java.util.Arrays.asList("cuisine", "keyword"), constraints.getClearedFields());
+    }
+
 }

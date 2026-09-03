@@ -147,4 +147,51 @@ class ConversationCriteriaMergerTest {
         assertEquals(100, result.getConstraints().getBudgetPerPerson());
         assertFalse(result.getConstraints().getLockedConstraints().contains("budgetPerPerson"));
     }
+
+    @Test
+    void clearedFieldsFromLlmClearAbandonedCriteria() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setCuisine("\u6c99\u53bf\u5c0f\u5403");
+        previous.setKeyword("\u6c99\u53bf\u5c0f\u5403");
+        previous.setRadiusKm(5D);
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.getClearedFields().add("cuisine");
+        delta.getClearedFields().add("keyword");
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "\u770b\u770b\u6709\u6ca1\u6709\u522b\u7684\u5403\u7684");
+
+        assertEquals("", result.getConstraints().getCuisine());
+        assertEquals("", result.getConstraints().getKeyword());
+        assertEquals(5D, result.getConstraints().getRadiusKm());
+        assertTrue(result.getCleared().contains("cuisine"));
+        assertTrue(result.getCleared().contains("keyword"));
+    }
+
+    @Test
+    void ruleFallbackClearsCuisineForOtherFoodsWithoutLlmClearedFields() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setCuisine("\u6c99\u53bf\u5c0f\u5403");
+        previous.setKeyword("\u6c99\u53bf\u5c0f\u5403");
+        DecisionConstraints delta = new DecisionConstraints();
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "\u770b\u770b\u6709\u6ca1\u6709\u522b\u7684\u5403\u7684");
+
+        assertEquals("", result.getConstraints().getCuisine());
+        assertEquals("", result.getConstraints().getKeyword());
+        assertTrue(result.getCleared().contains("cuisine"));
+    }
+
+    @Test
+    void clearedFieldsOnlyClearWhenPriorConstraintPresent() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setCuisine("");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.getClearedFields().add("cuisine");
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "\u770b\u770b\u6709\u6ca1\u6709\u522b\u7684\u5403\u7684");
+
+        assertEquals("", result.getConstraints().getCuisine());
+        assertFalse(result.getCleared().contains("cuisine"));
+    }
+
 }

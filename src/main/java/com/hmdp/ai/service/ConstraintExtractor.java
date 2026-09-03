@@ -49,7 +49,7 @@ public class ConstraintExtractor {
 
     private DecisionConstraints extractByModel(String query) throws Exception {
         List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(message("system", "你是餐饮消费决策需求解析器。只能根据用户原话提取约束；显式目标地点与设备当前位置必须分开：targetCity 是用户要求搜索的城市，targetArea 是用户要求搜索的行政区、商圈或地标，不能把它们放进 keyword。未知值使用空字符串、-1 或 false，不得臆测。"));
+        messages.add(message("system", "你是餐饮消费决策需求解析器。只能根据用户原话提取约束；显式目标地点与设备当前位置必须分开：targetCity 是用户要求搜索的城市，targetArea 是用户要求搜索的行政区、商圈或地标，不能把它们放进 keyword。未知值使用空字符串、-1 或 false，不得臆测。当用户明确放弃或更换之前已存在的某个旧约束时，把该字段名加入 clearedFields（可选字段，例如“看看有没有别的吃的”放弃菜系→cuisine，“预算随便/预算不限”放弃预算→budgetPerPerson）。仅当用户在放弃旧约束时才加入；普通条件微调或新增约束不得加入。"));
         messages.add(message("user", query));
 
         Map<String, Object> function = new LinkedHashMap<>();
@@ -95,6 +95,11 @@ public class ConstraintExtractor {
         constraints.setQuiet(query.contains("安静") || query.contains("聊天"));
         constraints.setAvoidQueue(query.contains("不想排队") || query.contains("不用排队") || query.contains("少排队"));
         constraints.setNearby(query.contains("附近") || query.contains("周边") || query.contains("就近"));
+        if (containsAny(query, "看看有没有别的吃的", "看看有没有别的", "换个别的", "换种", "别的餐厅", "别的店", "别的吃的", "别的菜品", "不要沙县")) {
+            if (constraints.getClearedFields() == null) constraints.setClearedFields(new ArrayList<String>());
+            if (!constraints.getClearedFields().contains("cuisine")) constraints.getClearedFields().add("cuisine");
+            if (!constraints.getClearedFields().contains("keyword")) constraints.getClearedFields().add("keyword");
+        }
         if (query.contains("约会") || query.contains("女朋友") || query.contains("男朋友")) {
             constraints.setOccasion("约会");
         }
@@ -122,6 +127,7 @@ public class ConstraintExtractor {
         if (constraints.getSoftPreferences() == null) constraints.setSoftPreferences(new ArrayList<String>());
         if (constraints.getMissingInformation() == null) constraints.setMissingInformation(new ArrayList<String>());
         if (constraints.getLockedConstraints() == null) constraints.setLockedConstraints(new java.util.HashSet<String>());
+        if (constraints.getClearedFields() == null) constraints.setClearedFields(new ArrayList<String>());
         return constraints;
     }
 
@@ -151,6 +157,8 @@ public class ConstraintExtractor {
         return "UNSPECIFIED";
     }
 
+    private boolean containsAny(String source, String... values) { for (String value : values) if (source.contains(value)) return true; return false; }
+
     private boolean containsCurrentDeviceReference(String query) {
         String text = query == null ? "" : query.replaceAll("\\s+", "");
         return text.contains("我附近") || text.contains("我这附近") || text.contains("我身边")
@@ -174,6 +182,7 @@ public class ConstraintExtractor {
         properties.put("hardConstraints", arrayProperty("Hard constraints explicitly stated by user."));
         properties.put("softPreferences", arrayProperty("Soft preferences explicitly stated by user."));
         properties.put("missingInformation", arrayProperty("Information needed but not supplied."));
+        properties.put("clearedFields", arrayProperty("Constraint fields the user explicitly abandons: cuisine, keyword, budgetPerPerson, radiusKm, nearby, quiet, avoidQueue, targetCity, targetArea, occasion, arrivalTime. Empty array if none."));
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "object");
         schema.put("properties", properties);
