@@ -1834,6 +1834,16 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **演进方向**：#34（已有推荐态"看看有没有别的吃的"LLM 误路由 BUSINESS_FOLLOW_UP 需确定性收窄）；#36（重构评测：构造 keyword=沙县小吃+数据无沙县→断言 WAITING_RELAXATION 的真实场景）；review 子串匹配与 Hybrid Search 下推随数据规模演进。
 
+### **17. 评测用例重构：断言确定性行为而非 LLM 偶然产物（#36，P0 回归保护，2026-09-03）**
+
+**问题**：case47（REPLACE_DEMAND_WITHOUT_NEW_CUISINE）三次评测（run70/71/72）全部失效——run70 第一轮 LLM 把"沙县"放 keyword（cuisine 空）导致第一轮 COMPLETED 有结果、未复现真实 bug 的 hard=0 无结果场景；run71/72 第一轮"有没有沙县？"被 LLM 路由成 GENERAL_CHAT（decisionSource=MODEL）根本进不了决策链路。根因是 case 断言绑定在 LLM 的偶然产物上：expected_routes 依赖 LLM 路由（GENERAL_CHAT/START_DECISION/BUSINESS_FOLLOW_UP 摇摆），expected_memory={"cuisine":""} 在 GENERAL_CHAT 时恒真（cuisine 空串）→ memory_matched=1 是假阳性。
+
+**方案（决策定案）**：评测断言从"LLM 中间产物"改为"确定性行为"。停用 case47（active=0），新增 4 个确定性断言 case：① ABSENT_CUISINE_NAMED_SHAXIAN（"帮我找附近的沙县小吃"→WAITING_RELAXATION+candidatePoolEmpty）；② ABSENT_CUISINE_NAMED_MEXICAN（同型第二变体）；③ PRESENT_CUISINE_HOTPOT_CONTROL（火锅→COMPLETED+期望店77，防过度拒绝）；④ PRESENT_SHOP_MINSHI_CONTROL（闽师东北菜→COMPLETED+期望店89，keyword 精确匹配验证）。4 case 全部断言 finalStatus/candidatePoolEmpty/route 序列（matchesMemory 已支持），不依赖 cuisine 提取成什么——无论沙县落 keyword 还是 cuisine，#33 硬过滤都 0 结果→WAITING_RELAXATION，对 LLM 波动稳健。正反对照组 ≥3 用例，杜绝单 case 过拟合。query 统一用"帮我找附近的X"命中 locationSearchContinuation 规则（附近+找+餐饮信号）确定性进 START_DECISION，绕开 LLM 路由波动。
+
+**关键 Trade-off（面试可讲）**：① 评测要区分"被测对象"与"环境噪声"——LLM 路由/提取是环境噪声（波动），确定性过滤/状态机是被测对象（稳定），断言应锚定后者，否则评测结果=模型抽卡；② 用例随数据漂移需要校准（case16 期望 WAITING_RELAXATION 但福州数据补入川菜后实际 COMPLETED 为正确行为，期望更新并注明依据），这是评测用例的生命周期管理，不是"为过 case 改期望"。
+
+**验证**：run74 route 22/23（唯一失败=case30，#34 相关）、finalStatus 23/23、shop 23/23，4 新 case 全绿；case16 期望校准后通过。**新发现（记 #38）**：case16 第一轮"推荐福州的佛跳墙餐厅"（EXPLICIT_TARGET 福州）无匹配时答复"福州目前暂无收录餐饮商户"——福州实际有 980 家店，ZERO_RESULT_NO_DATA 话术把"品类无候选"误说成"城市无数据"，需区分两种话术。
+
 ### 明确"不做清单" ### 明确"不做清单"
 
 以下方向已评估，当前阶段不引入：
