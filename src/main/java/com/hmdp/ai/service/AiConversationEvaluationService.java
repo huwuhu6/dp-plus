@@ -144,11 +144,25 @@ public class AiConversationEvaluationService {
         run.setUserId(UserHolder.getUser() == null ? null : UserHolder.getUser().getId());
         run.setModel(aiProperties.getModel());
         run.setDatasetVersion(datasetVersion);
+        run.setGitCommit(resolveGitCommit());
         run.setCaseCount(cases.size());
         run.setStatus("RUNNING");
         runMapper.insert(run);
         return run;
     }
+
+    private String resolveGitCommit() {
+        try {
+            Process p = new ProcessBuilder("git", "rev-parse", "HEAD")
+                    .directory(new java.io.File(System.getProperty("user.dir")))
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).trim();
+            return out.isEmpty() ? null : out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
 
     private ConversationEvaluationRunResponse response(AiConversationEvaluationRun run,
                                                         List<AiConversationEvaluationCaseResult> results) {

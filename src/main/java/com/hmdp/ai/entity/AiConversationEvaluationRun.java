@@ -13,6 +13,7 @@ public class AiConversationEvaluationRun {
     private Long userId;
     private String model;
     private String datasetVersion;
+private String gitCommit;
     private Integer caseCount;
     private Integer routeMatchedCount;
     private Integer contextRewriteExpectedCount;
