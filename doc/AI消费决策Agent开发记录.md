@@ -1970,6 +1970,16 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **判断**：LoadHistoryTool 设计健康（职责清晰、走压缩、有防御），风险点不在它自身而在"无引导场景"——记入待修 #46 观察项（保留 or 提供引导场景 or 移除），不阻塞。
 
+### 23. 路由层主线收束：实证零调用 + 治理盲点记账 + "已设计待执行"移交文档（2026-09-03）
+
+**本轮修正（GLM 评审）**："全项目无 prompt 引导"论断不精确——**工具描述本身就是 prompt**（模型看到的就是 description 文本，是唯一引导通道）。修正为"LoadHistoryTool 的唯一引导面是工具描述，除此之外无编排层引导"。
+
+**实证（从代码推断升级为实证）**：查 tbl_ai_conversation_event，event_type=TOOL_CALL 的事件，工具名在 event_result（不在 metadata，这是持久化路径的事实）：`load_history` **全表 0 次调用**（含 run76~80）。实际被调用的工具分布：search_shop_evidence 144 / get_shop_detail 122 / query_shop_vouchers 94 / search_alternative_shops 3（compare_shops 也 0 次，顺带观察）。#46 关闭为"保留 + 无编排引导 + 实证零调用"（描述已含 never restores 约束，精确度可接受）。
+
+**治理盲点记账（#47）**：`@Resource List<BaseAgentTool>` 自动注册 = 工具可见性无审查门——新增任何工具静默扩大模型动作空间，无变更审查点。与路由层 prompt/schema 双真相同构（形态不同）。freeze 精神向工具层平移：路由层靠"词表冻结"收束增长，工具层的等价物是"注册审查"（新增工具 checklist：描述质量/编排引导/测试覆盖）。
+
+**移交动作**：新建 `doc/路由层重构设计（已设计待执行）.md`——6 节"已设计待执行"文档（症状账本/根因模型/目标架构/待执行清单/为什么不现在执行/开工条件现状）。无论是否执行 C 重构，这页文档都是开工文档 + 面试叙事"生命周期管理"素材（识别病理→修复→量化→冻结→移交给自己未来的排期）。
+
 ## 封板状态
 
 **本项目已进入封板状态。**
