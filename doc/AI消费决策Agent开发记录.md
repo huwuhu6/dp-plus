@@ -1903,6 +1903,41 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **后续演进**：LLM 兜底占比 19.6% 仍在 20% 健康线附近；若继续升高，评估 embedding 意图例句库（词表→例句库种子→RULE→embedding→LLM 级联）作为 step 2.5。
 
+### 20. 规则层"该接没接"系统化清零 + 探针集量化 LLM 兜底准确率（step2.5，2026-09-03）
+
+**背景**：step2 完成后 LLM 兜底占比 19.6%（9/46）。我初步判断"存量 9 个 MODEL turn 都是规则不该覆盖的 LLM 领地"，据此建议暂缓 embedding 意图库。**GLM 评审质疑该论断未经验证**（"这类 turn 都是 LLM 领地"必须先逐条验证），并给出一套决策方法论。
+
+**逐条审计（9 个 MODEL turn → 7 个是规则"该接没接"，只有 2 个真 LLM 领地）**：
+| turn | 消息 | 归因 | 修复 |
+|---|---|---|---|
+| case10-t1 | 附近有什么好吃的闽菜 | 缺"闽菜"菜系词 + 缺"有什么"动词 | hasDiningCategory+闽菜等；asksForNewOptions+有什么；locationSearchContinuation+有什么 |
+| case10-t2 | 走过去大概多远 | isShopInquiry 缺距离词 | +多远/距离/几公里/走过去 |
+| case14 | 那另一家店有打折券吗 | isShopInquiry 缺"打折"（"那另一家店"无"那家"连续子串） | +打折 |
+| case24 | 我在杭州想吃火锅 | explicitSearchVerb 缺"想吃" | +想吃/想喝 |
+| case31 | 推荐一家杭州适合约会的日料 | explicitSearchVerb 只有"推荐一下/给我推荐" | +推荐一家 |
+| case32 | 附近的火锅 | hasDiningCategory+"附近"无组合条件 | 新增 nearbyCategory |
+| case3 | 附近有羽毛球馆推荐吗 | **已拦截但 instrumentation 误标**：isNonDiningDomain 拦截为 GENERAL_CHAT，但没更新 assessment.setSource → 统计成 MODEL | 拦截时 setSource("RULE") |
+| case8×2 | 你是谁/写论文 | 真 LLM 领地（开放问答） | 不动 |
+
+**关键认知**：
+1. **"这类 turn 都是 LLM 领地"这类论断必须先验证**——逐条审计后发现 78% 是规则便宜可接而没接（词表缺口），不是"设计使然"。之前用存量占比做暂缓依据是错的（run77 教训：词表改了存量占比纹丝不动）。
+2. **instrumentation 口径误差**：decisionSource 记录的是 assessRouting 的候选源，不是最终 action 的来源。isNonDiningDomain 拦截（RULE 类）没回写 assessment.setSource → 被误标 MODEL。修法：确定性拦截处显式 setSource("RULE")。这类"统计层双真相"是第 6 处。
+3. **探针集是"改述鲁棒性"的度量工具**：评测集只覆盖功能 case，测不出"规则 miss 的变体 LLM 兜底是否可靠"。10 条改述变体（词表刻意 miss）作为 robustness-probe case（notes 标记，聚合时与功能 case 分开，不污染存量准确率口径）。
+
+**验证结果（run79，git_commit=89c78e7-dirty）**：
+- 全量 34/34（24 功能 + 10 探针）route/finalStatus/shop 全绿，单测 261/0/0。
+- 功能 case MODEL 兜底 **9 → 2**（仅剩真 LLM 领地 case8），"该接没接"清零。
+- **探针集 LLM 兜底准确率 9/9 = 100%**（"还有啥能吃的""换个清淡点的""离这儿远吗""人均消费大概多少"等改述变体全部路由正确）。
+
+**决策（embedding 意图库暂缓，有据可依）**：
+- GLM 判定标准：探针准确率高 → 暂缓有数据支撑。探针 100%（9/9）→ **embedding 意图库不进 step 2.5**，保留为"演进叙事"。
+- 论证：当前瓶颈不在 LLM 兜底质量（100% 正确），而在"规则该接没接"（已通过词表补丁清零到 2 个真领地）。embedding 意图库解决的是"词表泛化差"，但探针证明 LLM 兜底已覆盖泛化——引入 embedding 只会增加阈值调参成本，收益存疑。
+- **诚实口径**：探针规模 10 条、单模型（deepseek-v4-flash），100% 是趋势参考非统计显著性；后续每加一类意图，把探针变体同步进 robustness 集（待修 #43）。
+
+**#42 dirty 锚定落地**：`git rev-parse HEAD` → `git describe --always --dirty`，run79 实测 `89c78e7-dirty`（工作区有未提交改动的评测与干净 HEAD 评测可区分）。
+
+**面试叙事**："我系统化审计了每个落 LLM 的 turn，区分'真 LLM 领地'和'规则该接没接'——78% 是后者，补词表把 9 个降到 2 个；再用改述探针集量化 LLM 兜底准确率 100%，数据支撑 embedding 暂缓。关键教训：'这类 turn 都是 LLM 领地'这类论断必须先验证，用存量占比做决策是 run77 教训。
+
 ## 封板状态
 
 **本项目已进入封板状态。**

@@ -223,6 +223,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (isNonDiningDomain(context.getOriginalMessage())) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT);
             context.setRoutingReason("non_dining_domain_guard");
+            // 领域守卫是确定性 RULE 拦截，修正 assessRouting 预评估落 MODEL 的统计口径（case3 审计 2026-09-03）
+            assessment.setSource("RULE");
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT);
             log.info("[AI][chat] event=DOMAIN_GUARD_BLOCKED chatId={} message={}", context.getChatId(), compact(context.getOriginalMessage()));
             return;
         }
@@ -639,7 +642,10 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 || message.contains("优惠") || message.contains("代金券") || message.contains("团购")
                 || message.contains("营业时间") || message.contains("排队") || message.contains("地址")
                 || message.contains("预约") || message.contains("第一家") || message.contains("第二家")
-                || message.contains("第三家") || message.contains("这家") || message.contains("那家");
+                || message.contains("第三家") || message.contains("这家") || message.contains("那家")
+                // 距离/折扣高频确定性表述（审计 run78 落 MODEL 的 turn 补齐）：过去/距离/打折
+                || message.contains("多远") || message.contains("距离") || message.contains("几公里")
+                || message.contains("走过去") || message.contains("打折");
     }
 
     private RoutingDecisionAssessment assessRouting(ChatProcessingContext context, boolean afterRewrite) {
@@ -717,27 +723,32 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         boolean asksForPlace = message.contains("店") || message.contains("餐厅") || message.contains("餐馆")
                 || message.contains("地方") || message.contains("吃饭");
         boolean asksForNewOptions = message.contains("有没有") || message.contains("有没") || message.contains("还有")
-                || message.contains("推荐") || message.contains("找") || message.contains("来一家");
+                || message.contains("有什么") || message.contains("推荐") || message.contains("找") || message.contains("来一家");
         boolean hasScene = message.contains("适合约会") || message.contains("约会") || message.contains("聚餐")
                 || message.contains("安静") || message.contains("清淡") || message.contains("性价比");
         boolean hasDiningCategory = message.contains("烤肉") || message.contains("烧烤") || message.contains("火锅")
                 || message.contains("日料") || message.contains("料理") || message.contains("小吃") || message.contains("咖啡")
                 || message.contains("奶茶") || message.contains("川菜") || message.contains("粤菜")
+                || message.contains("闽菜") || message.contains("湘菜") || message.contains("江浙菜")
+                || message.contains("本帮菜") || message.contains("西餐") || message.contains("韩餐")
                 || message.contains("简餐") || message.contains("快餐");
         boolean refinement = message.contains("换成") || message.contains("改成") || message.contains("便宜点")
                 || message.contains("贵点") || message.contains("不要辣") || message.contains("不吃辣");
         boolean explicitSearchVerb = message.contains("帮我找") || message.contains("帮我搜") || message.contains("找一下")
-                || message.contains("推荐一下") || message.contains("给我推荐");
+                || message.contains("推荐一下") || message.contains("给我推荐") || message.contains("推荐一家")
+                || message.contains("想吃") || message.contains("想喝");
         boolean mealPlanChanged = message.contains("取消") || message.contains("改吃") || message.contains("我自己")
                 || message.contains("一个人吃") || message.contains("单人");
         boolean locationSearchContinuation = message.contains("附近")
-                && (message.contains("找") || message.contains("推荐") || message.contains("看看"))
+                && (message.contains("找") || message.contains("推荐") || message.contains("看看") || message.contains("有什么"))
                 // 领域守卫：仅"附近+看看"不足以判定餐饮推荐，需同时带餐饮语义（店/餐厅/地方/吃饭 或 菜系 或 场景词），
                 // 避免"帮我看看附近有没有羽毛球馆"被正向规则短路误判 START_DECISION（2026-09-02 修复 #29）
                 && (asksForPlace || hasDiningSignal(message) || hasScene);
+        // "附近的火锅"：附近+菜系无动词，词表补充（case32 审计）
+        boolean nearbyCategory = message.contains("附近") && hasDiningCategory;
         return (asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory))
                 || (hasDiningCategory && (explicitSearchVerb || mealPlanChanged)) || (refinement && hasDiningCategory)
-                || locationSearchContinuation;
+                || locationSearchContinuation || nearbyCategory;
     }
 
     private boolean isFocusedShopQuestion(String message) {

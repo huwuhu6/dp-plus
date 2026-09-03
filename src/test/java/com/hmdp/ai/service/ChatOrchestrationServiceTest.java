@@ -1101,4 +1101,21 @@ class ChatOrchestrationServiceTest {
         assertEquals("START_DECISION", response.getRoute());
         verifyNoInteractions(aiClient);
     }
+    @Test
+    void vocabCatchesModelFallbackScenarios() {
+        // 审计 run78 落 MODEL 的 turn（2026-09-03）：高频确定性表述由规则接住，避免每轮 LLM 兜底。
+        // 正例：本应规则接住的表述
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "附近有什么好吃的闽菜"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "我在杭州想吃火锅"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "推荐一家杭州适合约会的日料"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "附近的火锅"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "我想吃日料"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isShopInquiry", "推荐的这几家走过去大概多远"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isShopInquiry", "那另一家店有打折券吗"));
+        // 反例：#29 领域守卫与无餐饮语义不回归
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "附近有什么好玩的"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "帮我看看附近有没有羽毛球馆"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "附近有什么推荐"));
+    }
 }
