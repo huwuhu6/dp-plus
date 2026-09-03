@@ -1955,6 +1955,21 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **验证**：单测 262/0/0（+1 碰撞测试）；run80 评测 40/40（24 功能 + 10 探针 + 6 对抗）；功能 case MODEL 兜底 9→2（4.3%）；一致性校验通过。
 
+### 22. LoadHistoryTool 定点覆盖 + 三问探查（2026-09-03，GLM 排期判定）
+
+**背景**：GLM 排期结论"LoadHistoryTool 定点补覆盖（必做，半天）→ C 视时间 → 工具编排整体审计不做"。理由：工具模块健康（5 测试文件、Compressor/ExecutionMode/Reducer 前瞻设计）说明整体审计期望收益低；但 LoadHistoryTool 是主链路可触达 + 无测试的风险项。
+
+**三问探查结论（前 1 小时代码确认）**：
+1. **Bootstrap 职责重叠（第 7 处双真相候选）→ 排除**：LoadHistoryTool 是"模型按需主动调用的历史版本只读查看"（输入 chatId+version，输出某版本快照摘要 + recentMessages + restorableFields），Bootstrap 是链路必经装载当前状态。**两者职责边界清晰：装当前 vs 查历史**。共享同一存储（AiWorkingMemory + ChatMemoryService），是同一真相的两个只读入口，非双真相。
+2. **ToolStateDelta 回写 → 无**：LoadHistoryTool 明确"never mutates state"，只读不产生状态变更；orchestrator 的 enrichWithDeterministicContext 只是把确定性上下文物化进工具输入（快照），不回写 Working Memory。
+3. **超长历史 + Compressor → 走压缩**：orchestrator L138 `resultCompressor.compress(tool.execute(input))` 对所有工具结果统一压缩，LoadHistoryTool 产物（含 recentMessages）不例外，无 context 撑爆风险。
+
+**额外发现（"备而未用"）**：LoadHistoryTool 通过 `@Resource List<BaseAgentTool>` 自动注册进模型可见工具集（AgentToolRegistry.definitions()），但**全项目无任何 prompt/上下文引导模型调用它**——是"备而未用"的工具。版本不存在时 WorkingMemoryVersionService.get 抛明确 IllegalArgumentException（无 NPE）。
+
+**测试（3 条）**：正常只读快照（钉住 restorableFields/warnings 契约）、缺参数 IllegalArgumentException、版本不存在传播。**全量单测 265/0/0。**
+
+**判断**：LoadHistoryTool 设计健康（职责清晰、走压缩、有防御），风险点不在它自身而在"无引导场景"——记入待修 #46 观察项（保留 or 提供引导场景 or 移除），不阻塞。
+
 ## 封板状态
 
 **本项目已进入封板状态。**
