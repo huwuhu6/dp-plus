@@ -184,6 +184,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (isLocationClarification(activeDecision) && isPotentialNamedLocation(message)) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.LOCATION_RESOLUTION);
             context.setRoutingReason("named_location_for_clarification");
+            assessment.setSource("RULE");
             ChatMessageResponse locationResponse = resolveNamedLocation(context.getChatId(), message,
                     context.getChatSession(), context.getActiveDecisionSessionId(), activeDecision);
             if (locationResponse != null) {
@@ -195,6 +196,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 && isSuspendedDecisionMetaQuestion(message)) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED);
             context.setRoutingReason("suspended_decision_meta_question");
+            assessment.setSource("RULE");
             return;
         }
         // 位置恢复（B 修复 #case30）：WAITING_RELAXATION 态下纯位置表达 → 保留约束换位置重搜，
@@ -204,6 +206,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 && isLocationRecoveryExpression(context.getOriginalMessage())) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT);
             context.setRoutingReason("location_recovery_in_waiting_relaxation");
+            assessment.setSource("RULE");
             return;
         }
         boolean replacesPausedDecision = !assessment.isConflictDetected()
@@ -216,6 +219,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
             context.setRoutingReason("new_recommendation_replaces_paused_decision");
             context.setUsedModel(false);
+            assessment.setSource("RULE");
             return;
         }
         // 非餐饮领域守卫（#29 修复）：无餐饮强信号且命中非餐饮领域词表 → 强制 GENERAL_CHAT，
@@ -248,6 +252,10 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             assessment.setStateAllowed(isRouteAllowed(route, activeDecision));
             assessment.setShouldEscalate(false);
             assessment.setReason("routing_model_candidate_validated");
+        } else if ("MODEL".equals(assessment.getSource())) {
+            // resolveContextualFollowUpRoute 是确定性 follow-up 路由（ShopInquiry/候选引用），非 LLM 兜底，
+            // 回写 source 防止统计层误标（一致性断言：确定性推导的 action 不得 source=MODEL）
+            assessment.setSource("RULE");
         }
         context.setRoute(route);
         context.setAction(toProcessingAction(route));

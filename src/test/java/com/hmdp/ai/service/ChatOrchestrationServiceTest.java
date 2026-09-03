@@ -1118,4 +1118,16 @@ class ChatOrchestrationServiceTest {
         assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "帮我看看附近有没有羽毛球馆"));
         assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "附近有什么推荐"));
     }
+    @Test
+    void shopInquiryWithYouShenMeNotSwallowedByStartDecision() {
+        // GLM 碰撞检查："有什么"进入 isNewRecommendationIntent 后，
+        // "这家店有什么优惠"必须走 BUSINESS_FOLLOW_UP（isFocusedShopQuestion 兜底 + isShopInquiry），
+        // 不被正向规则 START_DECISION 吞掉（isShopInquiry 判定晚于正向规则）。
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "这家店有什么优惠"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "这家店有什么评价"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "有什么优惠"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isShopInquiry", "这家店有什么优惠"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isFocusedShopQuestion", "这家店有什么优惠"));
+    }
 }
