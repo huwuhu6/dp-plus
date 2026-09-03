@@ -795,6 +795,12 @@ public class ConsumptionDecisionService {
     private boolean matchesHardConstraints(Shop shop, AiShopProfile profile, DecisionRequest request, DecisionConstraints constraints) {
         if (constraints.getBudgetPerPerson() > 0 && (shop.getAvgPrice() == null || shop.getAvgPrice() > constraints.getBudgetPerPerson())) return false;
         if (!constraints.getCuisine().isEmpty() && (profile == null || !matchesCuisine(profile.getCuisine(), constraints.getCuisine()))) return false;
+        if (hasText(constraints.getKeyword())) {
+            String keyword = constraints.getKeyword().trim();
+            boolean nameMatched = shop.getName() != null && shop.getName().contains(keyword);
+            boolean cuisineMatched = matchesCuisine(profile == null ? null : profile.getCuisine(), keyword);
+            if (!nameMatched && !cuisineMatched) return false;
+        }
         if (constraints.getRadiusKm() > 0 && request.getLatitude() != null && request.getLongitude() != null
                 && distanceKm(request.getLatitude(), request.getLongitude(), shop.getY(), shop.getX()) > constraints.getRadiusKm()) return false;
         return isOpenAt(shop.getOpenHours(), constraints.getArrivalTime());

@@ -1820,7 +1820,21 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 【演进方向】① #33 keyword 边界（schema 收紧 + canonicalize 后置迁移 + keyword 确定性精确匹配 + Hybrid Search）——#37 已先建好 preferences 收编描述型，是 #33 前置；② case47 评测期望 vs LLM 路由波动（GENERAL_CHAT/START_DECISION 不稳定）需确定性断言（#36）；③ 枚举集合会随数据增长继续扩充，注意其他兜底吸收新品类。
 
-### 明确"不做清单"
+### **16. keyword 确定性通道 + 菜系词迁移（#33，P0，2026-09-03）**
+
+**问题**：用户点名"沙县小吃"这类精确实体（品类/店名），当前系统只有"语义近似层"没有"精确匹配层"。LLM 把"沙县"放 keyword（run70 实况）→ keyword 不参与硬过滤 → 数据无沙县时向量给不出"没有"信号，只给"最像的"（semanticScore 0.47 极低却判 SUFFICIENT → 推荐东北菜）。本质是 **RAG 经典边界：向量检索在"数据里没有"时无法表达"没有"，只有精确匹配能**。
+
+**业界依据（2026-09-03 调研，AGENTS.md 要求的方案前置）**：关键词检索（BM25/term）擅长精确实体（店名/品类/SKU/型号/错误码），向量擅长模糊意图，两者互补（Redis/InfoQ/Elastic 共识）；标准做法是 dense+sparse 双路 + RRF 融合（Milvus 2.5 原生 BM25 built-in + hybrid_search + RRFRanker，无需调参）；电商"iPhone 15 Pro" vs "苹果最新手机"是同一个镜像；多路召回要防"精确匹配过度严格"（term 需扩为前缀/子串层）。
+
+**方案（决策定案，三层）**：① **schema 边界**——ConstraintExtractor prompt 已收敛（#37 已做：cuisine 只放菜系、keyword 只放点名实体），本轮补 **canonicalize 后置迁移** `migrateCuisineKeywordToCuisine`：keyword 命中 CuisineCanonicalizer 映射（补"沙县"→"小吃"别名）→ 自动迁入 cuisine（仅 cuisine 空才迁防覆盖），堵死"沙县摇摆"；② **keyword 确定性硬过滤**——`matchesHardConstraints` 增加 keyword 维度：shopName contains keyword 或 cuisine canonical token 匹配，两者皆无 → hard=0 → WAITING_RELAXATION（确定性"没有"信号）；③ **远期**——keyword review 子串匹配 + Milvus 2.5 sparse(BM25)+dense+RRF 混合检索下推（980 店不值得，记待修 #18）。
+
+**关键设计点**：① keyword 匹配是"任一维度命中即通过"（OR），不是 AND——点名店名（shopName）或点名品类（cuisine）都算命中；② 无命中 → hardMatched=0 → 语义召回在空集内天然无召回，杜绝漂移；③ keyword 迁移只影响"菜系词被错放 keyword"的场景，点名店名（如"闽师东北菜"）不迁移、走 shopName 精确匹配；④ `semanticRetrievalQuery` 的 keyword 兜底（L831）保留，只在地理 token 剔除后 query 空时用。
+
+**验证**：新增 6 单测（3 迁移：沙县小吃→小吃/点名店名不迁移/cuisine 已有不迁移；3 硬过滤：店名命中/cuisine 命中/全无命中）→ 全量 252 测试通过；conversation-v1 评测 run72 = 18/20 无回归；**真实链路双验证**（/ai/chat/messages）——"附近有没有沙县小吃" → WAITING_RELAXATION（修复前推荐东北菜）、"附近有没有闽师东北菜" → COMPLETED 精确命中 tbl_shop id=89。**评测盲区**：case47 第一轮 LLM 把"有没有沙县？"路由成 GENERAL_CHAT（decisionSource=MODEL），根本进不了决策链路，#33 修复无法通过该 case 验证——再次印证 #36（评测须断言确定性行为而非 LLM 偶然结果）。实施坑：PowerShell 传 JSON 转义（curl.exe `-d "{"chatId"...}"` 的 `"` 变字面反斜杠）→ 改用 Python urllib 脚本发请求。
+
+**演进方向**：#34（已有推荐态"看看有没有别的吃的"LLM 误路由 BUSINESS_FOLLOW_UP 需确定性收窄）；#36（重构评测：构造 keyword=沙县小吃+数据无沙县→断言 WAITING_RELAXATION 的真实场景）；review 子串匹配与 Hybrid Search 下推随数据规模演进。
+
+### 明确"不做清单" ### 明确"不做清单"
 
 以下方向已评估，当前阶段不引入：
 

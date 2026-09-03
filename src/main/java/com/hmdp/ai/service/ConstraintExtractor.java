@@ -123,6 +123,7 @@ public class ConstraintExtractor {
         if (constraints.getTargetArea() == null) constraints.setTargetArea("");
         constraints.setLocationIntent(normalizeLocationIntent(constraints.getLocationIntent(), constraints));
         if (constraints.getKeyword() == null) constraints.setKeyword("");
+        migrateCuisineKeywordToCuisine(constraints);
         constraints.setCuisine(canonicalizeCuisine(constraints.getCuisine()));
         if (constraints.getBudgetPerPerson() == null) constraints.setBudgetPerPerson(-1);
         if (constraints.getRadiusKm() == null) constraints.setRadiusKm(-1D);
@@ -138,6 +139,24 @@ public class ConstraintExtractor {
 
     private String canonicalizeCuisine(String cuisine) {
         return CuisineCanonicalizer.canonicalize(cuisine);
+    }
+
+    /**
+     * If the user explicitly names a cuisine keyword (e.g. "沙县" -> canonical "小吃") but the
+     * extractor put it in keyword, migrate it to cuisine so it participates in deterministic
+     * hard filtering instead of remaining a semantic-only signal. Only migrates when cuisine is
+     * empty to avoid overriding an already-extracted cuisine.
+     */
+    private void migrateCuisineKeywordToCuisine(DecisionConstraints constraints) {
+        String keyword = constraints.getKeyword();
+        if (keyword == null || keyword.trim().isEmpty()) return;
+        if (constraints.getCuisine() != null && !constraints.getCuisine().isEmpty()) return;
+        String trimmed = keyword.trim();
+        String canonical = CuisineCanonicalizer.canonicalize(trimmed);
+        if (!canonical.equals(trimmed)) { // 命中菜系映射表（如 沙县->小吃）
+            constraints.setCuisine(canonical);
+            constraints.setKeyword("");
+        }
     }
 
     /** Normalizes open-set preferences into canonical tags where a rule map consumes them; leaves open-ended phrases as-is. */

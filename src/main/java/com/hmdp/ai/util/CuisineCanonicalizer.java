@@ -134,6 +134,7 @@ public class CuisineCanonicalizer {
         CANONICAL_MAP.put("锅贴", "饺子馄饨");
         CANONICAL_MAP.put("小吃", "小吃");
         CANONICAL_MAP.put("沙县小吃", "小吃");
+        CANONICAL_MAP.put("沙县", "小吃");
         CANONICAL_MAP.put("卤味", "小吃");
         CANONICAL_MAP.put("凉皮", "小吃");
         CANONICAL_MAP.put("肉夹馍", "小吃");

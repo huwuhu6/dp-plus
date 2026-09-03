@@ -83,4 +83,53 @@ class ConstraintExtractorTest {
         assertEquals(java.util.Arrays.asList("cuisine", "keyword"), constraints.getClearedFields());
     }
 
+    @Test
+    void migratesCuisineKeywordToCuisineWhenModelPutsCuisineInKeyword() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"\\\",\\\"targetArea\\\":\\\"\\\",\\\"locationIntent\\\":\\\"CURRENT_DEVICE\\\",\\\"keyword\\\":\\\"沙县小吃\\\",\\\"cuisine\\\":\\\"\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":true,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("附近有没有沙县小吃");
+
+        assertEquals("小吃", constraints.getCuisine());
+        assertEquals("", constraints.getKeyword());
+    }
+
+    @Test
+    void keepsNamedShopKeywordWhenItIsNotACuisine() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"\\\",\\\"targetArea\\\":\\\"\\\",\\\"locationIntent\\\":\\\"CURRENT_DEVICE\\\",\\\"keyword\\\":\\\"闽师东北菜\\\",\\\"cuisine\\\":\\\"\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":true,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("去闽师东北菜吃");
+
+        assertEquals("闽师东北菜", constraints.getKeyword());
+        assertEquals("", constraints.getCuisine());
+    }
+
+    @Test
+    void doesNotMigrateKeywordWhenCuisineAlreadyExtracted() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"\\\",\\\"targetArea\\\":\\\"\\\",\\\"locationIntent\\\":\\\"CURRENT_DEVICE\\\",\\\"keyword\\\":\\\"沙县\\\",\\\"cuisine\\\":\\\"日料\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":true,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("日料店，附近有沙县吗");
+
+        assertEquals("日料", constraints.getCuisine());
+        assertEquals("沙县", constraints.getKeyword());
+    }
+
+
 }

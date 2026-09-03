@@ -851,4 +851,51 @@ class ConsumptionDecisionServiceTest {
         assertFalse(response.getUsedModel());
         assertEquals("未配置模型服务，本次已使用本地规则处理。", response.getDegradedReason());
     }
+    @Test
+    void keywordMatchesShopNameInHardFilter() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setKeyword("闽师东北菜");
+        Shop shop = new Shop();
+        shop.setName("闽师东北菜（大学城店）");
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, null,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void keywordMatchesCuisineTokenInHardFilter() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setKeyword("沙县");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("小吃");
+        Shop shop = new Shop();
+        shop.setName("普通小吃店");
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertTrue(matched);
+    }
+
+    @Test
+    void keywordWithNoNameOrCuisineMatchFailsHardFilter() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setKeyword("沙县");
+        AiShopProfile profile = new AiShopProfile();
+        profile.setCuisine("福州小吃,肉燕");
+        Shop shop = new Shop();
+        shop.setName("同利肉燕（上下杭店）");
+        shop.setOpenHours("10:00-22:00");
+
+        Boolean matched = ReflectionTestUtils.invokeMethod(service, "matchesHardConstraints", shop, profile,
+                new DecisionRequest(), constraints);
+
+        assertFalse(matched);
+    }
+
+
 }
