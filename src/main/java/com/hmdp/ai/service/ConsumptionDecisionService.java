@@ -151,8 +151,7 @@ public class ConsumptionDecisionService {
                     request.setLocationStatus("DECLINED");
                     constraints.setNearby(false);
                     constraints.setRadiusKm(-1D);
-                    constraints.getSoftPreferences().add("用户未提供位置，按全城搜索");
-                    removeHardConstraints(constraints, "附近", "距离", "位置");
+                    constraints.getSystemNotes().add("用户未提供位置，按全城搜索");
                     removeMissingInformation(constraints, "位置", "坐标", "起点");
                 } else if (followUp == null || followUp.getLatitude() == null || followUp.getLongitude() == null) {
                     throw new IllegalArgumentException("请提供 latitude 和 longitude 后继续附近搜索");
@@ -239,7 +238,6 @@ public class ConsumptionDecisionService {
             if ("DECLINED".equals(request.getLocationStatus())) {
                 constraints.setNearby(false);
                 constraints.setRadiusKm(-1D);
-                removeHardConstraints(constraints, "附近", "距离", "位置");
                 removeMissingInformation(constraints, "位置", "坐标", "起点");
                 log.info("[AI][session={}] event=LOCATION_SLOT_REUSED status=DECLINED searchScope=CITYWIDE", session.getId());
             }
@@ -254,9 +252,9 @@ public class ConsumptionDecisionService {
             updateSessionIfStatus(session, statusBeforeExecution);
             if (extractConstraints) {
                 recordStep(response, session.getId(), "EXTRACTING", "已提取预算、距离、菜系和场景偏好", start);
-                log.info("[AI][session={}] state=EXTRACTING action=CONSTRAINTS_PARSED cuisine={} budget={} radius={} nearby={} quiet={} avoidQueue={}",
+                log.info("[AI][session={}] state=EXTRACTING action=CONSTRAINTS_PARSED cuisine={} budget={} radius={} nearby={} preferences={}",
                         session.getId(), constraints.getCuisine(), constraints.getBudgetPerPerson(), constraints.getRadiusKm(),
-                        constraints.getNearby(), constraints.getQuiet(), constraints.getAvoidQueue());
+                        constraints.getNearby(), constraints.getPreferences());
             }
             if (requiresLocation(request)) {
                 return pauseForLocation(session, response, metrics, start, request);
@@ -348,28 +346,29 @@ public class ConsumptionDecisionService {
             removeMissingInformation(constraints, "位置", "坐标", "起点");
             if (Boolean.TRUE.equals(request.getUseLocationScope())) {
                 constraints.setNearby(true);
-                if (!constraints.getSoftPreferences().contains("已按会话位置在附近检索")) {
-                    constraints.getSoftPreferences().add("已按会话位置在附近检索");
+                if (!constraints.getSystemNotes().contains("已按会话位置在附近检索")) {
+                    constraints.getSystemNotes().add("已按会话位置在附近检索");
                 }
             }
         }
-        if (constraints.getOccasion().isEmpty() && isDateIntent(request.getQuery())) {
-            constraints.setOccasion("约会");
-            if (!constraints.getSoftPreferences().contains("根据伴侣表达识别为约会场景")) {
-                constraints.getSoftPreferences().add("根据伴侣表达识别为约会场景");
+        if (isDateIntent(request.getQuery())) {
+            if (!constraints.getPreferences().contains("约会")) constraints.getPreferences().add("约会");
+            if (!constraints.getSystemNotes().contains("根据伴侣表达识别为约会场景")) {
+                constraints.getSystemNotes().add("根据伴侣表达识别为约会场景");
             }
             removeMissingInformation(constraints, "场景", "约会");
         }
         if (isLightTasteIntent(request.getQuery())) {
-            if (!constraints.getSoftPreferences().contains("口味清淡")) {
-                constraints.getSoftPreferences().add("口味清淡");
+            if (!constraints.getPreferences().contains("清淡")) constraints.getPreferences().add("清淡");
+            if (!constraints.getSystemNotes().contains("根据原话识别为清淡口味")) {
+                constraints.getSystemNotes().add("根据原话识别为清淡口味");
             }
             removeMissingInformation(constraints, "口味", "饮食偏好");
         }
         if (request.getQuery().contains("晚上") && !EVENING_WITH_EXPLICIT_TIME.matcher(request.getQuery()).find()) {
             constraints.setArrivalTime("19:00");
-            if (!constraints.getSoftPreferences().contains("“晚上”按默认 19:00 解释")) {
-                constraints.getSoftPreferences().add("“晚上”按默认 19:00 解释");
+            if (!constraints.getSystemNotes().contains("“晚上”按默认 19:00 解释")) {
+                constraints.getSystemNotes().add("“晚上”按默认 19:00 解释");
             }
             removeMissingInformation(constraints, "时间", "晚上");
         }
@@ -390,21 +389,6 @@ public class ConsumptionDecisionService {
         constraints.setMissingInformation(filtered);
     }
 
-    private void removeHardConstraints(DecisionConstraints constraints, String... keywords) {
-        List<String> filtered = new ArrayList<>();
-        for (String item : constraints.getHardConstraints()) {
-            boolean matched = false;
-            for (String keyword : keywords) {
-                if (item.contains(keyword)) {
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched) filtered.add(item);
-        }
-        constraints.setHardConstraints(filtered);
-    }
-
     private boolean isDateIntent(String query) {
         return query.contains("约会") || query.contains("女朋友") || query.contains("男朋友") || query.contains("情侣");
     }
@@ -416,7 +400,7 @@ public class ConsumptionDecisionService {
     private void applyNearbyDefaultRadius(DecisionConstraints constraints, Long sessionId) {
         if (Boolean.TRUE.equals(constraints.getNearby()) && constraints.getRadiusKm() <= 0) {
             constraints.setRadiusKm(3D);
-            constraints.getSoftPreferences().add("“附近”按默认 3km 解释");
+            constraints.getSystemNotes().add("“附近”按默认 3km 解释");
             log.info("[AI][session={}] state=RETRIEVING action=NEARBY_DEFAULT_RADIUS radiusKm=3.0", sessionId);
         }
     }
@@ -456,17 +440,17 @@ public class ConsumptionDecisionService {
         if (!constraints.getCuisine().isEmpty()) {
             response.getOptions().add(new DecisionOption("RELAX_CUISINE", "保留其他条件，允许其他菜系"));
         }
-        if (Boolean.TRUE.equals(constraints.getQuiet())) {
+        if (constraints.getPreferences().contains("安静")) {
             response.getOptions().add(new DecisionOption("RELAX_QUIET", "保留其他条件，不再强制安静环境"));
         }
-        if (Boolean.TRUE.equals(constraints.getAvoidQueue())) {
+        if (constraints.getPreferences().contains("不排队")) {
             response.getOptions().add(new DecisionOption("ALLOW_QUEUE", "保留其他条件，允许存在排队风险"));
         }
         if (requiresLightTasteEvidence(constraints)) {
             response.getOptions().add(new DecisionOption("RELAX_LIGHT_TASTE", "保留其他条件，不再强制清淡口味"));
         }
-        if (constraints.getHardConstraints() != null && !constraints.getHardConstraints().isEmpty()) {
-            response.getOptions().add(new DecisionOption("RELAX_HARD_CONSTRAINTS", "保留地点和核心需求，移除额外硬性限制"));
+        if (hasRelaxablePreferenceTag(constraints)) {
+            response.getOptions().add(new DecisionOption("RELAX_HARD_CONSTRAINTS", "保留地点和核心需求，移除额外偏好要求"));
         }
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
         recordStep(response, session.getId(), "WAITING_RELAXATION", "候选为空，等待用户明确选择放宽项", startedAt);
@@ -490,9 +474,29 @@ public class ConsumptionDecisionService {
 
     private boolean hasRelaxableConstraints(DecisionConstraints constraints) {
         return (constraints.getBudgetPerPerson() > 0 && !isLocked(constraints, "budgetPerPerson")) || constraints.getRadiusKm() > 0
-                || hasText(constraints.getCuisine()) || Boolean.TRUE.equals(constraints.getQuiet())
-                || Boolean.TRUE.equals(constraints.getAvoidQueue()) || requiresLightTasteEvidence(constraints)
-                || (constraints.getHardConstraints() != null && !constraints.getHardConstraints().isEmpty());
+                || hasText(constraints.getCuisine()) || constraints.getPreferences().contains("安静")
+                || constraints.getPreferences().contains("不排队") || requiresLightTasteEvidence(constraints)
+                || hasRelaxablePreferenceTag(constraints);
+    }
+
+    /** True when preferences carry a tag beyond 安静/不排队/清淡 (which have dedicated relax options). */
+    private boolean hasRelaxablePreferenceTag(DecisionConstraints constraints) {
+        if (constraints.getPreferences() == null) return false;
+        for (String tag : constraints.getPreferences()) {
+            if (!"安静".equals(tag) && !"不排队".equals(tag) && !"清淡".equals(tag)) return true;
+        }
+        return false;
+    }
+
+    /** Removes open-ended preference tags, keeping the dedicated 安静/不排队/清淡 tags. */
+    private List<String> removeRelaxablePreferenceTags(List<String> preferences) {
+        List<String> kept = new ArrayList<>();
+        if (preferences != null) {
+            for (String tag : preferences) {
+                if ("安静".equals(tag) || "不排队".equals(tag) || "清淡".equals(tag)) kept.add(tag);
+            }
+        }
+        return kept;
     }
 
     private DecisionResponse finishPausedDecision(AiDecisionSession session, DecisionResponse response,
@@ -529,15 +533,14 @@ public class ConsumptionDecisionService {
             constraints.setBudgetPerPerson(constraints.getBudgetPerPerson() + 50);
         } else if (command == DecisionCommand.RELAX_CUISINE && !constraints.getCuisine().isEmpty()) {
             constraints.setCuisine("");
-        } else if (command == DecisionCommand.RELAX_QUIET && Boolean.TRUE.equals(constraints.getQuiet())) {
-            constraints.setQuiet(false);
-        } else if (command == DecisionCommand.ALLOW_QUEUE && Boolean.TRUE.equals(constraints.getAvoidQueue())) {
-            constraints.setAvoidQueue(false);
+        } else if (command == DecisionCommand.RELAX_QUIET && constraints.getPreferences().contains("安静")) {
+            constraints.getPreferences().remove("安静");
+        } else if (command == DecisionCommand.ALLOW_QUEUE && constraints.getPreferences().contains("不排队")) {
+            constraints.getPreferences().remove("不排队");
         } else if (command == DecisionCommand.RELAX_LIGHT_TASTE && requiresLightTasteEvidence(constraints)) {
-            constraints.getSoftPreferences().remove("口味清淡");
-        } else if (command == DecisionCommand.RELAX_HARD_CONSTRAINTS
-                && constraints.getHardConstraints() != null && !constraints.getHardConstraints().isEmpty()) {
-            constraints.setHardConstraints(new ArrayList<>());
+            constraints.getPreferences().remove("清淡");
+        } else if (command == DecisionCommand.RELAX_HARD_CONSTRAINTS && hasRelaxablePreferenceTag(constraints)) {
+            constraints.setPreferences(removeRelaxablePreferenceTags(constraints.getPreferences()));
         } else {
             throw new IllegalArgumentException("Decision Command 无效或不适用于当前约束: " + command);
         }
@@ -777,7 +780,7 @@ public class ConsumptionDecisionService {
     }
 
     private boolean requiresLightTasteEvidence(DecisionConstraints constraints) {
-        return constraints.getSoftPreferences().contains("口味清淡");
+        return constraints.getPreferences() != null && constraints.getPreferences().contains("清淡");
     }
 
     private boolean hasLightTasteEvidence(List<AiReviewDocument> documents) {
@@ -870,9 +873,9 @@ public class ConsumptionDecisionService {
         if (requiresLightTasteEvidence(constraints) && hasLightTasteEvidence(documents)) {
             item.getMatchedReasons().add("评价证据表明口味清淡");
         }
-        if (profile != null && !constraints.getOccasion().isEmpty() && contains(profile.getSceneTags(), constraints.getOccasion())) {
+        if (profile != null && constraints.getPreferences().contains("约会") && contains(profile.getSceneTags(), "约会")) {
             score += 12D;
-            item.getMatchedReasons().add("场景标签包含" + constraints.getOccasion());
+            item.getMatchedReasons().add("场景标签包含约会");
         }
         if (request.getLatitude() != null && request.getLongitude() != null) {
             double distance = distanceKm(request.getLatitude(), request.getLongitude(), shop.getY(), shop.getX());
@@ -880,11 +883,11 @@ public class ConsumptionDecisionService {
             if (constraints.getRadiusKm() > 0) score += Math.max(0D, 20D * (1D - distance / constraints.getRadiusKm()));
             item.getMatchedReasons().add("距离约 " + round(distance) + " km");
         }
-        if (profile != null && Boolean.TRUE.equals(constraints.getQuiet()) && contains(profile.getAmbienceTags(), "安静")) {
+        if (profile != null && constraints.getPreferences().contains("安静") && contains(profile.getAmbienceTags(), "安静")) {
             score += 12D;
             item.getMatchedReasons().add("环境标签包含安静");
         }
-        if (profile != null && Boolean.TRUE.equals(constraints.getAvoidQueue()) && "LOW".equalsIgnoreCase(profile.getQueueLevel())) {
+        if (profile != null && constraints.getPreferences().contains("不排队") && "LOW".equalsIgnoreCase(profile.getQueueLevel())) {
             score += 8D;
             item.getMatchedReasons().add("排队风险低");
         }
@@ -956,8 +959,8 @@ public class ConsumptionDecisionService {
     }
 
     private boolean containsDemoPlaceResolution(DecisionConstraints constraints) {
-        for (String preference : constraints.getSoftPreferences()) {
-            if (preference.startsWith("演示地点“")) return true;
+        for (String note : constraints.getSystemNotes()) {
+            if (note.startsWith("演示地点“")) return true;
         }
         return false;
     }

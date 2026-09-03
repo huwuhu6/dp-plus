@@ -29,7 +29,7 @@ public class ConversationCriteriaMerger {
         applyClearedFields(result, merged, delta, text);
         if (isDemandReplacement(text, previous, delta)) {
             clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
-            clear(result, "hardConstraints", () -> merged.setHardConstraints(new ArrayList<String>()));
+            clear(result, "preferences", () -> merged.setPreferences(new ArrayList<String>()));
             clear(result, "lockedConstraints", () -> merged.setLockedConstraints(new java.util.HashSet<String>()));
             clear(result, "keyword", () -> merged.setKeyword(""));
         }
@@ -55,12 +55,12 @@ public class ConversationCriteriaMerger {
         }
         if (delta.getRadiusKm() != null && delta.getRadiusKm() > 0) replace(result, "radiusKm", String.valueOf(merged.getRadiusKm()), String.valueOf(delta.getRadiusKm()), () -> merged.setRadiusKm(delta.getRadiusKm()));
         if (hasText(delta.getArrivalTime())) replace(result, "arrivalTime", merged.getArrivalTime(), delta.getArrivalTime(), () -> merged.setArrivalTime(delta.getArrivalTime()));
-        if (hasText(delta.getOccasion())) replace(result, "occasion", merged.getOccasion(), delta.getOccasion(), () -> merged.setOccasion(delta.getOccasion()));
-        if (Boolean.TRUE.equals(delta.getQuiet())) replace(result, "quiet", String.valueOf(merged.getQuiet()), "true", () -> merged.setQuiet(true));
-        if (Boolean.TRUE.equals(delta.getAvoidQueue())) replace(result, "avoidQueue", String.valueOf(merged.getAvoidQueue()), "true", () -> merged.setAvoidQueue(true));
         if (Boolean.TRUE.equals(delta.getNearby())) replace(result, "nearby", String.valueOf(merged.getNearby()), "true", () -> merged.setNearby(true));
-        append(result, "hardConstraints", merged.getHardConstraints(), delta.getHardConstraints());
-        append(result, "softPreferences", merged.getSoftPreferences(), delta.getSoftPreferences());
+        // preferences: append explicit new tags (dedup); explicit negation removes the tag.
+        append(result, "preferences", merged.getPreferences(), delta.getPreferences());
+        if (containsAny(text, "不要安静", "不用安静", "不用太安静", "别太安静")) removePreference(result, merged, "安静");
+        if (containsAny(text, "排队也行", "不用避开排队", "不想避开排队")) removePreference(result, merged, "不排队");
+        if (containsAny(text, "不要辣", "不吃辣", "清淡", "少油", "不油腻")) addPreference(result, merged, "清淡");
 
         if (containsAny(text, "不限菜系", "什么都行", "随便吃", "不限制菜系")) clear(result, "cuisine", () -> merged.setCuisine(""));
         if (containsAny(text, "预算不限", "不限制预算", "人均不限")) {
@@ -71,13 +71,9 @@ public class ConversationCriteriaMerger {
             clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
             clear(result, "nearby", () -> merged.setNearby(false));
         }
-        if (containsAny(text, "不要安静", "不用安静")) clear(result, "quiet", () -> merged.setQuiet(false));
-        if (containsAny(text, "排队也行", "不用避开排队")) clear(result, "avoidQueue", () -> merged.setAvoidQueue(false));
-        if (containsAny(text, "不要辣", "不吃辣", "清淡", "少油")) addPreference(merged, "清淡/不辣");
         applyRelativeConstraints(result, merged, text, candidatePool, focusedShopId);
 
-        merged.setHardConstraints(unique(merged.getHardConstraints()));
-        merged.setSoftPreferences(unique(merged.getSoftPreferences()));
+        merged.setPreferences(unique(merged.getPreferences()));
         return result;
     }
 
@@ -147,10 +143,9 @@ public class ConversationCriteriaMerger {
         target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword()); target.setLocationIntent(source.getLocationIntent());
         target.setCuisine(source.getCuisine()); target.setBudgetPerPerson(source.getBudgetPerPerson());
         target.setRadiusKm(source.getRadiusKm()); target.setNearby(source.getNearby());
-        target.setArrivalTime(source.getArrivalTime()); target.setOccasion(source.getOccasion());
-        target.setQuiet(source.getQuiet()); target.setAvoidQueue(source.getAvoidQueue());
-        target.setHardConstraints(new ArrayList<String>(source.getHardConstraints() == null ? new ArrayList<String>() : source.getHardConstraints()));
-        target.setSoftPreferences(new ArrayList<String>(source.getSoftPreferences() == null ? new ArrayList<String>() : source.getSoftPreferences()));
+        target.setArrivalTime(source.getArrivalTime());
+        target.setPreferences(new ArrayList<String>(source.getPreferences() == null ? new ArrayList<String>() : source.getPreferences()));
+        target.setSystemNotes(new ArrayList<String>(source.getSystemNotes() == null ? new ArrayList<String>() : source.getSystemNotes()));
         target.setMissingInformation(new ArrayList<String>(source.getMissingInformation() == null ? new ArrayList<String>() : source.getMissingInformation()));
         target.setLockedConstraints(new java.util.HashSet<String>(source.getLockedConstraints() == null ? new java.util.HashSet<String>() : source.getLockedConstraints()));
         return target;
@@ -174,16 +169,12 @@ public class ConversationCriteriaMerger {
                     clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
                 } else if ("nearby".equals(field) && Boolean.TRUE.equals(merged.getNearby())) {
                     clear(result, "nearby", () -> merged.setNearby(false));
-                } else if ("quiet".equals(field) && Boolean.TRUE.equals(merged.getQuiet())) {
-                    clear(result, "quiet", () -> merged.setQuiet(false));
-                } else if ("avoidQueue".equals(field) && Boolean.TRUE.equals(merged.getAvoidQueue())) {
-                    clear(result, "avoidQueue", () -> merged.setAvoidQueue(false));
                 } else if ("targetCity".equals(field) && hasText(merged.getTargetCity())) {
                     clear(result, "targetCity", () -> merged.setTargetCity(""));
                 } else if ("targetArea".equals(field) && hasText(merged.getTargetArea())) {
                     clear(result, "targetArea", () -> merged.setTargetArea(""));
-                } else if ("occasion".equals(field) && hasText(merged.getOccasion())) {
-                    clear(result, "occasion", () -> merged.setOccasion(""));
+                } else if ("preferences".equals(field) && merged.getPreferences() != null && !merged.getPreferences().isEmpty()) {
+                    clear(result, "preferences", () -> merged.setPreferences(new ArrayList<String>()));
                 } else if ("arrivalTime".equals(field) && hasText(merged.getArrivalTime())) {
                     clear(result, "arrivalTime", () -> merged.setArrivalTime(""));
                 }
@@ -202,10 +193,9 @@ public class ConversationCriteriaMerger {
         if (hasText(previous.getLocationIntent())) result.getInherited().add("locationIntent=" + previous.getLocationIntent());
         if (hasText(previous.getKeyword())) result.getInherited().add("keyword=" + previous.getKeyword());
         if (hasText(previous.getCuisine())) result.getInherited().add("cuisine=" + previous.getCuisine());
-        if (hasText(previous.getTargetCity())) result.getInherited().add("targetCity=" + previous.getTargetCity());
         if (previous.getBudgetPerPerson() != null && previous.getBudgetPerPerson() > 0) result.getInherited().add("budgetPerPerson=" + previous.getBudgetPerPerson());
         if (previous.getRadiusKm() != null && previous.getRadiusKm() > 0) result.getInherited().add("radiusKm=" + previous.getRadiusKm());
-        if (hasText(previous.getOccasion())) result.getInherited().add("occasion=" + previous.getOccasion());
+        if (previous.getPreferences() != null && !previous.getPreferences().isEmpty()) result.getInherited().add("preferences=" + previous.getPreferences());
     }
 
     private void replace(CriteriaMergeResult result, String field, String before, String after, Runnable mutation) {
@@ -218,26 +208,28 @@ public class ConversationCriteriaMerger {
         if (!result.getCleared().contains(field)) result.getCleared().add(field);
     }
 
-    private void clearWhenPresent(CriteriaMergeResult result, String field, String before, Runnable mutation) {
-        if (!hasText(before)) return;
-        clear(result, field, mutation);
-    }
-
     private void append(CriteriaMergeResult result, String field, List<String> target, List<String> additions) {
         if (additions == null || additions.isEmpty()) return;
-        if (target == null) target = new ArrayList<String>();
         for (String item : additions) {
             if (!hasText(item) || target.contains(item)) continue;
             target.add(item);
             result.getAppended().add(field + ":" + item);
         }
-        if ("hardConstraints".equals(field)) result.getConstraints().setHardConstraints(target);
-        else result.getConstraints().setSoftPreferences(target);
     }
 
-    private void addPreference(DecisionConstraints constraints, String preference) {
-        if (constraints.getSoftPreferences() == null) constraints.setSoftPreferences(new ArrayList<String>());
-        constraints.getSoftPreferences().add(preference);
+    private void addPreference(CriteriaMergeResult result, DecisionConstraints constraints, String preference) {
+        if (constraints.getPreferences() == null) constraints.setPreferences(new ArrayList<String>());
+        if (!constraints.getPreferences().contains(preference)) {
+            constraints.getPreferences().add(preference);
+            result.getAppended().add("preferences:" + preference);
+        }
+    }
+
+    private void removePreference(CriteriaMergeResult result, DecisionConstraints constraints, String preference) {
+        if (constraints.getPreferences() == null) return;
+        if (constraints.getPreferences().remove(preference)) {
+            result.getCleared().add("preferences:" + preference);
+        }
     }
 
     private void unlockBudgetWhenExplicitlyOverridden(CriteriaMergeResult result, DecisionConstraints constraints) {

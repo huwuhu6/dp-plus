@@ -47,8 +47,8 @@ public class ResultEvaluationService {
         double before = constraints.getRadiusKm();
         double after = aiProperties.getResultEvaluation().getAutoExpandedNearbyRadiusKm();
         constraints.setRadiusKm(after);
-        constraints.getSoftPreferences().remove(DEFAULT_NEARBY_MARKER);
-        constraints.getSoftPreferences().add("系统默认附近范围已从 " + format(before) + "km 扩展至 " + format(after) + "km");
+        constraints.getSystemNotes().remove(DEFAULT_NEARBY_MARKER);
+        constraints.getSystemNotes().add("系统默认附近范围已从 " + format(before) + "km 扩展至 " + format(after) + "km");
         result.setAutomatic(true);
         result.setOutcome("AUTO_RELAXED");
         result.setReason("未指定具体距离时，默认附近范围内无结果；仅扩大系统默认搜索半径。");
@@ -71,7 +71,7 @@ public class ResultEvaluationService {
         if (request.getLatitude() == null || request.getLongitude() == null) return false;
         if (constraints.getRadiusKm() == null || constraints.getRadiusKm() <= 0D) return false;
         if (constraints.getRadiusKm() >= policy.getAutoExpandedNearbyRadiusKm()) return false;
-        return constraints.getSoftPreferences().contains(DEFAULT_NEARBY_MARKER);
+        return constraints.getSystemNotes().contains(DEFAULT_NEARBY_MARKER);
     }
 
     private List<String> preservedHardConstraints(DecisionRequest request, DecisionConstraints constraints) {
@@ -83,7 +83,7 @@ public class ResultEvaluationService {
         if (hasText(constraints.getCuisine())) values.add("cuisine=" + constraints.getCuisine());
         if (constraints.getBudgetPerPerson() != null && constraints.getBudgetPerPerson() > 0) values.add("budgetPerPerson=" + constraints.getBudgetPerPerson());
         if (hasText(constraints.getArrivalTime())) values.add("arrivalTime=" + constraints.getArrivalTime());
-        values.addAll(constraints.getHardConstraints());
+        if (constraints.getPreferences() != null) values.addAll(constraints.getPreferences());
         return values;
     }
 

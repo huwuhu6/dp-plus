@@ -802,8 +802,8 @@ public class AiConversationEvaluationService {
         }
         if (expected.containsKey("hardConstraintsEmpty")) {
             boolean expectedEmpty = Boolean.parseBoolean(String.valueOf(expected.get("hardConstraintsEmpty")));
-            boolean actualEmpty = memory.getActiveCriteria() == null || memory.getActiveCriteria().getHardConstraints() == null
-                    || memory.getActiveCriteria().getHardConstraints().isEmpty();
+            boolean actualEmpty = memory.getActiveCriteria() == null || memory.getActiveCriteria().getPreferences() == null
+                    || memory.getActiveCriteria().getPreferences().isEmpty();
             if (expectedEmpty != actualEmpty) return false;
         }
         return true;

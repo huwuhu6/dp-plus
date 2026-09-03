@@ -138,7 +138,7 @@ class ConsumptionDecisionServiceTest {
         DecisionRequest request = new DecisionRequest();
         request.setQuery("和女朋友吃西餐");
         ReflectionTestUtils.invokeMethod(service, "reconcileRequestFacts", constraints, request);
-        assertEquals("约会", constraints.getOccasion());
+        assertTrue(constraints.getPreferences().contains("约会"));
 
         Shop shop = new Shop();
         shop.setId(4L);
@@ -470,8 +470,8 @@ class ConsumptionDecisionServiceTest {
     @Test
     void savedLocationScopeEnforcesNearbyRadiusForContextualNewDecision() {
         DecisionConstraints constraints = new DecisionConstraints();
-        constraints.setOccasion("约会");
-        constraints.setQuiet(true);
+        constraints.getPreferences().add("约会");
+        constraints.getPreferences().add("安静");
         when(constraintExtractor.extract("还有没有适合约会且安静的地方")).thenReturn(constraints);
         when(shopMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(profileMapper.selectList(any())).thenReturn(Collections.emptyList());
@@ -488,7 +488,7 @@ class ConsumptionDecisionServiceTest {
         assertTrue(response.getConstraints().getNearby());
         assertEquals(5D, response.getConstraints().getRadiusKm());
         assertTrue(response.getRelaxation().getAutomatic());
-        assertTrue(response.getConstraints().getSoftPreferences().contains("已按会话位置在附近检索"));
+        assertTrue(response.getConstraints().getSystemNotes().contains("已按会话位置在附近检索"));
     }
 
     @Test
@@ -681,8 +681,6 @@ class ConsumptionDecisionServiceTest {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setNearby(true);
         constraints.setCuisine("日料");
-        constraints.getHardConstraints().add("附近");
-        constraints.getHardConstraints().add("日料");
         constraints.getMissingInformation().add("具体位置/所在地点");
         when(constraintExtractor.extract("找附近的日料")).thenReturn(constraints);
 
@@ -714,9 +712,8 @@ class ConsumptionDecisionServiceTest {
         assertEquals("COMPLETED", completed.getStatus());
         assertFalse(completed.getConstraints().getNearby());
         assertEquals(-1D, completed.getConstraints().getRadiusKm());
-        assertFalse(completed.getConstraints().getHardConstraints().contains("附近"));
         assertFalse(completed.getConstraints().getMissingInformation().contains("具体位置/所在地点"));
-        assertTrue(completed.getConstraints().getSoftPreferences().contains("用户未提供位置，按全城搜索"));
+        assertTrue(completed.getConstraints().getSystemNotes().contains("用户未提供位置，按全城搜索"));
     }
 
     @Test
@@ -789,9 +786,9 @@ class ConsumptionDecisionServiceTest {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setCuisine("火锅");
         constraints.setBudgetPerPerson(100);
-        constraints.setOccasion("约会");
-        constraints.setQuiet(true);
-        constraints.setAvoidQueue(true);
+        constraints.getPreferences().add("约会");
+        constraints.getPreferences().add("安静");
+        constraints.getPreferences().add("不排队");
 
         DecisionRequest request = new DecisionRequest();
 

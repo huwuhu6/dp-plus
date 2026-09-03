@@ -1807,6 +1807,19 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **演进方向**：#33（keyword 参与确定性精确匹配 shopName/cuisine/review 子串，无命中→hard=0→WAITING_RELAXATION；远期下推 ES/Milvus sparse + Hybrid Search dense+sparse+metadata filter+RRF——业界 Redis/Azure/MongoDB 一致）；#34（路由收窄：dialogPhase=RECOMMENDING + "换品类/别的吃的" → 强制 START_DECISION）；#36（重构评测构造真实无结果场景）。softPreferences 双轨来源（LLM 提取弱 + `reconcileRequestFacts` 系统规则注入，是"解释笔记"非"软约束执行器"，软口味偏好仅"清淡"被消费）= 已知空白（见待修 #35）。
 
+
+### 15. DecisionConstraints 字段职责对齐重构（#37，软偏好开放集建模，2026-09-03）
+
+【背景】17 字段盘点发现 6 处设计债：occasion 为 4 个约会评测 case 驱动却场景开放集（枚举必爆炸）；quiet/avoidQueue 是属性标签却单独布尔字段；清淡仅 hardcode 一条而辣/甜/重口无路径；hardConstraints 名不副实（matchesHardConstraints 不含它，仅生成 RELAX_HARD_CONSTRAINTS 松弛项，且 case 1210 实存 [适合聚餐,有大桌] 与'聚会取消、一个人简餐'直接矛盾 = LLM 未理解否定）；softPreferences 混三类职责（用户偏好/系统推导/系统解释）；开放偏好无语义消费通道。业界依据：Rasa categorical/text 槽位分层 + other 兜底、arXiv 2507.01594 non-categorical free value、KDD20 Graph-CRS 属性开放描述、arXiv 2605.29141 硬约束确定性过滤 vs 软偏好排序。
+
+【方案（决策定案）】① CuisineCanonicalizer 枚举 5→30 个 canonical（参考美团 app 一级分类粒度：地方菜系 川/湘/粤/江浙/东北/西北/闽/鲁/徽/云贵/湖北 + 火锅/烧烤/日料/韩餐/西餐/东南亚/港式 + 快餐简餐/面食/粉面/饺子馄饨/小吃 + 自助餐/海鲜/素食/咖啡/甜品饮品/面包烘焙 + 其他兜底）；② DecisionConstraints 删 occasion/quiet/avoidQueue/hardConstraints/softPreferences 5 字段，加 preferences: List<String>（开放自然语言标签）+ systemNotes: List<String>（系统解释笔记），nearby 保留原名；③ 加 @JsonIgnoreProperties(ignoreUnknown=true) 兼容存量 constraintsJson；④ ConstraintExtractor schema/prompt：preferences 开放集提示 + cuisine 枚举提示 + 否定语义规则（聚会取消不入 preferences）；⑤ Merger：preferences append 去重/显式否定移除/继承；⑥ 消费端规则表（约会→sceneTags+12、安静→ambienceTags+12、不排队→queueLevel+8、清淡→review 文本证据+松弛项），reconcileRequestFacts 系统注入改 systemNotes，RELAX_HARD_CONSTRAINTS 语义改 hasRelaxablePreferenceTag 接管（移除非安静/不排队/清淡的开放标签）；⑦ 评测断言改 preferences 集合比对。
+
+【关键 Trade-off（面试可讲）】① 偏好不硬过滤——数据不完备（ambienceTags 稀疏）硬过滤必误杀 + 用户软偏好是'最好'非'必须'，错误成本量级不同（硬过滤失败=0 结果体验崩溃，排序失败=排名略偏）；② preferences 用 List<String> 而非单个 String——确定性消费（安静→加分、清淡→证据）需要可判定性（contains 某标签），单 String 只能 contains() 会误伤（不喜欢太辣误中辣）；③ 开放偏好语义通道——未命中规则表的标签（氛围/性价比/拍照）拼入 semanticQuery（跨轮补语义），但不硬过滤；④ 硬过滤先于语义召回、召回锁死在 hardMatched 白名单内——语义 query 里的偏好只影响白名单内排序，不会挤掉预算/菜系等硬信号（本项目确定性过滤与语义排序是干净分离的）。
+
+【验证】全量 mvn -q test 246 通过（3 skipped）；conversation-v1 评测 run71 提交 = 18/20 与重构前持平无回归；case1 确认 systemNotes 承接'已按会话位置在附近检索'/''附近'按默认 3km 解释'注入、case31 确认 preferences=[约会] 提取+场景加分正确；2 个失败均既有（case30 EXPLICIT_DESTINATION_OVERRIDES_DEVICE_LOCATION 自 run69、case47 本轮 LLM 路由波动 GENERAL_CHAT——decisionSource=MODEL，非本次引入）。实施坑：中文文件 Edit 工具 Native execution failed → 走 Python io.open(utf-8) 精确替换；replace 脚本误把 removeHardConstraints 替换成 removeMissingInformation 副本导致重复定义 + 一处残留 body（编译期 Javac 抓到，修复）；JSON 测试串替换丢逗号 → 反序列化失败静默走 fallback（测试碰巧过），修逗号后模型路径真被测。
+
+【演进方向】① #33 keyword 边界（schema 收紧 + canonicalize 后置迁移 + keyword 确定性精确匹配 + Hybrid Search）——#37 已先建好 preferences 收编描述型，是 #33 前置；② case47 评测期望 vs LLM 路由波动（GENERAL_CHAT/START_DECISION 不稳定）需确定性断言（#36）；③ 枚举集合会随数据增长继续扩充，注意其他兜底吸收新品类。
+
 ### 明确"不做清单"
 
 以下方向已评估，当前阶段不引入：

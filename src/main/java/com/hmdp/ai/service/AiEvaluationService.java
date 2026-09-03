@@ -324,10 +324,14 @@ public class AiEvaluationService {
         if (expected.getRadiusKm() > 0 && Math.abs(expected.getRadiusKm() - actual.getRadiusKm()) > 0.01D) mismatches.add("radiusKm");
         if (Boolean.TRUE.equals(expected.getNearby()) && !Boolean.TRUE.equals(actual.getNearby())) mismatches.add("nearby");
         if (!expected.getArrivalTime().isEmpty() && !expected.getArrivalTime().equals(actual.getArrivalTime())) mismatches.add("arrivalTime");
-        if (!expected.getOccasion().isEmpty() && !expected.getOccasion().equals(actual.getOccasion())) mismatches.add("occasion");
-        if (Boolean.TRUE.equals(expected.getQuiet()) && !Boolean.TRUE.equals(actual.getQuiet())) mismatches.add("quiet");
-        if (Boolean.TRUE.equals(expected.getAvoidQueue()) && !Boolean.TRUE.equals(actual.getAvoidQueue())) mismatches.add("avoidQueue");
+        if (!expected.getPreferences().isEmpty() && !sameStringSet(expected.getPreferences(), actual.getPreferences())) mismatches.add("preferences");
         return mismatches.isEmpty() ? null : String.join(",", mismatches);
+    }
+
+    private boolean sameStringSet(List<String> a, List<String> b) {
+        List<String> left = a == null ? new ArrayList<String>() : a;
+        List<String> right = b == null ? new ArrayList<String>() : b;
+        return left.size() == right.size() && left.containsAll(right);
     }
 
     private void finishRun(AiEvaluationRun run, List<AiEvaluationCaseResult> results) {

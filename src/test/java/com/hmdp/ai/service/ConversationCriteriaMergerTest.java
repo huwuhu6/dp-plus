@@ -19,7 +19,7 @@ class ConversationCriteriaMergerTest {
         previous.setBudgetPerPerson(200);
         previous.setRadiusKm(3D);
         previous.setNearby(true);
-        previous.setOccasion("聚餐");
+        previous.getPreferences().add("聚餐");
 
         DecisionConstraints delta = new DecisionConstraints();
         delta.setCuisine("粤菜");
@@ -29,7 +29,7 @@ class ConversationCriteriaMergerTest {
         assertEquals(200, result.getConstraints().getBudgetPerPerson());
         assertEquals(3D, result.getConstraints().getRadiusKm());
         assertTrue(result.getConstraints().getNearby());
-        assertTrue(result.getConstraints().getSoftPreferences().contains("清淡/不辣"));
+        assertTrue(result.getConstraints().getPreferences().contains("清淡"));
         assertTrue(result.getReplaced().stream().anyMatch(item -> item.startsWith("cuisine:")));
         assertFalse(result.getInherited().isEmpty());
     }
@@ -55,16 +55,17 @@ class ConversationCriteriaMergerTest {
     @Test
     void appendsNewLabelsWithoutDuplicatingExistingPreferences() {
         DecisionConstraints previous = new DecisionConstraints();
-        previous.setHardConstraints(java.util.Arrays.asList("必吃榜"));
-        previous.setSoftPreferences(java.util.Arrays.asList("安静"));
+        previous.getPreferences().add("必吃榜");
+        previous.getPreferences().add("安静");
         DecisionConstraints delta = new DecisionConstraints();
-        delta.setHardConstraints(java.util.Arrays.asList("必吃榜", "有停车位"));
-        delta.setSoftPreferences(java.util.Arrays.asList("安静", "有包厢"));
+        delta.getPreferences().add("必吃榜");
+        delta.getPreferences().add("有停车位");
+        delta.getPreferences().add("安静");
+        delta.getPreferences().add("有包厢");
 
         CriteriaMergeResult result = merger.merge(previous, delta, "有停车位和包厢吗");
 
-        assertEquals(java.util.Arrays.asList("必吃榜", "有停车位"), result.getConstraints().getHardConstraints());
-        assertEquals(java.util.Arrays.asList("安静", "有包厢"), result.getConstraints().getSoftPreferences());
+        assertEquals(java.util.Arrays.asList("必吃榜", "安静", "有停车位", "有包厢"), result.getConstraints().getPreferences());
         assertEquals(2, result.getAppended().size());
     }
 

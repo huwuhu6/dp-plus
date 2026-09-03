@@ -142,6 +142,13 @@ class CuisineCanonicalizerTest {
         assertTrue(values.contains("西餐"));
         assertTrue(values.contains("港式"));
         assertTrue(values.contains("火锅"));
-        assertEquals(5, values.size());
+        assertTrue(values.contains("川菜"));
+        assertTrue(values.contains("湘菜"));
+        assertTrue(values.contains("快餐简餐"));
+        assertTrue(values.contains("面食"));
+        assertTrue(values.contains("小吃"));
+        assertTrue(values.contains("咖啡"));
+        assertTrue(values.contains("其他"));
+        assertTrue(values.size() >= 20);
     }
 }

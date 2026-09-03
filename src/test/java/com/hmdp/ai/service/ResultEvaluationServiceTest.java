@@ -43,7 +43,7 @@ class ResultEvaluationServiceTest {
     void neverExpandsAnExplicitRadiusOrOtherHardConstraint() {
         DecisionRequest request = nearbyRequest();
         DecisionConstraints constraints = defaultNearbyConstraints();
-        constraints.getSoftPreferences().clear();
+        constraints.getSystemNotes().clear();
 
         RelaxationInfo result = service.evaluateStrictResult(request, constraints, 0);
         boolean applied = service.applySafeAutomaticRelaxation(request, constraints, result);
@@ -67,7 +67,7 @@ class ResultEvaluationServiceTest {
         constraints.setRadiusKm(3D);
         constraints.setCuisine("火锅");
         constraints.setBudgetPerPerson(150);
-        constraints.getSoftPreferences().add("“附近”按默认 3km 解释");
+        constraints.getSystemNotes().add("“附近”按默认 3km 解释");
         return constraints;
     }
 }

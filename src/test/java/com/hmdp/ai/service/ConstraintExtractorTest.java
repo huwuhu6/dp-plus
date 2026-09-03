@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -20,7 +21,7 @@ class ConstraintExtractorTest {
         ConstraintExtractor extractor = new ConstraintExtractor();
         ReflectionTestUtils.setField(extractor, "aiClient", client);
         ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
-        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"重庆\\\",\\\"targetArea\\\":\\\"解放碑\\\",\\\"keyword\\\":\\\"火锅\\\",\\\"cuisine\\\":\\\"港式茶餐厅\\\",\\\"budgetPerPerson\\\":100,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"occasion\\\":\\\"情侣约会\\\",\\\"quiet\\\":false,\\\"avoidQueue\\\":false,\\\"hardConstraints\\\":[],\\\"softPreferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"重庆\\\",\\\"targetArea\\\":\\\"解放碑\\\",\\\"keyword\\\":\\\"火锅\\\",\\\"cuisine\\\":\\\"港式茶餐厅\\\",\\\"budgetPerPerson\\\":100,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[\\\"情侣约会\\\"],\\\"missingInformation\\\":[]}\"}}]}}]}");
         when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
 
         DecisionConstraints constraints = extractor.extract("人均100的港式茶餐厅");
@@ -30,7 +31,7 @@ class ConstraintExtractorTest {
         assertEquals("解放碑", constraints.getTargetArea());
         assertEquals("火锅", constraints.getKeyword());
         assertEquals(Integer.valueOf(100), constraints.getBudgetPerPerson());
-        assertEquals("约会", constraints.getOccasion());
+        assertTrue(constraints.getPreferences().contains("约会"));
     }
 
     @Test
@@ -56,7 +57,7 @@ class ConstraintExtractorTest {
         ConstraintExtractor extractor = new ConstraintExtractor();
         ReflectionTestUtils.setField(extractor, "aiClient", client);
         ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
-        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"locationIntent\\\":\\\"CURRENT_DEVICE\\\",\\\"targetCity\\\":\\\"北京\\\",\\\"targetArea\\\":\\\"朝阳区\\\",\\\"keyword\\\":\\\"烧烤\\\",\\\"cuisine\\\":\\\"烧烤\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":true,\\\"arrivalTime\\\":\\\"\\\",\\\"occasion\\\":\\\"\\\",\\\"quiet\\\":false,\\\"avoidQueue\\\":false,\\\"hardConstraints\\\":[],\\\"softPreferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"locationIntent\\\":\\\"CURRENT_DEVICE\\\",\\\"targetCity\\\":\\\"北京\\\",\\\"targetArea\\\":\\\"朝阳区\\\",\\\"keyword\\\":\\\"烧烤\\\",\\\"cuisine\\\":\\\"烧烤\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":true,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[],\\\"missingInformation\\\":[]}\"}}]}}]}");
         when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
 
         DecisionConstraints constraints = extractor.extract("看看我附近的烧烤");
@@ -73,7 +74,7 @@ class ConstraintExtractorTest {
         ConstraintExtractor extractor = new ConstraintExtractor();
         ReflectionTestUtils.setField(extractor, "aiClient", client);
         ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
-        JsonNode modelResponse = objectMapper.readTree("{\"choices\": [{\"message\": {\"tool_calls\": [{\"function\": {\"arguments\": \"{\\\"targetCity\\\": \\\"\\\", \\\"targetArea\\\": \\\"\\\", \\\"locationIntent\\\": \\\"UNSPECIFIED\\\", \\\"keyword\\\": \\\"\\\", \\\"cuisine\\\": \\\"\\\", \\\"budgetPerPerson\\\": -1, \\\"radiusKm\\\": -1, \\\"nearby\\\": false, \\\"arrivalTime\\\": \\\"\\\", \\\"occasion\\\": \\\"\\\", \\\"quiet\\\": false, \\\"avoidQueue\\\": false, \\\"hardConstraints\\\": [], \\\"softPreferences\\\": [], \\\"missingInformation\\\": [], \\\"clearedFields\\\": [\\\"cuisine\\\", \\\"keyword\\\"]}\"}}]}}]}");
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\": [{\"message\": {\"tool_calls\": [{\"function\": {\"arguments\": \"{\\\"targetCity\\\": \\\"\\\", \\\"targetArea\\\": \\\"\\\", \\\"locationIntent\\\": \\\"UNSPECIFIED\\\", \\\"keyword\\\": \\\"\\\", \\\"cuisine\\\": \\\"\\\", \\\"budgetPerPerson\\\": -1, \\\"radiusKm\\\": -1, \\\"nearby\\\": false, \\\"arrivalTime\\\": \\\"\\\", \\\"preferences\\\": [], \\\"missingInformation\\\": [], \\\"clearedFields\\\": [\\\"cuisine\\\", \\\"keyword\\\"]}\"}}]}}]}");
 
         when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
 
