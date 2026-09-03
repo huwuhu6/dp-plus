@@ -62,6 +62,10 @@ public class DecisionTransitionService {
                 DecisionSideEffect.CLEAR_PENDING_OPTIONS, DecisionSideEffect.PERSIST_RESULT);
         register(RESUMING, DecisionCommand.COMPLETE, COMPLETED,
                 DecisionSideEffect.CLEAR_PENDING_OPTIONS, DecisionSideEffect.PERSIST_RESULT);
+        // B 修复 #case30：WAITING_RELAXATION 态下用户补充位置 → 恢复（保留约束换位置重搜），
+        // 与 CLARIFYING 的 PROVIDE_LOCATION 同语义。TODO(C重构): 与路由层转移表统一。
+        register(WAITING_RELAXATION, DecisionCommand.PROVIDE_LOCATION, RESUMING,
+                DecisionSideEffect.APPLY_LOCATION, DecisionSideEffect.CLEAR_PENDING_OPTIONS, DecisionSideEffect.RETRY_SEARCH);
         registerRelaxation(DecisionCommand.EXPAND_RADIUS);
         registerRelaxation(DecisionCommand.INCREASE_BUDGET);
         registerRelaxation(DecisionCommand.RELAX_CUISINE);

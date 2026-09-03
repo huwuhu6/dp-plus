@@ -153,20 +153,20 @@ public class ConsumptionDecisionService {
                     constraints.setRadiusKm(-1D);
                     constraints.getSystemNotes().add("用户未提供位置，按全城搜索");
                     removeMissingInformation(constraints, "位置", "坐标", "起点");
-                } else if (followUp == null || followUp.getLatitude() == null || followUp.getLongitude() == null) {
-                    throw new IllegalArgumentException("请提供 latitude 和 longitude 后继续附近搜索");
                 } else {
-                    request.setLatitude(followUp.getLatitude());
-                    request.setLongitude(followUp.getLongitude());
-                    request.setProvince(followUp.getProvince());
-                    request.setCity(followUp.getCity());
-                    request.setDistrict(followUp.getDistrict());
-                    request.setLocationStatus("AVAILABLE");
+                    applyProvidedLocation(request, followUp);
                     log.info("[AI][session={}] state=CLARIFYING action=LOCATION_ACCEPTED latitude={} longitude={}",
                             sessionId, request.getLatitude(), request.getLongitude());
                 }
             } else if ("WAITING_RELAXATION".equals(pausedStatus)) {
-                applyRelaxation(constraints, command);
+                if (command == DecisionCommand.PROVIDE_LOCATION) {
+                    // B 修复 #case30：WAITING_RELAXATION 态补充位置 → 保留约束换位置重搜
+                    applyProvidedLocation(request, followUp);
+                    log.info("[AI][session={}] state=WAITING_RELAXATION action=LOCATION_ACCEPTED latitude={} longitude={}",
+                            sessionId, request.getLatitude(), request.getLongitude());
+                } else {
+                    applyRelaxation(constraints, command);
+                }
                 log.info("[AI][session={}] state=WAITING_RELAXATION action=RELAXATION_SELECTED option={}",
                         sessionId, followUp.getSelectedOptionId());
             } else {
@@ -430,6 +430,8 @@ public class ConsumptionDecisionService {
                 : autoRetried
                 ? "默认附近范围已在保留地点、菜系、预算等硬条件下自动扩大一次，仍未找到匹配商户。请明确选择一项条件放宽后继续，或结束本次推荐。"
                 : "当前条件下没有找到匹配的餐饮商户。你可以选择明确放宽一项条件继续，或结束本次推荐；系统不会自动修改你的限制。");
+        // B 修复 #case30：让"改用当前位置重搜"这一恢复路径对用户可发现
+        response.setQuestion(response.getQuestion() + " 你也可以回复“我附近”，改用当前位置重新搜索。");
         if (constraints.getRadiusKm() > 0) {
             response.getOptions().add(new DecisionOption("EXPAND_RADIUS", "扩大搜索距离到 " + round(constraints.getRadiusKm() + 2D) + " km"));
         }
@@ -452,6 +454,9 @@ public class ConsumptionDecisionService {
         if (hasRelaxablePreferenceTag(constraints)) {
             response.getOptions().add(new DecisionOption("RELAX_HARD_CONSTRAINTS", "保留地点和核心需求，移除额外偏好要求"));
         }
+        // B 修复 #case30：WAITING_RELAXATION 态提供"改用当前位置"选项（按钮 + 自然语言"我附近"双通道），
+        // 让位置恢复对用户可发现；转移表已允许 WAITING_RELAXATION + PROVIDE_LOCATION → RESUMING。
+        response.getOptions().add(new DecisionOption("PROVIDE_LOCATION", "改用当前位置重新搜索"));
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
         recordStep(response, session.getId(), "WAITING_RELAXATION", "候选为空，等待用户明确选择放宽项", startedAt);
         return finishPausedDecision(session, response, metrics, DecisionCommand.STRICT_SEARCH_EMPTY, "RELAXATION", startedAt);
@@ -548,6 +553,19 @@ public class ConsumptionDecisionService {
 
     private boolean isLocked(DecisionConstraints constraints, String field) {
         return constraints.getLockedConstraints() != null && constraints.getLockedConstraints().contains(field);
+    }
+
+    /** 应用用户提供的设备坐标 payload（CLARIFYING 与 WAITING_RELAXATION 共用）。 */
+    private void applyProvidedLocation(DecisionRequest request, DecisionFollowUpRequest followUp) {
+        if (followUp == null || followUp.getLatitude() == null || followUp.getLongitude() == null) {
+            throw new IllegalArgumentException("请提供 latitude 和 longitude 后继续附近搜索");
+        }
+        request.setLatitude(followUp.getLatitude());
+        request.setLongitude(followUp.getLongitude());
+        request.setProvince(followUp.getProvince());
+        request.setCity(followUp.getCity());
+        request.setDistrict(followUp.getDistrict());
+        request.setLocationStatus("AVAILABLE");
     }
 
     private DecisionCommand resolveFollowUpCommand(DecisionFollowUpRequest followUp) {

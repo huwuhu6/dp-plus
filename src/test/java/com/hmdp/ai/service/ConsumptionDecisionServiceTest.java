@@ -897,5 +897,48 @@ class ConsumptionDecisionServiceTest {
         assertFalse(matched);
     }
 
+    @Test
+    void waitingRelaxationProvidedLocationKeepsConstraintsAndResearches() throws Exception {
+        // B 修复 #case30（检查项①④）：WAITING_RELAXATION 态 PROVIDE_LOCATION 不再抛"命令无效"，
+        // 保留原约束（菜系未被清空）并带新位置重搜——恢复而非重开。
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setCuisine("不存在菜系");
+        when(constraintExtractor.extract("想吃不存在菜系")).thenReturn(constraints);
 
+        Shop shop = new Shop();
+        shop.setId(1L);
+        shop.setName("测试餐厅");
+        shop.setAvgPrice(80L);
+        shop.setScore(40);
+        shop.setOpenHours("10:00-22:00");
+        shop.setX(120.0D);
+        shop.setY(30.0D);
+        AiShopProfile profile = new AiShopProfile();
+        profile.setShopId(1L);
+        profile.setCuisine("火锅");
+        when(shopMapper.selectList(any())).thenReturn(Collections.singletonList(shop));
+        when(profileMapper.selectList(any())).thenReturn(Collections.singletonList(profile));
+
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("想吃不存在菜系");
+        request.setLocationStatus("DECLINED");
+        DecisionResponse paused = service.decide(request);
+        assertEquals("WAITING_RELAXATION", paused.getStatus());
+
+        ArgumentCaptor<AiDecisionSession> sessionCaptor = ArgumentCaptor.forClass(AiDecisionSession.class);
+        verify(sessionMapper).insert(sessionCaptor.capture());
+        when(sessionMapper.selectById(100L)).thenReturn(sessionCaptor.getValue());
+
+        DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
+        followUp.setSelectedOptionId("PROVIDE_LOCATION");
+        followUp.setLatitude(26.0745D);
+        followUp.setLongitude(119.1978D);
+        DecisionResponse resumed = service.continueDecision(100L, followUp);
+
+        // 不再抛"Decision Command 无效"；约束保留；恢复态合法
+        assertTrue(resumed.getStatus() != null);
+        assertEquals("不存在菜系", resumed.getConstraints().getCuisine());
+        assertTrue("WAITING_RELAXATION".equals(resumed.getStatus())
+                || "COMPLETED".equals(resumed.getStatus()));
+    }
 }

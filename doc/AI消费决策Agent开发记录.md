@@ -1844,6 +1844,26 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **验证**：run74 route 22/23（唯一失败=case30，#34 相关）、finalStatus 23/23、shop 23/23，4 新 case 全绿；case16 期望校准后通过。**新发现（记 #38）**：case16 第一轮"推荐福州的佛跳墙餐厅"（EXPLICIT_TARGET 福州）无匹配时答复"福州目前暂无收录餐饮商户"——福州实际有 980 家店，ZERO_RESULT_NO_DATA 话术把"品类无候选"误说成"城市无数据"，需区分两种话术。
 
+### **18. WAITING_RELAXATION 态位置恢复路径缺失（case30，P0，2026-09-03 封板后例外修复）**
+
+**问题**：case30 评测失败——设备定位福州、用户显式查询"帮我找重庆附近的火锅"（EXPLICIT_DESTINATION 直搜，单测 `explicitPlaceDoesNotReusePreviousBrowserLocation` 已固化"显式地名直接用"设计）。重庆无入库数据 → 进入 WAITING_RELAXATION；第二轮用户"我附近"想改回当前位置重搜，但恢复路径断裂：WAITING_RELAXATION 态无 PROVIDE_LOCATION 转移（`DecisionTransitionService.resolve` 抛 IllegalArgumentException "Decision Command 无效" → ERROR）。
+
+**双真相第 4 个实例（测试层自裂）**：单测（绿）与评测 case30（红）对同一输入断言相反期望且长期共存——case30 原期望 `["LOCATION_RESOLUTION","DECISION_EVENT"]`+WAITING_RELAXATION（走 CONFIRM_RESOLVED_LOCATION_0 前置确认），单测期望 START_DECISION+latitude=null（显式地名直接搜索）。规则 vs prompt 是第 1 处、executeLegacy 是第 2 处、词表双轨是第 3 处，这次测试套件自己也分裂了。单测赢不是因为它对，而是因为它先写了。
+
+**GLM 评审闭环（2026-09-03）**：起草全自包含路由层问题提示词（P0×4/P1×3 诊断、A/B/C 三档演进、#34/case30 两条失败链路）请 GLM 评审，核心结论：①最本质问题是"意图/槽位/状态三维度被压成一维路由标签"（18 个 isXxx 按组合数而非意图数膨胀）；②case30 是槽位层缺失而非路由问题；③case30 修复优先级 = 建回归测试集 → 修两 case → C 状态机先行 → A+B 合并重构。**代码验证修正 GLM 两处**：①"缺路由测试集"不成立（已有 ChatOrchestrationServiceTest 24 用例），step0 降级为"补覆盖矩阵+空洞用例"；②assessRouting 双跑 flag 只影响 setSource 元数据，风险降级卫生项。用户拍板：**放弃 A（前置异位澄清），保留"显式地名直接用"**——原则"澄清应发生在问题实际出现之后（无数据后反应式），而非可能出现之前（前置阻塞式）"；case30 重写是"用显式决策消解规格冲突"而非改测试让绿灯。
+
+**B 修复（5 处代码 + 1 处评测重写）**：
+- `ChatOrchestrationService.route()`：新增分流（插在 replacesPausedDecision 之前）——WAITING_RELAXATION 态 && 无 selectedOptionId && `isLocationRecoveryExpression(message)` → action=DECISION_EVENT、reason=location_recovery_in_waiting_relaxation，带 `// TODO(C重构): 迁入 RoutingTransitionService 转移表` 注释；
+- 新增窄谓词 `isLocationRecoveryExpression`：位置词（我附近/当前位置/当前定位/就在我这/在我这/用我的位置）∧ **无** 餐饮/需求词（火锅烧烤日料小吃菜面饭找吃推荐餐店预算便宜评分评价换一家换一批）；边界钉死："我附近"→恢复，"福州附近的火锅"/"我附近有没有火锅"→START_DECISION（显式新需求）；
+- `handleDecisionEvent`：optionId==null 且 activeDecision=WAITING_RELAXATION 且是位置恢复表达 → optionId 默认 "PROVIDE_LOCATION"；
+- `DecisionTransitionService`：register(WAITING_RELAXATION, PROVIDE_LOCATION, RESUMING, APPLY_LOCATION, CLEAR_PENDING_OPTIONS, RETRY_SEARCH)（与 CLARIFYING 同语义，位置 payload 经 transitionWithLocation）；
+- `ConsumptionDecisionService`：提取公共方法 `applyProvidedLocation`（CLARIFYING 与 WAITING_RELAXATION 共用），WAITING_RELAXATION 分支不再抛"Decision Command 无效"；`pauseForRelaxation` 文案追加"你也可以回复"我附近"，改用当前位置重新搜索。" + options 加 PROVIDE_LOCATION（按钮可见，validateSelectedOption 校验 pendingOptions 才可通过）；
+- case30 评测重写：改名 `EXPLICIT_DESTINATION_NO_DATA_DEVICE_LOCATION_RECOVERY`，turns=["帮我找重庆附近的火锅"(福州坐标),"我附近"]，expected_routes=["START_DECISION","DECISION_EVENT"]，expected_final_status=COMPLETED，notes 留决策注释"显式异地目的地直接搜索，澄清是反应式（无数据后）而非前置式"（防三个月后自我怀疑）。
+
+**验证**：全量 mvn -q test = 258/0/0（原 252 + 新增 5 个 B 相关测试 + 1 空洞测试 `clarifyingDemandSwitchStartsNewDecision`；CLARIFYING×换需求已被 replacesPausedDecision 覆盖只缺测试，COMPLETED×元问题依赖 LLM mock 记为后续）；conversation-v1 评测 run75 = route 23/23、finalStatus 23/23、shop 23/23、0 error（run74 唯一失败 case30 已修复）；端到端链路验证：重庆直搜 → 无数据 WAITING_RELAXATION → "我附近" → 按福州重搜 → COMPLETED。检索城市用 request.city（`ConsumptionDecisionService:722`），恢复后 applyProvidedLocation 设为福州；targetCity=重庆仅用于语义 query 移除 token（L851），不参与城市过滤——恢复语义正确。
+
+**遗留（step2/#34）**：route() LLM prompt 仍含陈旧位置指令"我附近/当前定位/换个地方→必须 START_DECISION"，WAITING_RELAXATION 态下现为错误答案（正确是 DECISION_EVENT），规则层先拦截暂不冲突，规则 miss 的新表述会让 LLM 按 stale prompt 选错——step2 prompt 重写时删除；B 新规则是"状态×意图组合补丁"但打在正确层（路由层、先于 START_DECISION、先于 LLM），pre-C 可接受。
+
 ### 明确"不做清单" ### 明确"不做清单"
 
 以下方向已评估，当前阶段不引入：

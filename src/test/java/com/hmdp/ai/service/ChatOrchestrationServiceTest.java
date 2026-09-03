@@ -837,4 +837,207 @@ class ChatOrchestrationServiceTest {
         // 未进入餐饮决策链路
         verifyNoInteractions(decisionService);
     }
+
+    @Test
+    void waitingRelaxationPureLocationRecoversDecisionWithProvidedLocation() {
+        // B 修复 #case30：WAITING_RELAXATION 态"我附近" → 恢复（PROVIDE_LOCATION），保留约束换位置重搜。
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", mock(AgentConversationService.class));
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        ConversationLocationSlot location = new ConversationLocationSlot();
+        location.setStatus("AVAILABLE");
+        location.setLatitude(26.0745D);
+        location.setLongitude(119.1978D);
+        when(stateService.usableSearchLocation(state)).thenReturn(location);
+        DecisionResponse suspended = new DecisionResponse();
+        suspended.setSessionId(100L);
+        suspended.setStatus("WAITING_RELAXATION");
+        when(decisionService.getDecision(100L)).thenReturn(suspended);
+        DecisionResponse resumed = new DecisionResponse();
+        resumed.setSessionId(100L);
+        resumed.setStatus("COMPLETED");
+        resumed.setAnswer("已按当前位置重新搜索");
+        when(decisionService.continueDecision(any(), any())).thenReturn(resumed);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("我附近");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("DECISION_EVENT", response.getRoute());
+        ArgumentCaptor<DecisionFollowUpRequest> captor = ArgumentCaptor.forClass(DecisionFollowUpRequest.class);
+        verify(decisionService).continueDecision(org.mockito.Mockito.eq(100L), captor.capture());
+        assertEquals("PROVIDE_LOCATION", captor.getValue().getSelectedOptionId());
+        assertEquals(26.0745D, captor.getValue().getLatitude());
+        assertEquals(119.1978D, captor.getValue().getLongitude());
+        verifyNoInteractions(aiClient);
+    }
+
+    @Test
+    void locationRecoveryPredicateExcludesDiningOrDemandExpressions() {
+        // 检查项②：窄谓词边界。纯位置 → true；含餐饮/需求词 → false（不被恢复分流吞掉）。
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isLocationRecoveryExpression", "我附近"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isLocationRecoveryExpression", "当前位置"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isLocationRecoveryExpression", "就在我这"));
+        // 完整新需求（含菜系/需求词）不得被恢复分流吞掉
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isLocationRecoveryExpression", "福州附近的火锅"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isLocationRecoveryExpression", "我附近有没有火锅"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isLocationRecoveryExpression", "换一家"));
+    }
+
+    @Test
+    void waitingRelaxationLocationPlusDiningStartsNewDecision() {
+        // 检查项②：WAITING_RELAXATION + "我附近有没有火锅"（位置词+餐饮词）→ 显式新需求 → START_DECISION。
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        AgentConversationService conversationService = mock(AgentConversationService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", conversationService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        DecisionResponse paused = new DecisionResponse();
+        paused.setSessionId(100L);
+        paused.setStatus("WAITING_RELAXATION");
+        when(decisionService.getDecision(100L)).thenReturn(paused);
+        DecisionResponse cancelled = new DecisionResponse();
+        cancelled.setSessionId(100L);
+        cancelled.setStatus("CANCELLED");
+        when(decisionService.continueDecision(org.mockito.Mockito.eq(100L), any())).thenReturn(cancelled);
+        DecisionResponse started = new DecisionResponse();
+        started.setSessionId(101L);
+        started.setStatus("COMPLETED");
+        when(decisionService.decide(any())).thenReturn(started);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("我附近有没有火锅");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("START_DECISION", response.getRoute());
+        ArgumentCaptor<DecisionFollowUpRequest> cancellation = ArgumentCaptor.forClass(DecisionFollowUpRequest.class);
+        verify(decisionService).continueDecision(org.mockito.Mockito.eq(100L), cancellation.capture());
+        assertEquals("END_DECISION", cancellation.getValue().getSelectedOptionId());
+        verifyNoInteractions(aiClient);
+    }
+
+    @Test
+    void waitingRelaxationDemandSwitchStartsNewDecision() {
+        // 空洞1：WAITING_RELAXATION × 换需求（"重新推荐"）→ START_DECISION 重开，而非追问候选池。
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        AgentConversationService conversationService = mock(AgentConversationService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", conversationService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        DecisionResponse paused = new DecisionResponse();
+        paused.setSessionId(100L);
+        paused.setStatus("WAITING_RELAXATION");
+        when(decisionService.getDecision(100L)).thenReturn(paused);
+        DecisionResponse cancelled = new DecisionResponse();
+        cancelled.setSessionId(100L);
+        cancelled.setStatus("CANCELLED");
+        when(decisionService.continueDecision(org.mockito.Mockito.eq(100L), any())).thenReturn(cancelled);
+        DecisionResponse started = new DecisionResponse();
+        started.setSessionId(101L);
+        started.setStatus("COMPLETED");
+        when(decisionService.decide(any())).thenReturn(started);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("重新推荐");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("START_DECISION", response.getRoute());
+        ArgumentCaptor<DecisionFollowUpRequest> cancellation = ArgumentCaptor.forClass(DecisionFollowUpRequest.class);
+        verify(decisionService).continueDecision(org.mockito.Mockito.eq(100L), cancellation.capture());
+        assertEquals("END_DECISION", cancellation.getValue().getSelectedOptionId());
+        verifyNoInteractions(aiClient);
+    }
+
+    @Test
+    void clarifyingDemandSwitchStartsNewDecision() {
+        // 空洞3：CLARIFYING × 换需求（"算了换一家"）→ START_DECISION 重开，而非卡在位置澄清。
+        // replacesPausedDecision 的 isPausedDecision 覆盖 CLARIFYING，此处补确定性测试。
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        AgentConversationService conversationService = mock(AgentConversationService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "conversationService", conversationService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        AmapMcpLocationResolutionService locationResolutionService = mock(AmapMcpLocationResolutionService.class);
+        ReflectionTestUtils.setField(service, "locationResolutionService", locationResolutionService);
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        DecisionResponse paused = new DecisionResponse();
+        paused.setSessionId(100L);
+        paused.setStatus("CLARIFYING");
+        when(decisionService.getDecision(100L)).thenReturn(paused);
+        DecisionResponse cancelled = new DecisionResponse();
+        cancelled.setSessionId(100L);
+        cancelled.setStatus("CANCELLED");
+        when(decisionService.continueDecision(org.mockito.Mockito.eq(100L), any())).thenReturn(cancelled);
+        DecisionResponse started = new DecisionResponse();
+        started.setSessionId(101L);
+        started.setStatus("COMPLETED");
+        when(decisionService.decide(any())).thenReturn(started);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("算了换一家");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("START_DECISION", response.getRoute());
+        ArgumentCaptor<DecisionFollowUpRequest> cancellation = ArgumentCaptor.forClass(DecisionFollowUpRequest.class);
+        verify(decisionService).continueDecision(org.mockito.Mockito.eq(100L), cancellation.capture());
+        assertEquals("END_DECISION", cancellation.getValue().getSelectedOptionId());
+        verifyNoInteractions(aiClient);
+    }
 }
