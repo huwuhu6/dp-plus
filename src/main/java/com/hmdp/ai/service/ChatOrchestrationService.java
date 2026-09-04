@@ -311,11 +311,14 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             request.setQuery(context.getEffectiveMessage());
             return;
         }
-        List<Long> excludedCandidates = refinementExclusions(context.getContextRewrite(), context.getWorkingMemory());
+        com.hmdp.ai.dto.DecisionConstraints extracted = constraintExtractor.extract(context.getEffectiveMessage());
+        // critique is a single source of truth: direction != 0 (LLM) OR refinement words (rule fast-path) both feed exclusion
+        List<Long> excludedCandidates = refinementExclusions(context.getContextRewrite(), context.getWorkingMemory(), extracted);
         request.setExcludeShopIds(excludedCandidates);
         com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(
-                context.getWorkingMemory().getActiveCriteria(), constraintExtractor.extract(context.getEffectiveMessage()),
-                context.getOriginalMessage(), context.getWorkingMemory().getCandidatePool(), context.getWorkingMemory().getFocusedShopId());
+                context.getWorkingMemory().getActiveCriteria(), extracted,
+                context.getOriginalMessage(), context.getWorkingMemory().getCandidatePool(),
+                context.getWorkingMemory().getFocusedShopId(), context.getWorkingMemory().getShownShopIds());
         context.setCriteriaMergeResult(mergeResult);
         context.setMergedConstraints(mergeResult.getConstraints());
         request.setQuery(cleanRetrievalQuery(context.getEffectiveMessage(), mergeResult.getConstraints()));
@@ -455,10 +458,16 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
 
     private List<Long> refinementExclusions(ContextRewriteResult contextRewrite,
-                                            com.hmdp.ai.dto.ConversationWorkingMemory memory) {
+                                            com.hmdp.ai.dto.ConversationWorkingMemory memory,
+                                            com.hmdp.ai.dto.DecisionConstraints extracted) {
         List<Long> excluded = new ArrayList<Long>();
-        if (!isSearchRefinement(contextRewrite == null ? null : contextRewrite.getOriginalQuery(),
-                contextRewrite == null ? null : contextRewrite.getRewrittenQuery()) || memory == null) return excluded;
+        boolean critique = extracted != null
+                && ((extracted.getBudgetDirection() != null && extracted.getBudgetDirection() != 0)
+                || (extracted.getRadiusDirection() != null && extracted.getRadiusDirection() != 0));
+        boolean refinement = critique || isSearchRefinement(
+                contextRewrite == null ? null : contextRewrite.getOriginalQuery(),
+                contextRewrite == null ? null : contextRewrite.getRewrittenQuery());
+        if (!refinement || memory == null) return excluded;
         if (memory.getShownShopIds() != null && !memory.getShownShopIds().isEmpty()) {
             excluded.addAll(memory.getShownShopIds());
             return excluded;
@@ -638,6 +647,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         String text = ((originalMessage == null ? "" : originalMessage) + " "
                 + (effectiveMessage == null ? "" : effectiveMessage)).replaceAll("\\s+", "");
         return text.contains("太贵") || text.contains("便宜点") || text.contains("更便宜")
+                || text.contains("好贵") || text.contains("平价") || text.contains("实惠") || text.contains("有点贵") || text.contains("贵一点")
                 || text.contains("换个条件") || text.contains("换个口味") || text.contains("换个商圈")
                 || text.contains("更近") || text.contains("附近一点") || text.contains("重新筛选")
                 || text.contains("重新推荐") || text.contains("当前设备附近搜索") || text.contains("我附近")

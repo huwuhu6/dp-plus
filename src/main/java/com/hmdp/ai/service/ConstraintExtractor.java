@@ -91,6 +91,12 @@ public class ConstraintExtractor {
         if (budget.find()) {
             constraints.setBudgetPerPerson(Integer.valueOf(budget.group(1)));
         }
+        if (containsAny(query, "好贵", "太贵", "平价", "便宜", "实惠", "贵一点", "更便宜", "有点贵")) {
+            constraints.setBudgetDirection(-1);
+        }
+        if (containsAny(query, "更近", "近一点", "近点", "附近一点", "太远", "远一点")) {
+            constraints.setRadiusDirection(-1);
+        }
         Matcher radiusMatcher = RADIUS_PATTERN.matcher(query);
         if (radiusMatcher.find()) {
             double radiusValue = Double.parseDouble(radiusMatcher.group(1));
@@ -127,7 +133,9 @@ public class ConstraintExtractor {
         migrateCuisineKeywordToCuisine(constraints);
         constraints.setCuisine(canonicalizeCuisine(constraints.getCuisine()));
         if (constraints.getBudgetPerPerson() == null) constraints.setBudgetPerPerson(-1);
+        if (constraints.getBudgetDirection() == null) constraints.setBudgetDirection(0);
         if (constraints.getRadiusKm() == null) constraints.setRadiusKm(-1D);
+        if (constraints.getRadiusDirection() == null) constraints.setRadiusDirection(0);
         if (constraints.getNearby() == null) constraints.setNearby(false);
         if (constraints.getArrivalTime() == null) constraints.setArrivalTime("");
         constraints.setPreferences(normalizePreferences(constraints.getPreferences()));
@@ -192,7 +200,9 @@ public class ConstraintExtractor {
         properties.put("keyword", property("string", "Specific entity the user explicitly names: a restaurant name or signature dish (e.g. 闽师东北菜, 锅包肉). Do NOT put a cuisine here — cuisines go to the cuisine field. Do not include targetCity or targetArea."));
         properties.put("cuisine", property("string", "Cuisine category (e.g. 川菜, 火锅, 日料, 快餐简餐, 面食, 小吃). Empty string if unknown."));
         properties.put("budgetPerPerson", property("integer", "Maximum per-person budget. -1 if unknown."));
+        properties.put("budgetDirection", property("integer", "Relative budget intent WITHOUT an absolute number: -1 = cheaper (太贵/好贵/平价一点/便宜点/实惠), 0 = no relative intent, 1 = more expensive. Only set on a relative price critique; leave 0 otherwise."));
         properties.put("radiusKm", property("number", "Search radius in kilometers. -1 if unknown."));
+        properties.put("radiusDirection", property("integer", "Relative distance intent: -1 = closer (更近/近一点/太远), 0 = no relative intent, 1 = farther. Only set on a relative distance critique; leave 0 otherwise."));
         properties.put("nearby", property("boolean", "Whether the user uses a nearby/local intent."));
         properties.put("arrivalTime", property("string", "Arrival time HH:mm. Empty string if unknown."));
         properties.put("preferences", arrayProperty("Open-set soft preferences as natural-language tags, e.g. 安静, 不排队, 约会, 便餐, 清淡, 辣, 适合聚餐, 氛围好, 性价比高. This is an open set — do not restrict to an enum. Do NOT include constraints the user explicitly cancelled or negated."));

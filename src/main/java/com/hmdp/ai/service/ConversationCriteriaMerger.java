@@ -14,12 +14,12 @@ import java.util.List;
 public class ConversationCriteriaMerger {
 
     public CriteriaMergeResult merge(DecisionConstraints previous, DecisionConstraints delta, String query) {
-        return merge(previous, delta, query, new ArrayList<DecisionRecommendation>(), null);
+        return merge(previous, delta, query, new ArrayList<DecisionRecommendation>(), null, new ArrayList<Long>());
     }
 
     /** Reduces an explicit delta using the previous recommendation only for relative constraints. */
     public CriteriaMergeResult merge(DecisionConstraints previous, DecisionConstraints delta, String query,
-                                     List<DecisionRecommendation> candidatePool, Long focusedShopId) {
+                                     List<DecisionRecommendation> candidatePool, Long focusedShopId, List<Long> shownShopIds) {
         DecisionConstraints merged = copy(previous);
         CriteriaMergeResult result = new CriteriaMergeResult();
         result.setConstraints(merged);
@@ -71,18 +71,21 @@ public class ConversationCriteriaMerger {
             clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
             clear(result, "nearby", () -> merged.setNearby(false));
         }
-        applyRelativeConstraints(result, merged, text, candidatePool, focusedShopId);
+        applyRelativeConstraints(result, merged, delta, text, candidatePool, focusedShopId, shownShopIds);
 
         merged.setPreferences(unique(merged.getPreferences()));
         return result;
     }
 
-    private void applyRelativeConstraints(CriteriaMergeResult result, DecisionConstraints merged, String text,
-                                          List<DecisionRecommendation> candidatePool, Long focusedShopId) {
-        if (containsAny(text, "太贵", "便宜点", "更便宜")) {
-            Long anchorPrice = relativePriceAnchor(candidatePool, focusedShopId);
+    private void applyRelativeConstraints(CriteriaMergeResult result, DecisionConstraints merged, DecisionConstraints delta,
+                                          String text, List<DecisionRecommendation> candidatePool, Long focusedShopId, List<Long> shownShopIds) {
+        boolean cheaper = containsAny(text, "太贵", "便宜点", "更便宜", "好贵", "平价", "实惠", "有点贵", "贵一点")
+                || (delta.getBudgetDirection() != null && delta.getBudgetDirection() < 0);
+        if (cheaper) {
+            Long anchorPrice = relativePriceAnchor(candidatePool, focusedShopId, shownShopIds);
             if (anchorPrice != null && anchorPrice > 1L) {
-                int budget = Math.toIntExact(anchorPrice - 1L);
+                // proportional step instead of anchorPrice-1: a -1 unit is meaningless for price (GLM review 2026-09-04)
+                int budget = Math.max(20, (int) Math.round(anchorPrice * 0.85D));
                 replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(budget),
                         () -> merged.setBudgetPerPerson(budget));
                 if (merged.getLockedConstraints() == null) merged.setLockedConstraints(new java.util.HashSet<String>());
@@ -92,8 +95,10 @@ public class ConversationCriteriaMerger {
                 result.getAppended().add("relativeBudget:anchorPrice=" + anchorPrice + "->budgetPerPerson=" + budget);
             }
         }
-        if (containsAny(text, "更近", "近一点", "近点", "附近一点")) {
-            Double anchorDistance = relativeDistanceAnchor(candidatePool, focusedShopId);
+        boolean closer = containsAny(text, "更近", "近一点", "近点", "附近一点", "太远", "远一点")
+                || (delta.getRadiusDirection() != null && delta.getRadiusDirection() < 0);
+        if (closer) {
+            Double anchorDistance = relativeDistanceAnchor(candidatePool, focusedShopId, shownShopIds);
             if (anchorDistance != null && anchorDistance > 0.5D) {
                 double radius = Math.max(0.5D, Math.round(anchorDistance * 0.9D * 10D) / 10D);
                 replace(result, "radiusKm", String.valueOf(merged.getRadiusKm()), String.valueOf(radius),
@@ -101,9 +106,18 @@ public class ConversationCriteriaMerger {
                 result.getAppended().add("relativeDistance:anchorKm=" + anchorDistance + "->radiusKm=" + radius);
             }
         }
+        // one-shot pulse: consume-and-reset so a residual direction is never re-applied on a later turn
+        if (delta != null) {
+            delta.setBudgetDirection(0);
+            delta.setRadiusDirection(0);
+        }
+        merged.setBudgetDirection(0);
+        merged.setRadiusDirection(0);
     }
 
-    private Long relativePriceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId) {
+    /** Anchor = the shop the user is actually complaining about: focused shop first, then the shown (displayed) set,
+     *  then the pool. A user can only complain about shops they have seen (GLM review 2026-09-04). */
+    private Long relativePriceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId, List<Long> shownShopIds) {
         if (candidates == null || candidates.isEmpty()) return null;
         if (focusedShopId != null) {
             for (DecisionRecommendation candidate : candidates) {
@@ -111,6 +125,15 @@ public class ConversationCriteriaMerger {
                     return candidate.getAvgPrice();
                 }
             }
+        }
+        if (shownShopIds != null && !shownShopIds.isEmpty()) {
+            Long shownMin = null;
+            for (DecisionRecommendation candidate : candidates) {
+                if (candidate.getShopId() == null || !shownShopIds.contains(candidate.getShopId())) continue;
+                if (candidate.getAvgPrice() == null || candidate.getAvgPrice() <= 0L) continue;
+                if (shownMin == null || candidate.getAvgPrice() < shownMin) shownMin = candidate.getAvgPrice();
+            }
+            if (shownMin != null) return shownMin;
         }
         Long minimum = null;
         for (DecisionRecommendation candidate : candidates) {
@@ -120,7 +143,7 @@ public class ConversationCriteriaMerger {
         return minimum;
     }
 
-    private Double relativeDistanceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId) {
+    private Double relativeDistanceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId, List<Long> shownShopIds) {
         if (candidates == null || candidates.isEmpty()) return null;
         if (focusedShopId != null) {
             for (DecisionRecommendation candidate : candidates) {
@@ -128,6 +151,15 @@ public class ConversationCriteriaMerger {
                     return candidate.getDistanceKm();
                 }
             }
+        }
+        if (shownShopIds != null && !shownShopIds.isEmpty()) {
+            Double shownMin = null;
+            for (DecisionRecommendation candidate : candidates) {
+                if (candidate.getShopId() == null || !shownShopIds.contains(candidate.getShopId())) continue;
+                if (candidate.getDistanceKm() == null || candidate.getDistanceKm() <= 0D) continue;
+                if (shownMin == null || candidate.getDistanceKm() < shownMin) shownMin = candidate.getDistanceKm();
+            }
+            if (shownMin != null) return shownMin;
         }
         Double minimum = null;
         for (DecisionRecommendation candidate : candidates) {
