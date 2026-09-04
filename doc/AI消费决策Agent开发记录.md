@@ -1998,6 +1998,12 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **面试叙事**：① 相对反馈 critique vs 形式化查询是强区分度问题（业界 critique 应视为硬约束的 ACM 论据）；② 「机制已半成形、升级而非新建」的探查发现（比从零建 APPLY_CRITIQUE 便宜一个量级）；③ 三个设计决策=锚改展示集（用户只能抱怨见过的东西）/ 脉冲清零（防残留 direction 后续轮误收紧）/ 触发权统一（direction 字段是唯一真相来源，防双真相第7例）；④ GLM 评审→代码查证→修正盲区→落地计划的闭环。
 
+### Layer 6 数据驱动锚点（2026-09-04 第三批）：硬编码档严重偏低
+
+R1 修复后 GLM 建议补齐锚点链。探查发现：① Layer 5（上一轮推荐锚点）不需要做——candidatePool 在决策间不主动清空（代码无 clear 点），R2 第三轮 critique 时还能锚到上一轮的 3 家，「空池但有上一轮推荐」的场景几乎不存在；② Layer 6 硬编码档严重偏低——查数据库 tbl_ai_shop_profile JOIN tbl_shop：火锅 AVG=153、咖啡 156、日料 154、烧烤 153，而硬编码写的是火锅=60、咖啡=40、日料=85，导致「平价一点」budget=51 只推 1 家。
+
+修复：AiShopProfileMapper 加 selectAvgPriceByCuisine（LIKE 菜系前缀匹配复合标签如「火锅,重庆」）；Merger 注入 Mapper，defaultBudgetAnchor 先查库 AVG×0.8，查不到/异常兜底硬编码。端到端：火锅 budget 从 51→103，推荐从 1 家→3 家(49/63/69)。全量 mvn test 通过。
+
 ### R1 修复（2026-09-04 第二批）：兜底语义混淆与空池锚链
 
 第一批提交后 GLM 评审指出 R1 未真正验证。端到端复现确认 R1 仍失败：开场第一句「火锅有点贵，平价一点」→ budgetDirection=0、budget=-1、推荐不过滤价格。
