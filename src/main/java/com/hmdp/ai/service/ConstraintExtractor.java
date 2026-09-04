@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.util.CuisineCanonicalizer;
+import com.hmdp.ai.util.PreferenceCanonicalizer;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -161,19 +162,7 @@ public class ConstraintExtractor {
 
     /** Normalizes open-set preferences into canonical tags where a rule map consumes them; leaves open-ended phrases as-is. */
     private List<String> normalizePreferences(List<String> preferences) {
-        LinkedHashSet<String> normalized = new LinkedHashSet<>();
-        if (preferences != null) {
-            for (String preference : preferences) {
-                if (preference == null || preference.trim().isEmpty()) continue;
-                String tag = preference.trim();
-                if (containsAny(tag, "情侣", "女朋友", "男朋友", "浪漫", "二人世界")) tag = "约会";
-                if (containsAny(tag, "不想排队", "不用排队", "少排队", "避免排队", "别排队")) tag = "不排队";
-                if (containsAny(tag, "安静", "静一点", "别太吵", "清净")) tag = "安静";
-                if (containsAny(tag, "清淡", "少油", "不油腻", "清爽")) tag = "清淡";
-                normalized.add(tag);
-            }
-        }
-        return new ArrayList<>(normalized);
+        return PreferenceCanonicalizer.canonicalizeAll(preferences);
     }
 
     private boolean hasText(String value) {
