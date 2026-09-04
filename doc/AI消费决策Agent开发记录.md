@@ -1998,6 +1998,16 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **面试叙事**：① 相对反馈 critique vs 形式化查询是强区分度问题（业界 critique 应视为硬约束的 ACM 论据）；② 「机制已半成形、升级而非新建」的探查发现（比从零建 APPLY_CRITIQUE 便宜一个量级）；③ 三个设计决策=锚改展示集（用户只能抱怨见过的东西）/ 脉冲清零（防残留 direction 后续轮误收紧）/ 触发权统一（direction 字段是唯一真相来源，防双真相第7例）；④ GLM 评审→代码查证→修正盲区→落地计划的闭环。
 
+### R1 修复（2026-09-04 第二批）：兜底语义混淆与空池锚链
+
+第一批提交后 GLM 评审指出 R1 未真正验证。端到端复现确认 R1 仍失败：开场第一句「火锅有点贵，平价一点」→ budgetDirection=0、budget=-1、推荐不过滤价格。
+
+**根因一（兜底语义混淆，病理编目 #7 近亲）**：direction 规则兜底挂在 `extractByRule()`（LLM 抛异常时才走的 fallback 路径），而 `extract()` 正常走 `extractByModel()`（LLM）。LLM 正常返回但没输出 direction 时，兜底永远不触发。这是**兜底的路径级 vs 字段级语义混淆**——兜底被设计成"LLM 挂了才兜"（路径级），但实际需要的是"LLM 返回了但某字段缺失时兜"（字段级）。修复：新建 `applyDirectionFallback()`，在 extract() 的 LLM 和规则两条路径都经过。审计结论：extractByRule 里其他字段（cuisine/budget/radius/preferences 等）都有明确的"未设置"哨兵值（空串/-1/false/空列表），LLM 输出哨兵值时下游能识别，无需字段级兜底；唯独 direction 的 0 同时是"未设置"和"保持不变"，无法区分——这是它需要字段级兜底的根因。
+
+**根因二（空池锚链 no-op）**：即使 direction=-1 被提取，开场 critique 时候选池空、无 shown、无 focused 店，锚链（focused→shown→pool）全空 → 收紧 no-op。修复：锚链末端加菜系 DEFAULT_LEVEL（火锅=60、日料=85 等 18 菜系，表 miss 兜全局 60），budget=60×0.85=51。P25 数据驱动分位记第二批（硬编码档无空池构造性保证）。
+
+**验证**：R1 端到端 budget=51（locked）+ 只推人均 49；R2 budget=59 + 排除旧候选 → 推人均 49；R3 锚到店 budget=42 + 保留火锅 → WAITING_RELAXATION。全量 mvn test 278+ 通过。新增碰撞疫苗（「这家店实惠吗」族 → BUSINESS_FOLLOW_UP）和 DEFAULT_LEVEL miss 测试（闽菜 → 51）。
+
 ## 封板状态
 
 **本项目已进入封板状态。**

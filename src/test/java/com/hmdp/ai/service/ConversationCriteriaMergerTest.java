@@ -308,6 +308,23 @@ class ConversationCriteriaMergerTest {
 
 
     @Test
+    void openingCritiqueFallsBackToGlobalDefaultWhenCuisineNotInTable() {
+        // GLM 收尾检查：DEFAULT_LEVEL 硬编码表只覆盖 18 菜系，表 miss（如闽菜）必须兜全局默认档 60，
+        // 不得静默返回 null 导致锚链 no-op（R1 在未覆盖菜系上的精确复刻）。
+        ConversationCriteriaMerger merger = new ConversationCriteriaMerger();
+        DecisionConstraints active = new DecisionConstraints();
+        active.setCuisine("闽菜");
+        active.setBudgetPerPerson(-1);
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setCuisine("闽菜");
+        delta.setBudgetDirection(-1);
+        CriteriaMergeResult result = merger.merge(
+                active, delta, "闽菜有点贵，平价一点",
+                java.util.Collections.emptyList(), null, java.util.Collections.emptyList());
+        assertEquals(51, result.getConstraints().getBudgetPerPerson()); // 60 * 0.85
+    }
+
+    @Test
     void openingCritiqueUsesCuisineDefaultAnchorWhenPoolEmpty() {
         // R1 bug（2026-09-04 复现）：开场第一句「火锅有点贵，有没有稍微平价一点的」，
         // 候选池空、无 shown、无 focused 店，锚链全空 → 此前收紧 no-op，budget 仍 -1，
