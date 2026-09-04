@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.hmdp.ai.entity.AiShopProfile;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 public interface AiShopProfileMapper extends BaseMapper<AiShopProfile> {
@@ -47,4 +48,11 @@ public interface AiShopProfileMapper extends BaseMapper<AiShopProfile> {
             """)
     int completeWithoutReviews(@Param("shopId") Long shopId,
                                @Param("expectedRevision") Long expectedRevision);
+
+    /** Layer 6 data-driven critique anchor: average price of shops matching cuisine prefix (e.g. "火锅" matches "火锅,重庆").
+     *  Used as AVG*0.8 default budget band when candidate pool is empty (opening critique).
+     *  Returns null when no matching shop has a price. */
+    @Select("SELECT ROUND(AVG(s.avg_price), 0) FROM tbl_ai_shop_profile p JOIN tbl_shop s ON p.shop_id = s.id " +
+            "WHERE p.cuisine LIKE CONCAT(#{cuisine}, '%') AND s.avg_price > 0")
+    Integer selectAvgPriceByCuisine(@Param("cuisine") String cuisine);
 }

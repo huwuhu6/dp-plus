@@ -3,6 +3,10 @@ package com.hmdp.ai.service;
 import com.hmdp.ai.dto.CriteriaMergeResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionConstraints;
+import com.hmdp.ai.mapper.AiShopProfileMapper;
+import jakarta.annotation.Resource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -12,6 +16,10 @@ import java.util.List;
 /** Applies an explicitly expressed constraint delta without asking the model to infer absent fields. */
 @Service
 public class ConversationCriteriaMerger {
+    private static final Logger log = LoggerFactory.getLogger(ConversationCriteriaMerger.class);
+
+    @Resource
+    private AiShopProfileMapper shopProfileMapper;
 
     public CriteriaMergeResult merge(DecisionConstraints previous, DecisionConstraints delta, String query) {
         return merge(previous, delta, query, new ArrayList<DecisionRecommendation>(), null, new ArrayList<Long>());
@@ -124,6 +132,18 @@ public class ConversationCriteriaMerger {
     /** Default price band per cuisine for opening critiques (no candidate pool yet).
      *  Hard-coded minimal version; second batch replaces with cuisine price-distribution P25 (待修 #50). */
     private Long defaultBudgetAnchor(String cuisine) {
+        // Layer 6 data-driven anchor: AVG(price) * 0.8 before hardcoded fallback.
+        // Hardcoded bands were severely mis-calibrated (火锅=60 vs actual AVG=153), so DB lookup is primary.
+        if (cuisine != null && !cuisine.isEmpty()) {
+            try {
+                Integer avg = shopProfileMapper.selectAvgPriceByCuisine(cuisine);
+                if (avg != null && avg > 0) {
+                    return Math.round(avg * 0.8D);
+                }
+            } catch (Exception e) {
+                log.warn("[AI][critique] defaultAnchor db lookup failed for cuisine={}, fallback hardcoded", cuisine, e);
+            }
+        }
         if (cuisine == null || cuisine.isEmpty()) return 60L;
         switch (cuisine) {
             case "火锅": return 60L;
