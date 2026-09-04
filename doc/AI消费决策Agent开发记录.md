@@ -1980,6 +1980,24 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 
 **移交动作**：新建 `doc/路由层重构设计（已设计待执行）.md`——6 节"已设计待执行"文档（症状账本/根因模型/目标架构/待执行清单/为什么不现在执行/开工条件现状）。无论是否执行 C 重构，这页文档都是开工文档 + 面试叙事"生命周期管理"素材（识别病理→修复→量化→冻结→移交给自己未来的排期）。
 
+### 24. Critique 相对反馈落地：相对价格/距离反馈无法落数值约束（2026-09-04，封板后重新开启）
+
+**背景（bug 复现）**：会话 web-1788439676118-sb5kgjkd 三连——R1「火锅有点贵，有没有稍微平价一点的」→ decision_session 1608 budgetPerPerson=-1（相对表述无法落数值，仅入 preferences）；R2「好贵啊」→ 1609 约束未变、继续推同一家朝天门(人均110)；R3「xxx店不错，就是太贵了」→ 语义=其余条件都满意只要比这家便宜的同类，无解。
+
+**根因（定案）**：用户表达的是 critique（对上一推荐的相对反馈），CRS 经典范式 critique 是 acceptance 的 mandatory condition、应视为硬约束（ACM Survey 10.1145/3453154、10.1145/3442381.3450123）；而 schema 只有绝对数值预算；「平价」被错误建模成软偏好。经典文献：Chen & Pu "Critiquing-based recommenders: survey and trends"（ACM TIIS 2012）、McGinty & Smyth incremental critiquing（critique retention：收紧结果物化进约束字段，脉冲只对未物化元组生效）、Reilly et al. entry-point（推荐前 critique 的入口点选择）、Pu & Chen tradeoff support（批硬夸软不对称）。
+
+**GLM 评审定案（锚/算子/边界/集成）**：① 锚解析优先级链=显式店名→指代焦点店→已展示集→存活池→上一轮已接受结果→菜系 P25→降级偏好标签；② exclusion 与 bound 解耦（凡 critique 必 exclude 被锚定店/展示集，bound 另算——R2 最大失败是没排除被否决的朝天门）；③ min(候选)-1 有致命反例（用户只见过展示集，池里未展示的便宜店不该被误杀）→ 收紧算子改 bound=锚值×(1-步长[magnitude])、维度配步长；④ DEFAULT_LEVEL 硬编码 60 无空池保证→改菜系价格分位 P25（第二批）；⑤ 批硬夸软不对称（被批维度→硬界，被夸维度→软偏好提升）；⑥ direction 是脉冲型（one-shot），物化进约束字段后清零，防「再便宜点」两连击丢第一次；⑦ APPLY_CRITIQUE 作为决策事件命令进状态机转移表（第二批）；⑧ schema 缺口=价格下界字段（direction=+1 想吃好点的，第二批）；⑨ 与 lockedConstraints 冲突时锁优先除非 critique 带显式数值。
+
+**探查发现（修正双方盲区，采用「升级而非新建」）**：机制已半成形——ConversationCriteriaMerger.applyRelativeConstraints（收紧预算/半径）+ refinementExclusions（排除已展示/候选店）+ 锚函数 relativePriceAnchor/relativeDistanceAnchor（focused 店优先、否则池最低）都已存在，但全部纯词表驱动（"太贵/便宜点"），"好贵啊/平价一点"漏词→既不收紧也不排除；消费端 ConsumptionDecisionService L814 硬过滤 avgPrice>budgetPerPerson 自动生效——只要 budget 被收紧下游即生效。
+
+**第一批实现（2026-09-04）**：DecisionConstraints +budgetDirection/radiusDirection（int 三态 -1/0/1，默认0）；ConstraintExtractor schema +2 字段 + 规则兜底（好贵/太贵/平价/便宜/实惠/贵一点/更便宜/有点贵→budgetDirection=-1；更近/近一点/太远/远一点→radiusDirection=-1）+ normalize 空值归0；Merger merge 6 参重载(+shownShopIds)、applyRelativeConstraints 消费 direction+扩充词表、预算算子 Math.max(20, round(anchorPrice*0.85))、锚函数 shown 集优先（focused→shown min→pool min）、merge 末尾 direction 清零；ChatOrchestrationService prepareDecision 提前 extract 存 extracted、refinementExclusions 消费 direction（非零即触发 exclusion，统一触发权防「收紧生效但排除失效」双真相第7例）、isSearchRefinement 词表补词降级为路由便宜快路径。
+
+**验证**：ConversationCriteriaMergerTest 18/18（119→102 断言迁移属设计变更导致期望迁移，测试注释写推导 120×0.85=102）；全量 mvn test 278/0/0 BUILD SUCCESS（一次 exit 1 属偶发，重跑即 0，surefire 报告全绿）。
+
+**第二批待做（记待修 #50）**：×0.85 固定步长按 magnitude 细化、DEFAULT 菜系 P25 分位、价格下界字段、APPLY_CRITIQUE 状态机集成、锁定约束冲突规则写死。
+
+**面试叙事**：① 相对反馈 critique vs 形式化查询是强区分度问题（业界 critique 应视为硬约束的 ACM 论据）；② 「机制已半成形、升级而非新建」的探查发现（比从零建 APPLY_CRITIQUE 便宜一个量级）；③ 三个设计决策=锚改展示集（用户只能抱怨见过的东西）/ 脉冲清零（防残留 direction 后续轮误收紧）/ 触发权统一（direction 字段是唯一真相来源，防双真相第7例）；④ GLM 评审→代码查证→修正盲区→落地计划的闭环。
+
 ## 封板状态
 
 **本项目已进入封板状态。**
@@ -1992,5 +2010,7 @@ append-only，量级可控（单行 1-5KB，最新版查询走 (chat_id, version
 2. 明确影响核心正确性或业务质量
 3. 现有架构无法解释
 4. 修复成本与收益明确匹配
+
+**封板后例外（2026-09-04）**：critique 相对反馈修复经用户批准重新开启（满足封板重开四条件：稳定复现 R1/R2/R3、明确影响核心正确性、现有架构无法解释——schema 只有绝对数值预算无法表达相对反馈、修复成本明确）。该修复计入 Known Limitations #24，处理完成后继续封板。
 
 当前代码、实验、文档已全部提交，文档一致性已通过静态检查。
