@@ -1119,6 +1119,22 @@ class ChatOrchestrationServiceTest {
         assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "附近有什么推荐"));
     }
     @Test
+    void critiqueWordsDoNotSwallowShopInquiry() {
+        // GLM 碰撞疫苗（2026-09-04）：critique 词表新增「实惠/平价/好贵」后，
+        // 聚焦商户的问句「这家店实惠吗」必须走 BUSINESS_FOLLOW_UP（isFocusedShopQuestion 短路 + isShopInquiry），
+        // 不被 isSearchRefinement 的「实惠」子串吞成 START_DECISION 误收紧预算。
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        // 聚焦信号存在 → isNewRecommendationIntent 短路 false
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "这家店实惠吗"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "这里平价吗"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "这家店贵吗"));
+        // 聚焦信号 + ShopInquiry 强词
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isFocusedShopQuestion", "这家店实惠吗"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isShopInquiry", "这家店实惠吗"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isShopInquiry", "这家店贵吗"));
+    }
+
+    @Test
     void shopInquiryWithYouShenMeNotSwallowedByStartDecision() {
         // GLM 碰撞检查："有什么"进入 isNewRecommendationIntent 后，
         // "这家店有什么优惠"必须走 BUSINESS_FOLLOW_UP（isFocusedShopQuestion 兜底 + isShopInquiry），

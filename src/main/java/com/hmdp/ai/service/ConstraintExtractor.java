@@ -33,11 +33,26 @@ public class ConstraintExtractor {
 
     public DecisionConstraints extract(String query) {
         try {
-            return enforceCurrentDeviceIntent(normalize(extractByModel(query)), query);
+            return enforceCurrentDeviceIntent(applyDirectionFallback(normalize(extractByModel(query)), query), query);
         } catch (Exception e) {
             log.warn("[AI][model] action=CONSTRAINT_EXTRACTION event=FALLBACK reason={}", e.getClass().getSimpleName());
-            return enforceCurrentDeviceIntent(normalize(extractByRule(query)), query);
+            return enforceCurrentDeviceIntent(applyDirectionFallback(normalize(extractByRule(query)), query), query);
         }
+    }
+
+    /** Rule fallback for relative intent (critique) that runs on BOTH model and rule paths.
+     *  Previously this lived only in extractByRule (LLM-failure path), so normal model extraction
+     *  never saw "好贵/平价" — R1 bug: budgetDirection stayed 0 on an opening critique. */
+    private DecisionConstraints applyDirectionFallback(DecisionConstraints constraints, String query) {
+        if ((constraints.getBudgetDirection() == null || constraints.getBudgetDirection() == 0)
+                && containsAny(query, "好贵", "太贵", "平价", "便宜", "实惠", "贵一点", "更便宜", "有点贵")) {
+            constraints.setBudgetDirection(-1);
+        }
+        if ((constraints.getRadiusDirection() == null || constraints.getRadiusDirection() == 0)
+                && containsAny(query, "更近", "近一点", "近点", "附近一点", "太远", "远一点")) {
+            constraints.setRadiusDirection(-1);
+        }
+        return constraints;
     }
 
     private DecisionConstraints enforceCurrentDeviceIntent(DecisionConstraints constraints, String query) {
@@ -90,12 +105,6 @@ public class ConstraintExtractor {
         Matcher budget = BUDGET_PATTERN.matcher(query);
         if (budget.find()) {
             constraints.setBudgetPerPerson(Integer.valueOf(budget.group(1)));
-        }
-        if (containsAny(query, "好贵", "太贵", "平价", "便宜", "实惠", "贵一点", "更便宜", "有点贵")) {
-            constraints.setBudgetDirection(-1);
-        }
-        if (containsAny(query, "更近", "近一点", "近点", "附近一点", "太远", "远一点")) {
-            constraints.setRadiusDirection(-1);
         }
         Matcher radiusMatcher = RADIUS_PATTERN.matcher(query);
         if (radiusMatcher.find()) {

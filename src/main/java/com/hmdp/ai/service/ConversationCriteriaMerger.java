@@ -83,6 +83,12 @@ public class ConversationCriteriaMerger {
                 || (delta.getBudgetDirection() != null && delta.getBudgetDirection() < 0);
         if (cheaper) {
             Long anchorPrice = relativePriceAnchor(candidatePool, focusedShopId, shownShopIds);
+            if (anchorPrice == null) {
+                // opening critique (R1): no pool/shown/focused anchor yet — fall back to a cuisine-level
+                // default price band so "平价一点" still lands a hard budget instead of no-op.
+                // P25 data-driven percentile is the second-batch evolution (待修 #50).
+                anchorPrice = defaultBudgetAnchor(merged.getCuisine());
+            }
             if (anchorPrice != null && anchorPrice > 1L) {
                 // proportional step instead of anchorPrice-1: a -1 unit is meaningless for price (GLM review 2026-09-04)
                 int budget = Math.max(20, (int) Math.round(anchorPrice * 0.85D));
@@ -113,6 +119,33 @@ public class ConversationCriteriaMerger {
         }
         merged.setBudgetDirection(0);
         merged.setRadiusDirection(0);
+    }
+
+    /** Default price band per cuisine for opening critiques (no candidate pool yet).
+     *  Hard-coded minimal version; second batch replaces with cuisine price-distribution P25 (待修 #50). */
+    private Long defaultBudgetAnchor(String cuisine) {
+        if (cuisine == null || cuisine.isEmpty()) return 60L;
+        switch (cuisine) {
+            case "火锅": return 60L;
+            case "烧烤": return 70L;
+            case "日料": return 85L;
+            case "韩餐": return 70L;
+            case "西餐": return 90L;
+            case "东南亚": return 70L;
+            case "港式": return 65L;
+            case "快餐简餐": return 30L;
+            case "面食": return 25L;
+            case "粉面": return 25L;
+            case "饺子馄饨": return 30L;
+            case "小吃": return 25L;
+            case "自助餐": return 80L;
+            case "海鲜": return 100L;
+            case "素食": return 45L;
+            case "咖啡": return 40L;
+            case "甜品饮品": return 35L;
+            case "面包烘焙": return 30L;
+            default: return 60L;
+        }
     }
 
     /** Anchor = the shop the user is actually complaining about: focused shop first, then the shown (displayed) set,

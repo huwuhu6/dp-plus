@@ -306,4 +306,27 @@ class ConversationCriteriaMergerTest {
         assertEquals(-1, result.getConstraints().getBudgetPerPerson());
     }
 
+
+    @Test
+    void openingCritiqueUsesCuisineDefaultAnchorWhenPoolEmpty() {
+        // R1 bug（2026-09-04 复现）：开场第一句「火锅有点贵，有没有稍微平价一点的」，
+        // 候选池空、无 shown、无 focused 店，锚链全空 → 此前收紧 no-op，budget 仍 -1，
+        // 推荐不过滤价格（原样推人均 110 朝天门）。
+        // 修复：锚链末端加菜系 DEFAULT_LEVEL（火锅=60），budget=60*0.85=51。
+        ConversationCriteriaMerger merger = new ConversationCriteriaMerger();
+        DecisionConstraints active = new DecisionConstraints();
+        active.setCuisine("火锅");
+        active.setBudgetPerPerson(-1);
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setCuisine("火锅");
+        delta.setBudgetDirection(-1);
+        CriteriaMergeResult result = merger.merge(
+                active, delta, "火锅有点贵，有没有稍微平价一点的",
+                java.util.Collections.emptyList(), null, java.util.Collections.emptyList());
+        assertEquals(51, result.getConstraints().getBudgetPerPerson());
+        assertTrue(result.getConstraints().getLockedConstraints().contains("budgetPerPerson"));
+        // direction 脉冲清零
+        assertEquals(0, result.getConstraints().getBudgetDirection());
+    }
+
 }
