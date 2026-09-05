@@ -249,10 +249,14 @@ class ChatOrchestrationServiceTest {
         second.setShopId(10L); second.setAvgPrice(80L);
         com.hmdp.ai.dto.DecisionRecommendation third = new com.hmdp.ai.dto.DecisionRecommendation();
         third.setShopId(11L); third.setAvgPrice(95L);
-        memory.setCandidatePool(Collections.singletonList(third));
-        memory.setShownShopIds(Arrays.asList(9L, 10L, 11L));
+        TestTaskFixture.append(memory, 1L, Arrays.asList(first, second, third));
         memory.setFocusedShopId(9L);
         when(stateService.workingMemory(state)).thenReturn(memory);
+        when(stateService.shownShopIds(memory)).thenReturn(Arrays.asList(9L, 10L, 11L));
+        when(stateService.latestCandidatePool(memory)).thenReturn(Arrays.asList(first, second, third));
+        when(stateService.activeCriteria(memory)).thenReturn(memory.activeTask().getCriteria());
+        when(stateService.transitionTask(org.mockito.Mockito.eq(memory), any(DecisionConstraints.class), anyString()))
+                .thenReturn(new ConversationStateService.TaskTransition("UPDATE", "TEST", memory.getActiveTaskId(), memory.getActiveTaskId()));
         com.hmdp.ai.dto.AgentSessionContext agentContext = new com.hmdp.ai.dto.AgentSessionContext();
         agentContext.setCandidatePoolSnapshot(Arrays.asList(first, second, third));
         agentContext.setFocusedShopId(9L);
@@ -750,9 +754,11 @@ class ChatOrchestrationServiceTest {
         when(stateService.getOrCreate("test-chat")).thenReturn(state);
         when(stateService.agentContext(state)).thenReturn(new com.hmdp.ai.dto.AgentSessionContext());
         com.hmdp.ai.dto.ConversationWorkingMemory memory = new com.hmdp.ai.dto.ConversationWorkingMemory();
-        memory.getActiveCriteria().setTargetCity("北京"); memory.getActiveCriteria().setLocationIntent("EXPLICIT_TARGET");
+        TestTaskFixture.task(memory).getCriteria().setTargetCity("北京"); TestTaskFixture.task(memory).getCriteria().setLocationIntent("EXPLICIT_TARGET");
         when(stateService.workingMemory(state)).thenReturn(memory);
         when(stateService.slots(state)).thenReturn(new ConversationSlots());
+        when(stateService.transitionTask(org.mockito.Mockito.eq(memory), any(DecisionConstraints.class), anyString()))
+                .thenReturn(new ConversationStateService.TaskTransition("UPDATE", "TEST", memory.getActiveTaskId(), memory.getActiveTaskId()));
         DecisionResponse paused = new DecisionResponse();
         paused.setSessionId(100L); paused.setStatus("ZERO_RESULT_NO_DATA");
         when(decisionService.getDecision(100L)).thenReturn(paused);

@@ -29,6 +29,8 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -39,6 +41,27 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class AiConversationEvaluationServiceTest {
+    @Test
+    void submitsRobustnessSubsetWithDeterministicDeduplicationAndRejectsUnknownCodes() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ConversationEvaluationDatasetLoader loader = mock(ConversationEvaluationDatasetLoader.class);
+        AiConversationEvaluationRunMapper runs = mock(AiConversationEvaluationRunMapper.class);
+        AiProperties properties = new AiProperties(); properties.setConversationRobustnessDatasetVersion("conversation-robustness-v1");
+        ReflectionTestUtils.setField(service, "datasetLoader", loader); ReflectionTestUtils.setField(service, "runMapper", runs);
+        ReflectionTestUtils.setField(service, "aiProperties", properties); ReflectionTestUtils.setField(service, "evaluationExecutor", (Executor) command -> { });
+        AiConversationEvaluationCase a = new AiConversationEvaluationCase(); a.setId(1L); a.setCaseCode("A");
+        AiConversationEvaluationCase b = new AiConversationEvaluationCase(); b.setId(2L); b.setCaseCode("B");
+        when(loader.loadCases("conversation-robustness-v1")).thenReturn(List.of(a, b));
+        AtomicReference<AiConversationEvaluationRun> captured = new AtomicReference<>();
+        doAnswer(invocation -> { AiConversationEvaluationRun run = invocation.getArgument(0); run.setId(7L); captured.set(run); return 1; }).when(runs).insert(any(AiConversationEvaluationRun.class));
+
+        java.util.LinkedHashSet<String> duplicateA = new java.util.LinkedHashSet<>(); duplicateA.add("A"); duplicateA.add("A");
+        assertEquals(1, service.submitRobustnessCases(duplicateA).getRun().getCaseCount());
+        assertEquals(1, captured.get().getCaseCount());
+        assertEquals(2, service.submitRobustnessCases(Set.of("A", "B")).getRun().getCaseCount());
+        assertThrows(IllegalArgumentException.class, () -> service.submitRobustnessCases(Set.of("A", "NOT_EXIST")));
+    }
+
     @Test
     void evaluatesTurnStateToolsAndRelationsWithoutChangingLegacyAssertions() throws Exception {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
@@ -80,6 +103,22 @@ class AiConversationEvaluationServiceTest {
                 memory("火锅", Collections.emptyList(), Collections.emptyList(), null, 10L),
                 memory("日料", list(2L), list(2L), 2L, 11L),
                 memory("日料", list(2L), list(2L), 2L, 11L));
+        when(stateService.activeCriteria(any(ConversationWorkingMemory.class))).thenAnswer(i -> {
+            com.hmdp.ai.dto.DecisionTaskState task = i.<ConversationWorkingMemory>getArgument(0).activeTask();
+            return task == null ? null : task.getCriteria();
+        });
+        when(stateService.latestCandidatePool(any(ConversationWorkingMemory.class))).thenAnswer(i -> {
+            ConversationWorkingMemory memory = i.getArgument(0); com.hmdp.ai.dto.DecisionTaskState task = memory.activeTask();
+            if (task == null || task.getRecommendationBatches().isEmpty()) return Collections.emptyList();
+            return task.getRecommendationBatches().get(task.getRecommendationBatches().size() - 1).getCandidates().stream().map(ref -> recommendation(ref.getShopId())).collect(java.util.stream.Collectors.toList());
+        });
+        when(stateService.shownShopIds(any(ConversationWorkingMemory.class))).thenAnswer(i -> {
+            List<Long> ids = new ArrayList<>(); for (com.hmdp.ai.dto.RecommendationBatch batch : i.<ConversationWorkingMemory>getArgument(0).activeTask().getRecommendationBatches()) for (com.hmdp.ai.dto.RecommendationCandidateRef ref : batch.getCandidates()) if (!ids.contains(ref.getShopId())) ids.add(ref.getShopId()); return ids;
+        });
+        when(stateService.latestSourceDecisionSessionId(any(ConversationWorkingMemory.class))).thenAnswer(i -> {
+            com.hmdp.ai.dto.DecisionTaskState task = i.<ConversationWorkingMemory>getArgument(0).activeTask(); return task.getRecommendationBatches().isEmpty() ? null : task.getRecommendationBatches().get(task.getRecommendationBatches().size() - 1).getDecisionSessionId();
+        });
+        when(stateService.activeTask(any(ConversationWorkingMemory.class))).thenAnswer(i -> i.<ConversationWorkingMemory>getArgument(0).activeTask());
         AiAgentToolCall call = new AiAgentToolCall();
         call.setToolName("get_shop_detail"); call.setToolInputJson("{\"shopId\":2,\"includeHours\":true}"); call.setTurnNo(3);
         when(toolCallMapper.selectList(any())).thenReturn(Collections.singletonList(call));
@@ -508,13 +547,12 @@ class AiConversationEvaluationServiceTest {
     private ConversationWorkingMemory memory(String cuisine, List<Long> candidates, List<Long> shown,
                                              Long focusedShopId, Long sessionId) {
         ConversationWorkingMemory memory = new ConversationWorkingMemory();
-        memory.getActiveCriteria().setCuisine(cuisine);
-        memory.setCandidatePool(new ArrayList<DecisionRecommendation>());
-        for (Long candidate : candidates) memory.getCandidatePool().add(recommendation(candidate));
-        memory.setShownShopIds(new ArrayList<Long>(shown));
+        TestTaskFixture.task(memory).getCriteria().setCuisine(cuisine);
+        List<DecisionRecommendation> batch = new ArrayList<DecisionRecommendation>();
+        for (Long candidate : candidates) batch.add(recommendation(candidate));
+        TestTaskFixture.append(memory, sessionId, batch);
         memory.setFocusedShopId(focusedShopId);
         memory.setActiveDecisionSessionId(sessionId);
-        memory.setSourceDecisionSessionId(sessionId);
         return memory;
     }
 

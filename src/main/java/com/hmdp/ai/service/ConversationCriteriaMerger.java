@@ -69,19 +69,9 @@ public class ConversationCriteriaMerger {
         if (delta.getRemovedPreferences() != null) {
             for (String preference : delta.getRemovedPreferences()) removePreference(result, merged, preference);
         }
-        if (containsAny(text, "不要安静", "不用安静", "不用太安静", "别太安静")) removePreference(result, merged, "安静");
-        if (containsAny(text, "排队也行", "不用避开排队", "不想避开排队")) removePreference(result, merged, "不排队");
         if (containsAny(text, "不要辣", "不吃辣", "清淡", "少油", "不油腻")) addPreference(result, merged, "清淡");
 
         if (containsAny(text, "不限菜系", "什么都行", "随便吃", "不限制菜系")) clear(result, "cuisine", () -> merged.setCuisine(""));
-        if (containsAny(text, "预算不限", "不限制预算", "人均不限")) {
-            clear(result, "budgetPerPerson", () -> merged.setBudgetPerPerson(-1));
-            unlockBudgetWhenExplicitlyOverridden(result, merged);
-        }
-        if (containsAny(text, "不限距离", "不考虑距离", "全城都行")) {
-            clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
-            clear(result, "nearby", () -> merged.setNearby(false));
-        }
         applyRelativeConstraints(result, merged, delta, text, candidatePool, focusedShopId, shownShopIds);
 
         merged.setPreferences(unique(merged.getPreferences()));

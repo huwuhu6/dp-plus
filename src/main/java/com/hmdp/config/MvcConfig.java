@@ -26,6 +26,7 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/ai/chat/**",
                         "/ai/decisions/**",
                         "/ai/retrieval/**",
+                        "/ai/evaluations/**",
                         "/user/code",
                         "/user/login"
                 )

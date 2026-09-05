@@ -42,7 +42,10 @@ class ConversationCriteriaMergerTest {
         previous.setRadiusKm(2D);
         previous.setNearby(true);
 
-        CriteriaMergeResult result = merger.merge(previous, new DecisionConstraints(), "全城都行，预算不限，什么都行");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.getClearedFields().add("cuisine"); delta.getClearedFields().add("budgetPerPerson");
+        delta.getClearedFields().add("radiusKm"); delta.getClearedFields().add("nearby");
+        CriteriaMergeResult result = merger.merge(previous, delta, "");
 
         assertEquals("", result.getConstraints().getCuisine());
         assertEquals(-1, result.getConstraints().getBudgetPerPerson());

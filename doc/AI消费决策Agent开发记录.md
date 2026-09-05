@@ -2093,3 +2093,17 @@ Run 85 是正式 Flat baseline：24 case、完整通过 3，Route/Tool/Final Sta
 5. **Clarification / Escape**：确认位置后持久化 `dialogPhase` 为 RECOMMENDING；命名地点路径则实际新开 session 并完成推荐，与“澄清中仅形成可确认候选”的 Ground Truth 不符。
 
 **验证**：`mvn -q test` 通过；`AiConversationEvaluationServiceTest` 14/14 通过。JSONL 加载正常，未发生 Dataset Schema 或 Loader 失败。
+
+### Working Memory V2 收口：统一 Pipeline Snapshot 与 Task Scope 验收（2026-09-05）
+
+**问题演进**：Flat Working Memory 只有全局 criteria/entity context，A→B→A 会让 B 的预算、地点和区域污染 A。V2 引入 Lightweight Task Registry（`activeTaskId`、task-local criteria/searchLocation/constraintSources）及 `RecommendationBatch` 后，Run 87 的 Scope 仍为 2/4；逐轮评测显示 `taskCount` 始终为 1、`activeTaskId` 不变。
+
+**真实根因（双状态视图）**：不是 CREATE/SWITCH 识别规则未命中。trace 证明 Pipeline context 已成功 CREATE/SWITCH；但 `ConversationStateService.reduceCriteria()` 又从持久层读取 transition 前的 Working Memory。于是同一次处理同时存在“已 transition 的内存 snapshot”和“旧持久 snapshot”，reducer 使用后者并在首次持久化前覆盖前者。
+
+**修复原则**：一次 Pipeline processing 必须让 `bootstrap snapshot → task transition → constraint merge → reduce → persist` 使用同一 Working Memory snapshot；中途不得重载旧状态。`reduceCriteria` 因此接收当前 Pipeline memory。Run 89 全量 robustness 为 7/24；Run 90 Scope subset 为 4/4，且 ID 轨迹验证 A/B/C 为独立 Task、回到 A 使用原 Task ID，B 的西湖不泄漏，SWITCH 后 budget 80 仅作用 A；普通地点 refinement 仍保持一个 Task。Scope 演进：Run85 Flat 2/4，Run87 V2 初版 2/4，Run89 4/4，Run90 4/4。
+
+**最终边界**：conversation scope 为 deviceLocation、dialogPhase、pendingLocationCandidates、activeDecisionSession、focusedShop 和 activeTaskId；task scope 为 criteria、searchLocation、constraintSources、recommendationBatches。latest candidate pool = latest batch，shownShopIds = batches union，source decision session = latest batch session。旧 Flat `activeCriteria/candidatePool/shownShopIds/searchLocation/sourceDecisionSessionId` 不再是独立事实源。
+
+**评测反馈效率**：新增 `POST /ai/evaluations/conversation-runs/robustness?caseCodes=...`。无参数跑完整集；支持单/多 Case、去重；未知或混合非法 code 明确失败，Run.caseCount 反映实际执行量。Run90 是首次正式验证（4 Case、4/4），其目的仅是缩短定向迭代周期，不改变评测语义。
+
+**边界冻结**：剩余红灯归入独立后续问题：Compound Intent/Single Action Contract、Location Clarification、preference/radius mutation extraction、历史 batch ordinal resolver、refreshed-batch binding、部分 Routing/Tool binding；不再归因或扩展 Working Memory V2。

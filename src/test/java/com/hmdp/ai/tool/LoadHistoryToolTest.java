@@ -59,8 +59,7 @@ class LoadHistoryToolTest {
         when(v.get("chat-1", 3)).thenReturn(snapshot);
         ConversationWorkingMemory memory = new ConversationWorkingMemory();
         memory.setDialogPhase("COMPLETED");
-        memory.setCandidatePool(new ArrayList<com.hmdp.ai.dto.DecisionRecommendation>());
-        memory.setShownShopIds(new ArrayList<Long>());
+        memory.ensureActiveTask();
         when(s.historicalWorkingMemory("{}")).thenReturn(memory);
         when(c.load("chat-1")).thenReturn(Collections.emptyList());
 

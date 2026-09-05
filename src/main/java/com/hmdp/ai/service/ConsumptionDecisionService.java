@@ -259,7 +259,6 @@ public class ConsumptionDecisionService {
             if (requiresLocation(request)) {
                 return pauseForLocation(session, response, metrics, start, request);
             }
-            applyNearbyDefaultRadius(constraints, session.getId());
             // Keep the durable snapshot aligned with the constraints behind rendered options.
             session.setConstraintsJson(objectMapper.writeValueAsString(constraints));
             updateSessionIfStatus(session, session.getStatus());
@@ -395,14 +394,6 @@ public class ConsumptionDecisionService {
 
     private boolean isLightTasteIntent(String query) {
         return query.contains("清淡") || query.contains("少油") || query.contains("不油腻") || query.contains("清爽");
-    }
-
-    private void applyNearbyDefaultRadius(DecisionConstraints constraints, Long sessionId) {
-        if (Boolean.TRUE.equals(constraints.getNearby()) && constraints.getRadiusKm() <= 0) {
-            constraints.setRadiusKm(3D);
-            constraints.getSystemNotes().add("“附近”按默认 3km 解释");
-            log.info("[AI][session={}] state=RETRIEVING action=NEARBY_DEFAULT_RADIUS radiusKm=3.0", sessionId);
-        }
     }
 
     private DecisionResponse pauseForLocation(AiDecisionSession session, DecisionResponse response,

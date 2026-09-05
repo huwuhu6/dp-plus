@@ -2,6 +2,8 @@ package com.hmdp.ai.dto;
 import lombok.Data;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 @Data
 public class DecisionTaskState {
     private String taskId;
@@ -9,6 +11,5 @@ public class DecisionTaskState {
     private DecisionConstraints criteria = new DecisionConstraints();
     private Map<String, ConstraintSource> constraintSources = new LinkedHashMap<>();
     private ConversationLocationSlot searchLocation = new ConversationLocationSlot();
-    private int createdTurnNo;
-    private int lastActivatedTurnNo;
+    private List<RecommendationBatch> recommendationBatches = new ArrayList<>();
 }

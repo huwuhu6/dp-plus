@@ -4,7 +4,6 @@ import lombok.Data;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * Durable, chat-scoped business state. Message history is only supporting context;
@@ -22,30 +21,32 @@ public class ConversationWorkingMemory {
     private List<ResolvedLocationCandidate> pendingLocationCandidates = new ArrayList<ResolvedLocationCandidate>();
     private String activeTaskId;
     private List<DecisionTaskState> tasks = new ArrayList<DecisionTaskState>();
-    private List<DecisionRecommendation> candidatePool = new ArrayList<DecisionRecommendation>();
-    /** Shop ids already presented in the current retrieval domain; used for explicit refresh requests. */
-    private List<Long> shownShopIds = new ArrayList<Long>();
     private Long focusedShopId;
     private String focusedShopName;
     private String dialogPhase = "IDLE";
-    private Long sourceDecisionSessionId;
     private String lastPolicyAction = "NONE";
     private String lastPolicyReason;
 
-    /** V2 canonical criteria live in the active task; no flat criteria is persisted. */
+    /** Read-only lookup. State readers must not create a task as a side effect. */
     public DecisionTaskState activeTask() {
-        for (DecisionTaskState task : tasks) if (task.getTaskId().equals(activeTaskId)) return task;
+        if (tasks == null || activeTaskId == null) return null;
+        for (DecisionTaskState task : tasks) if (task != null && activeTaskId.equals(task.getTaskId())) return task;
+        return null;
+    }
+
+    /** Write-path helper for a conversation whose first recommendation task is being created. */
+    public DecisionTaskState ensureActiveTask() {
+        DecisionTaskState existing = activeTask();
+        if (existing != null) return existing;
         DecisionTaskState task = new DecisionTaskState();
-        task.setTaskId(UUID.randomUUID().toString());
+        task.setTaskId(java.util.UUID.randomUUID().toString());
         task.setTitle("当前推荐");
+        if (tasks == null) tasks = new ArrayList<DecisionTaskState>();
         tasks.add(task); activeTaskId = task.getTaskId();
         return task;
     }
-    // Transitional derived accessors for entity-context callers. They do not store a second criteria copy.
-    public DecisionConstraints getActiveCriteria() { return activeTask().getCriteria(); }
-    public void setActiveCriteria(DecisionConstraints criteria) { activeTask().setCriteria(criteria == null ? new DecisionConstraints() : criteria); }
     public ConversationLocationSlot getLocation() { return deviceLocation; }
     public void setLocation(ConversationLocationSlot location) { this.deviceLocation = location; }
-    public ConversationLocationSlot getSearchLocation() { return activeTask().getSearchLocation(); }
-    public void setSearchLocation(ConversationLocationSlot location) { activeTask().setSearchLocation(location); }
+    /** Deprecated read projection for legacy location policy code; never creates a task. */
+    public ConversationLocationSlot getSearchLocation() { DecisionTaskState task = activeTask(); return task == null ? null : task.getSearchLocation(); }
 }

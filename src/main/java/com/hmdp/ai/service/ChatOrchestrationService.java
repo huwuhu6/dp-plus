@@ -312,27 +312,26 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             return;
         }
         com.hmdp.ai.dto.DecisionConstraints extracted = constraintExtractor.extract(context.getEffectiveMessage());
-        // V2 task transition is deterministic and deliberately small: explicit historical wording wins;
-        // a simultaneous destination and cuisine replacement opens an independent recommendation task.
-        if (!conversationStateService.activateHistoricalTask(context.getWorkingMemory(), context.getOriginalMessage())) {
-            com.hmdp.ai.dto.DecisionConstraints previous = context.getWorkingMemory().getActiveCriteria();
-            boolean separateDemand = hasText(extracted.getTargetCity()) && hasText(extracted.getCuisine())
-                    && hasText(previous.getTargetCity()) && hasText(previous.getCuisine())
-                    && (!extracted.getTargetCity().equals(previous.getTargetCity())
-                    && !extracted.getCuisine().equals(previous.getCuisine()));
-            if (separateDemand) conversationStateService.createTask(context.getWorkingMemory(), extracted.getTargetCity() + extracted.getCuisine());
-        }
+        com.hmdp.ai.dto.DecisionTaskState activeBefore = conversationStateService.activeTask(context.getWorkingMemory());
+        com.hmdp.ai.service.ConversationStateService.TaskTransition transition = conversationStateService.transitionTask(
+                context.getWorkingMemory(), extracted, context.getOriginalMessage());
+        com.hmdp.ai.dto.DecisionConstraints previous = conversationStateService.activeCriteria(context.getWorkingMemory());
+        if (previous == null) previous = new com.hmdp.ai.dto.DecisionConstraints();
+        log.info("[AI][task] event=TRANSITION chatId={} original={} effective={} action={} reason={} activeTaskBefore={} activeTaskAfter={} taskCount={} previous={} extracted={}",
+                context.getChatId(), compact(context.getOriginalMessage()), compact(context.getEffectiveMessage()), transition.action(),
+                transition.reason(), activeBefore == null ? null : activeBefore.getTaskId(), transition.activeTaskIdAfter(),
+                context.getWorkingMemory().getTasks().size(), compact(previous.toString()), compact(extracted.toString()));
         // critique is a single source of truth: direction != 0 (LLM) OR refinement words (rule fast-path) both feed exclusion
         List<Long> excludedCandidates = refinementExclusions(context.getContextRewrite(), context.getWorkingMemory(), extracted);
         request.setExcludeShopIds(excludedCandidates);
         com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(
-                context.getWorkingMemory().getActiveCriteria(), extracted,
-                context.getOriginalMessage(), context.getWorkingMemory().getCandidatePool(),
-                context.getWorkingMemory().getFocusedShopId(), context.getWorkingMemory().getShownShopIds());
+                previous, extracted,
+                context.getOriginalMessage(), conversationStateService.latestCandidatePool(context.getWorkingMemory()),
+                context.getWorkingMemory().getFocusedShopId(), conversationStateService.shownShopIds(context.getWorkingMemory()));
         context.setCriteriaMergeResult(mergeResult);
         context.setMergedConstraints(mergeResult.getConstraints());
         request.setQuery(cleanRetrievalQuery(context.getEffectiveMessage(), mergeResult.getConstraints()));
-        conversationStateService.reduceCriteria(context.getChatSession(), mergeResult);
+        conversationStateService.reduceCriteria(context.getChatSession(), context.getWorkingMemory(), mergeResult);
         conversationStateService.applyNamedSearchLocation(context.getChatSession(), mergeResult.getConstraints());
         applyLocationSlot(request, context.getChatSession(), mergeResult.getConstraints());
         log.info("[AI][chat] event=CRITERIA_MERGED chatId={} inherited={} replaced={} appended={} cleared={} invalidated={} query={}",
@@ -478,12 +477,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 contextRewrite == null ? null : contextRewrite.getOriginalQuery(),
                 contextRewrite == null ? null : contextRewrite.getRewrittenQuery());
         if (!refinement || memory == null) return excluded;
-        if (memory.getShownShopIds() != null && !memory.getShownShopIds().isEmpty()) {
-            excluded.addAll(memory.getShownShopIds());
+        List<Long> shown = conversationStateService.shownShopIds(memory);
+        if (!shown.isEmpty()) {
+            excluded.addAll(shown);
             return excluded;
         }
-        if (memory.getCandidatePool() == null) return excluded;
-        for (com.hmdp.ai.dto.DecisionRecommendation candidate : memory.getCandidatePool()) {
+        for (com.hmdp.ai.dto.DecisionRecommendation candidate : conversationStateService.latestCandidatePool(memory)) {
             if (candidate.getShopId() != null) excluded.add(candidate.getShopId());
         }
         return excluded;
@@ -567,15 +566,16 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     }
 
     private String workingMemorySummary(com.hmdp.ai.dto.ConversationWorkingMemory memory) {
-        if (memory == null || memory.getActiveCriteria() == null) return "尚未确认搜索条件。";
-        com.hmdp.ai.dto.DecisionConstraints criteria = memory.getActiveCriteria();
+        com.hmdp.ai.dto.DecisionConstraints criteria = memory == null ? null : conversationStateService.activeCriteria(memory);
+        if (criteria == null) return "尚未确认搜索条件。";
         List<String> facts = new ArrayList<>();
         if (hasText(criteria.getTargetCity())) facts.add("已锁定目标城市=" + criteria.getTargetCity());
         if (hasText(criteria.getTargetArea())) facts.add("已锁定目标区域=" + criteria.getTargetArea());
         if (hasText(criteria.getCuisine())) facts.add("菜系=" + criteria.getCuisine());
         if (criteria.getBudgetPerPerson() > 0) facts.add("预算上限=" + criteria.getBudgetPerPerson());
-        if (memory.getCandidatePool() != null && !memory.getCandidatePool().isEmpty()) {
-            facts.add("当前候选店铺数=" + memory.getCandidatePool().size());
+        List<com.hmdp.ai.dto.DecisionRecommendation> candidates = conversationStateService.latestCandidatePool(memory);
+        if (!candidates.isEmpty()) {
+            facts.add("当前候选店铺数=" + candidates.size());
         }
         return facts.isEmpty() ? "尚未确认搜索条件。" : String.join("；", facts) + "。";
     }
@@ -862,7 +862,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     /** A paused recommendation may be refined after unrelated small talk. */
     private boolean isContinuationRefinement(String message, AiChatSession state) {
         if (message == null || !message.contains("继续")) return false;
-        com.hmdp.ai.dto.DecisionConstraints criteria = conversationStateService.workingMemory(state).getActiveCriteria();
+        com.hmdp.ai.dto.DecisionConstraints criteria = conversationStateService.activeCriteria(conversationStateService.workingMemory(state));
         if (criteria == null) return false;
         boolean hasActiveDemand = hasText(criteria.getCuisine()) || hasText(criteria.getKeyword())
                 || hasText(criteria.getTargetCity()) || Boolean.TRUE.equals(criteria.getNearby());

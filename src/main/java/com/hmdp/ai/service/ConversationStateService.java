@@ -15,6 +15,8 @@ import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
+import com.hmdp.ai.dto.RecommendationBatch;
+import com.hmdp.ai.dto.RecommendationCandidateRef;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.entity.AiWorkingMemory;
 import com.hmdp.ai.mapper.AiChatSessionMapper;
@@ -110,15 +112,139 @@ public class ConversationStateService {
         return memory.activeTask();
     }
 
+    public DecisionTaskState ensureActiveTask(ConversationWorkingMemory memory) {
+        return memory.ensureActiveTask();
+    }
+
+    public DecisionConstraints activeCriteria(ConversationWorkingMemory memory) {
+        DecisionTaskState task = activeTask(memory);
+        return task == null ? null : task.getCriteria();
+    }
+
+    public ConversationLocationSlot searchLocation(ConversationWorkingMemory memory) {
+        DecisionTaskState task = activeTask(memory);
+        return task == null ? null : task.getSearchLocation();
+    }
+
+    public List<DecisionRecommendation> latestCandidatePool(ConversationWorkingMemory memory) {
+        DecisionTaskState task = activeTask(memory);
+        if (task == null || task.getRecommendationBatches() == null || task.getRecommendationBatches().isEmpty()) return new ArrayList<DecisionRecommendation>();
+        return recommendations(task.getRecommendationBatches().get(task.getRecommendationBatches().size() - 1));
+    }
+
+    public List<Long> shownShopIds(ConversationWorkingMemory memory) {
+        List<Long> shown = new ArrayList<Long>();
+        DecisionTaskState task = activeTask(memory);
+        if (task == null || task.getRecommendationBatches() == null) return shown;
+        for (RecommendationBatch batch : task.getRecommendationBatches()) for (DecisionRecommendation item : recommendations(batch)) {
+            if (item.getShopId() != null && !shown.contains(item.getShopId())) shown.add(item.getShopId());
+        }
+        return shown;
+    }
+
+    public Long latestSourceDecisionSessionId(ConversationWorkingMemory memory) {
+        DecisionTaskState task = activeTask(memory);
+        if (task == null || task.getRecommendationBatches() == null || task.getRecommendationBatches().isEmpty()) return null;
+        return task.getRecommendationBatches().get(task.getRecommendationBatches().size() - 1).getDecisionSessionId();
+    }
+
+    private boolean activateTaskForDecisionSession(ConversationWorkingMemory memory, Long sessionId) {
+        if (sessionId == null || memory.getTasks() == null) return false;
+        for (DecisionTaskState task : memory.getTasks()) {
+            if (task.getRecommendationBatches() == null) continue;
+            for (RecommendationBatch batch : task.getRecommendationBatches()) {
+                if (sessionId.equals(batch.getDecisionSessionId())) {
+                    if (!task.getTaskId().equals(memory.getActiveTaskId())) {
+                        memory.setActiveTaskId(task.getTaskId());
+                        memory.setFocusedShopId(null); memory.setFocusedShopName(null);
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public DecisionTaskState createTask(ConversationWorkingMemory memory, String title) {
         DecisionTaskState task = new DecisionTaskState();
         task.setTaskId(UUID.randomUUID().toString());
         task.setTitle(title == null || title.isBlank() ? "新的推荐" : title);
-        task.setCreatedTurnNo(memory.getTasks().size() + 1);
-        task.setLastActivatedTurnNo(task.getCreatedTurnNo());
         memory.getTasks().add(task); memory.setActiveTaskId(task.getTaskId());
         memory.setFocusedShopId(null); memory.setFocusedShopName(null);
         return task;
+    }
+
+    /**
+     * Selects the task that must receive a decision delta before that delta is merged.
+     * A task identity is deliberately limited to explicit destination and cuisine: budgets
+     * and preferences refine an existing demand rather than creating a sibling task.
+     */
+    public TaskTransition transitionTask(ConversationWorkingMemory memory, DecisionConstraints extracted, String message) {
+        DecisionTaskState before = activeTask(memory);
+        if (before == null) {
+            ensureActiveTask(memory);
+            return new TaskTransition("UPDATE", "INITIAL_TASK", null, memory.getActiveTaskId());
+        }
+        if (activateHistoricalTask(memory, message)) {
+            return new TaskTransition("SWITCH", "EXPLICIT_HISTORY", before.getTaskId(), memory.getActiveTaskId());
+        }
+
+        DemandSignature resolved = DemandSignature.resolve(before.getCriteria(), extracted);
+        DecisionTaskState matchingTask = uniqueHistoricalMatch(memory, resolved, before.getTaskId());
+        if (matchingTask != null) {
+            memory.setActiveTaskId(matchingTask.getTaskId());
+            memory.setFocusedShopId(null); memory.setFocusedShopName(null);
+            return new TaskTransition("SWITCH", "UNIQUE_SIGNATURE", before.getTaskId(), matchingTask.getTaskId());
+        }
+        if (isIndependentDemand(before.getCriteria(), resolved)) {
+            DecisionTaskState created = createTask(memory, resolved.title());
+            return new TaskTransition("CREATE", "DESTINATION_AND_CUISINE_REPLACED", before.getTaskId(), created.getTaskId());
+        }
+        return new TaskTransition("UPDATE", "REFINEMENT_OR_PARTIAL_REPLACEMENT", before.getTaskId(), before.getTaskId());
+    }
+
+    private DecisionTaskState uniqueHistoricalMatch(ConversationWorkingMemory memory, DemandSignature resolved, String activeTaskId) {
+        DecisionTaskState match = null;
+        for (DecisionTaskState task : memory.getTasks()) {
+            if (task == null || task.getTaskId().equals(activeTaskId) || !resolved.matches(DemandSignature.of(task.getCriteria()))) continue;
+            if (match != null) return null;
+            match = task;
+        }
+        return match;
+    }
+
+    private boolean isIndependentDemand(DecisionConstraints active, DemandSignature resolved) {
+        DemandSignature current = DemandSignature.of(active);
+        return current.hasCityAndCuisine() && resolved.hasCityAndCuisine()
+                && !current.city.equals(resolved.city) && !current.cuisine.equals(resolved.cuisine);
+    }
+
+    public record TaskTransition(String action, String reason, String activeTaskIdBefore, String activeTaskIdAfter) { }
+
+    private record DemandSignature(String city, String area, String cuisine) {
+        private static DemandSignature of(DecisionConstraints criteria) {
+            return new DemandSignature(normalizeCity(criteria == null ? null : criteria.getTargetCity()),
+                    normalize(criteria == null ? null : criteria.getTargetArea()),
+                    normalize(criteria == null ? null : criteria.getCuisine()));
+        }
+        private static DemandSignature resolve(DecisionConstraints previous, DecisionConstraints delta) {
+            DemandSignature base = of(previous);
+            return new DemandSignature(hasText(delta == null ? null : delta.getTargetCity()) ? normalizeCity(delta.getTargetCity()) : base.city,
+                    hasText(delta == null ? null : delta.getTargetArea()) ? normalize(delta.getTargetArea()) : base.area,
+                    hasText(delta == null ? null : delta.getCuisine()) ? normalize(delta.getCuisine()) : base.cuisine);
+        }
+        private boolean hasCityAndCuisine() { return !city.isEmpty() && !cuisine.isEmpty(); }
+        private boolean matches(DemandSignature other) {
+            return hasCityAndCuisine() && other.hasCityAndCuisine()
+                    && city.equals(other.city) && area.equals(other.area) && cuisine.equals(other.cuisine);
+        }
+        private String title() { return city + (area.isEmpty() ? "" : area) + cuisine; }
+        private static String normalizeCity(String value) {
+            String normalized = normalize(value);
+            return normalized.endsWith("市") ? normalized.substring(0, normalized.length() - 1) : normalized;
+        }
+        private static String normalize(String value) { return value == null ? "" : value.trim(); }
+        private static boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
     }
 
     public boolean activateHistoricalTask(ConversationWorkingMemory memory, String message) {
@@ -130,7 +256,7 @@ public class ConversationStateService {
             for (int i = memory.getTasks().size() - 1; i >= 0; i--) if (!memory.getTasks().get(i).getTaskId().equals(memory.getActiveTaskId())) { candidate = memory.getTasks().get(i); break; }
         }
         if (candidate == null) return false;
-        memory.setActiveTaskId(candidate.getTaskId()); candidate.setLastActivatedTurnNo(candidate.getLastActivatedTurnNo() + 1);
+        memory.setActiveTaskId(candidate.getTaskId());
         memory.setFocusedShopId(null); memory.setFocusedShopName(null);
         return true;
     }
@@ -158,7 +284,7 @@ public class ConversationStateService {
     /** An explicit destination is independent from, and takes precedence over, device location. */
     public ConversationLocationSlot usableSearchLocation(AiChatSession state) {
         ConversationWorkingMemory memory = workingMemory(state);
-        ConversationLocationSlot target = usable(memory.getSearchLocation());
+        ConversationLocationSlot target = usable(searchLocation(memory));
         return target == null ? usableLocation(state) : target;
     }
 
@@ -197,7 +323,7 @@ public class ConversationStateService {
             throw new IllegalArgumentException("地点候选不存在或已失效，请重新解析地点后再确认");
         }
         ResolvedLocationCandidate candidate = candidates.get(index);
-        ConversationLocationSlot target = memory.getSearchLocation();
+        ConversationLocationSlot target = ensureActiveTask(memory).getSearchLocation();
         boolean changed = materialLocationChange(target, candidate.getLatitude(), candidate.getLongitude());
         target.setStatus("AVAILABLE"); target.setLatitude(candidate.getLatitude()); target.setLongitude(candidate.getLongitude());
         target.setProvince(candidate.getProvince()); target.setCity(candidate.getCity()); target.setDistrict(candidate.getDistrict());
@@ -237,9 +363,16 @@ public class ConversationStateService {
     /** Applies the deterministic criteria delta before a new decision can reuse stale candidates. */
     public void reduceCriteria(AiChatSession state, CriteriaMergeResult reduction) {
         if (reduction == null || reduction.getConstraints() == null) return;
-        ConversationWorkingMemory memory = workingMemory(state);
-        DecisionTaskState task = activeTask(memory);
-        memory.setActiveCriteria(reduction.getConstraints());
+        reduceCriteria(state, workingMemory(state), reduction);
+    }
+
+    /** Persists a reduction against the pipeline snapshot so a task transition is not lost between nodes. */
+    public void reduceCriteria(AiChatSession state, ConversationWorkingMemory memory, CriteriaMergeResult reduction) {
+        if (reduction == null || reduction.getConstraints() == null) return;
+        if (memory == null) memory = workingMemory(state);
+        DecisionTaskState task = ensureActiveTask(memory);
+        normalizeNearbyDefault(task, reduction);
+        task.setCriteria(reduction.getConstraints());
         markConstraintSources(task, reduction);
         synchronizeNamedSearchLocation(state, memory, reduction);
         if (changesCandidateUniverse(reduction)) {
@@ -257,12 +390,13 @@ public class ConversationStateService {
     public void snapshotDecision(AiChatSession state, DecisionResponse decision) {
         if (decision == null) return;
         ConversationWorkingMemory memory = workingMemory(state);
-        memory.setSourceDecisionSessionId(decision.getSessionId()); memory.setDialogPhase(hasText(decision.getStatus()) ? decision.getStatus() : "IDLE");
-        if (decision.getConstraints() != null) memory.setActiveCriteria(decision.getConstraints());
+        DecisionTaskState task = ensureActiveTask(memory);
+        memory.setDialogPhase(hasText(decision.getStatus()) ? decision.getStatus() : "IDLE");
+        // Execution constraints are an immutable per-session input snapshot. The task reducer is
+        // the only normal writer of activeTask.criteria; execution must never overwrite it.
         List<DecisionRecommendation> recommendations = decision.getRecommendations() == null
                 ? new ArrayList<DecisionRecommendation>() : decision.getRecommendations();
-        memory.setCandidatePool(new ArrayList<DecisionRecommendation>(recommendations));
-        appendShownShopIds(memory, recommendations);
+        if (!sameBatch(task, decision.getSessionId(), recommendations)) appendRecommendationBatch(task, decision.getSessionId(), recommendations);
         if (!recommendations.isEmpty()) {
             DecisionRecommendation first = recommendations.get(0);
             memory.setFocusedShopId(first.getShopId()); memory.setFocusedShopName(first.getShopName());
@@ -271,12 +405,11 @@ public class ConversationStateService {
             memory.setFocusedShopId(null); memory.setFocusedShopName(null);
         }
         updateWorkingMemory(state, memory);
-        log.info("[AI][state] event=WORKING_MEMORY_SNAPSHOT chatId={} sessionId={} phase={} candidates={} focusedShopId={}", state.getChatId(), decision.getSessionId(), memory.getDialogPhase(), memory.getCandidatePool().size(), memory.getFocusedShopId());
+        log.info("[AI][state] event=WORKING_MEMORY_SNAPSHOT chatId={} sessionId={} phase={} candidates={} focusedShopId={}", state.getChatId(), decision.getSessionId(), memory.getDialogPhase(), recommendations.size(), memory.getFocusedShopId());
     }
 
     public void snapshotFollowUp(AiChatSession state, Long sessionId, Long focusedShopId, String focusedShopName) {
         ConversationWorkingMemory memory = workingMemory(state);
-        memory.setSourceDecisionSessionId(sessionId);
         if (focusedShopId != null) memory.setFocusedShopId(focusedShopId);
         if (hasText(focusedShopName)) memory.setFocusedShopName(focusedShopName);
         updateWorkingMemory(state, memory);
@@ -305,17 +438,16 @@ public class ConversationStateService {
                     : context.getBaseWorkingMemoryVersion(), latestVersion, sessionId);
         }
         ConversationWorkingMemory memory = workingMemory(state);
-        memory.setSourceDecisionSessionId(sessionId);
-        memory.setCandidatePool(new ArrayList<DecisionRecommendation>(context.getCandidatePoolSnapshot() == null
-                ? new ArrayList<DecisionRecommendation>() : context.getCandidatePoolSnapshot()));
-        memory.setShownShopIds(new ArrayList<Long>(context.getShownShopIdsSnapshot() == null
-                ? new ArrayList<Long>() : context.getShownShopIdsSnapshot()));
+        List<DecisionRecommendation> candidates = context.getCandidatePoolSnapshot() == null
+                ? new ArrayList<DecisionRecommendation>() : context.getCandidatePoolSnapshot();
+        DecisionTaskState task = ensureActiveTask(memory);
+        if (!sameCandidateIds(latestCandidatePool(memory), candidates)) appendRecommendationBatch(task, sessionId, candidates);
         memory.setFocusedShopId(context.getFocusedShopId());
         memory.setFocusedShopName(context.getFocusedShopName());
         memory.setDialogPhase("RECOMMENDING");
         updateWorkingMemory(state, memory);
         log.info("[AI][state] event=AGENT_CONTEXT_REDUCED chatId={} sessionId={} candidates={} focusedShopId={}",
-                state.getChatId(), sessionId, memory.getCandidatePool().size(), memory.getFocusedShopId());
+                state.getChatId(), sessionId, candidates.size(), memory.getFocusedShopId());
     }
 
     public AgentSessionContext agentContext(AiChatSession state) {
@@ -323,16 +455,17 @@ public class ConversationStateService {
         AgentSessionContext context = new AgentSessionContext();
         context.setBaseWorkingMemoryVersion(state.getVersion());
         context.setFocusedShopId(memory.getFocusedShopId()); context.setFocusedShopName(memory.getFocusedShopName());
-        context.setCandidatePoolSnapshot(new ArrayList<DecisionRecommendation>(memory.getCandidatePool()));
-        context.setShownShopIdsSnapshot(new ArrayList<Long>(memory.getShownShopIds()));
-        context.setDecisionConstraints(memory.getActiveCriteria());
+        context.setCandidatePoolSnapshot(latestCandidatePool(memory));
+        context.setShownShopIdsSnapshot(shownShopIds(memory));
+        context.setDecisionConstraints(activeCriteria(memory));
         return context;
     }
 
     private void markConstraintSources(DecisionTaskState task, CriteriaMergeResult reduction) {
         for (String change : reduction.getReplaced()) {
             String field = change.split(":", 2)[0];
-            if ("budgetPerPerson".equals(field) || "radiusKm".equals(field) || "nearby".equals(field)) task.getConstraintSources().put(field, ConstraintSource.USER_EXPLICIT);
+            if (("budgetPerPerson".equals(field) || "radiusKm".equals(field) || "nearby".equals(field))
+                    && task.getConstraintSources().get(field) != ConstraintSource.SYSTEM_DEFAULT) task.getConstraintSources().put(field, ConstraintSource.USER_EXPLICIT);
         }
         for (String appended : reduction.getAppended()) {
             if (appended.startsWith("relativeBudget") || appended.startsWith("relativeDistance")) {
@@ -340,6 +473,16 @@ public class ConversationStateService {
             }
         }
         for (String cleared : reduction.getCleared()) task.getConstraintSources().remove(cleared);
+    }
+
+    private void normalizeNearbyDefault(DecisionTaskState task, CriteriaMergeResult reduction) {
+        DecisionConstraints constraints = reduction.getConstraints();
+        if (Boolean.TRUE.equals(constraints.getNearby()) && (constraints.getRadiusKm() == null || constraints.getRadiusKm() <= 0D)) {
+            constraints.setRadiusKm(3D);
+            if (!constraints.getSystemNotes().contains("“附近”按默认 3km 解释")) constraints.getSystemNotes().add("“附近”按默认 3km 解释");
+            if (!reduction.getReplaced().contains("radiusKm:-1.0->3.0")) reduction.getReplaced().add("radiusKm:-1.0->3.0");
+            task.getConstraintSources().put("radiusKm", ConstraintSource.SYSTEM_DEFAULT);
+        }
     }
 
     void markConstraintSourcesForTest(DecisionTaskState task, CriteriaMergeResult reduction) { markConstraintSources(task, reduction); }
@@ -373,11 +516,15 @@ public class ConversationStateService {
     public AgentSessionContext contextForDecision(AiChatSession state, DecisionResponse decision) {
         if (decision == null || decision.getSessionId() == null) throw new IllegalArgumentException("决策会话不能为空");
         ConversationWorkingMemory memory = workingMemory(state);
-        if (!decision.getSessionId().equals(memory.getSourceDecisionSessionId())) {
+        if (!decision.getSessionId().equals(latestSourceDecisionSessionId(memory))) {
+            if (activateTaskForDecisionSession(memory, decision.getSessionId())) {
+                updateWorkingMemory(state, memory);
+            } else {
             snapshotDecision(state, decision);
+            }
             memory = workingMemory(state);
             log.info("[AI][state] event=FOLLOW_UP_CONTEXT_REBOUND chatId={} sessionId={} candidates={}",
-                    state.getChatId(), decision.getSessionId(), memory.getCandidatePool().size());
+                    state.getChatId(), decision.getSessionId(), latestCandidatePool(memory).size());
         }
         return agentContext(state);
     }
@@ -416,7 +563,7 @@ public class ConversationStateService {
     public void applyNamedSearchLocation(AiChatSession state, DecisionConstraints criteria) {
         if (criteria == null || !hasText(criteria.getTargetCity())) return;
         ConversationWorkingMemory memory = workingMemory(state);
-        ConversationLocationSlot target = memory.getSearchLocation();
+        ConversationLocationSlot target = ensureActiveTask(memory).getSearchLocation();
         boolean changed = !criteria.getTargetCity().equals(target.getCity())
                 || !sameText(criteria.getTargetArea(), target.getDistrict());
         if (!changed && "RESOLVED_BY_NAME".equals(target.getStatus())
@@ -443,7 +590,7 @@ public class ConversationStateService {
     }
     private String writeLegacySlots(ConversationWorkingMemory memory) { ConversationSlots slots = new ConversationSlots(); slots.setLocation(memory.getLocation()); slots.setPendingLocationCandidates(memory.getPendingLocationCandidates()); try { return objectMapper.writeValueAsString(slots); } catch (Exception e) { throw new IllegalStateException("Conversation location slots cannot be saved", e); } }
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
-    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getSearchLocation() == null) memory.setSearchLocation(new ConversationLocationSlot()); if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (memory.getActiveCriteria() == null) memory.setActiveCriteria(new DecisionConstraints()); if (memory.getCandidatePool() == null) memory.setCandidatePool(new ArrayList<DecisionRecommendation>()); if (memory.getShownShopIds() == null) memory.setShownShopIds(new ArrayList<Long>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
+    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getTasks() == null) memory.setTasks(new ArrayList<DecisionTaskState>()); for (DecisionTaskState task : memory.getTasks()) { if (task.getCriteria() == null) task.setCriteria(new DecisionConstraints()); if (task.getSearchLocation() == null) task.setSearchLocation(new ConversationLocationSlot()); if (task.getRecommendationBatches() == null) task.setRecommendationBatches(new ArrayList<RecommendationBatch>()); } if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
     private boolean changesCandidateUniverse(CriteriaMergeResult reduction) {
         // A candidate pool is only valid for the exact retrieval domain that produced it.
         // Be deliberately conservative: preserving a stale reference is worse than asking
@@ -475,7 +622,8 @@ public class ConversationStateService {
         DecisionConstraints criteria = reduction.getConstraints();
         if (!hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea())) {
             if (containsClearedField(reduction.getCleared(), "targetCity") || containsClearedField(reduction.getCleared(), "targetArea")) {
-                clearLocation(memory.getSearchLocation(), "MISSING");
+                DecisionTaskState task = activeTask(memory);
+                if (task != null) clearLocation(task.getSearchLocation(), "MISSING");
                 log.info("[AI][state] event=NAMED_SEARCH_LOCATION_CLEARED chatId={} action=USE_DEVICE_LOCATION_IF_AUTHORIZED", state.getChatId());
             }
             return;
@@ -483,7 +631,7 @@ public class ConversationStateService {
         if (!containsField(reduction.getReplaced(), "targetCity")
                 && !containsField(reduction.getReplaced(), "targetArea")) return;
 
-        ConversationLocationSlot target = memory.getSearchLocation();
+        ConversationLocationSlot target = ensureActiveTask(memory).getSearchLocation();
         clearLocation(target, "RESOLVED_BY_NAME");
         target.setCity(criteria.getTargetCity());
         target.setDistrict(criteria.getTargetArea());
@@ -504,24 +652,49 @@ public class ConversationStateService {
         return changes != null && changes.contains(field);
     }
     private int invalidateCandidatePool(ConversationWorkingMemory memory) {
-        int previousCandidateCount = memory.getCandidatePool().size();
-        memory.setCandidatePool(new ArrayList<DecisionRecommendation>());
-        memory.setShownShopIds(new ArrayList<Long>());
+        int previousCandidateCount = latestCandidatePool(memory).size();
+        appendRecommendationBatch(ensureActiveTask(memory), null, new ArrayList<DecisionRecommendation>());
         memory.setFocusedShopId(null);
         memory.setFocusedShopName(null);
         return previousCandidateCount;
     }
 
-    private void appendShownShopIds(ConversationWorkingMemory memory, List<DecisionRecommendation> recommendations) {
-        List<Long> shown = new ArrayList<Long>(memory.getShownShopIds() == null
-                ? new ArrayList<Long>() : memory.getShownShopIds());
-        for (DecisionRecommendation recommendation : recommendations) {
-            if (recommendation != null && recommendation.getShopId() != null
-                    && !shown.contains(recommendation.getShopId())) {
-                shown.add(recommendation.getShopId());
-            }
+    private void appendRecommendationBatch(DecisionTaskState task, Long sessionId, List<DecisionRecommendation> recommendations) {
+        RecommendationBatch batch = new RecommendationBatch();
+        batch.setDecisionSessionId(sessionId);
+        for (DecisionRecommendation item : recommendations) {
+            if (item == null) continue;
+            RecommendationCandidateRef ref = new RecommendationCandidateRef();
+            ref.setShopId(item.getShopId()); ref.setShopName(item.getShopName());
+            ref.setPricePerPerson(item.getAvgPrice()); ref.setDistanceKm(item.getDistanceKm());
+            batch.getCandidates().add(ref);
         }
-        memory.setShownShopIds(shown);
+        task.getRecommendationBatches().add(batch);
+    }
+
+    private List<DecisionRecommendation> recommendations(RecommendationBatch batch) {
+        List<DecisionRecommendation> result = new ArrayList<DecisionRecommendation>();
+        if (batch == null || batch.getCandidates() == null) return result;
+        for (RecommendationCandidateRef ref : batch.getCandidates()) {
+            DecisionRecommendation item = new DecisionRecommendation();
+            item.setShopId(ref.getShopId()); item.setShopName(ref.getShopName());
+            item.setAvgPrice(ref.getPricePerPerson()); item.setDistanceKm(ref.getDistanceKm());
+            result.add(item);
+        }
+        return result;
+    }
+
+    private boolean sameCandidateIds(List<DecisionRecommendation> left, List<DecisionRecommendation> right) {
+        if (left.size() != right.size()) return false;
+        for (int i = 0; i < left.size(); i++) if (!java.util.Objects.equals(left.get(i).getShopId(), right.get(i).getShopId())) return false;
+        return true;
+    }
+
+    private boolean sameBatch(DecisionTaskState task, Long sessionId, List<DecisionRecommendation> candidates) {
+        if (task.getRecommendationBatches() == null || task.getRecommendationBatches().isEmpty()) return false;
+        RecommendationBatch latest = task.getRecommendationBatches().get(task.getRecommendationBatches().size() - 1);
+        return java.util.Objects.equals(latest.getDecisionSessionId(), sessionId)
+                && sameCandidateIds(recommendations(latest), candidates);
     }
     private boolean materialLocationChange(ConversationLocationSlot current, ChatLocationInput next) {
         if (current == null || current.getLatitude() == null || current.getLongitude() == null) return false;

@@ -91,6 +91,20 @@ public class AiConversationEvaluationService {
         return submitCases(aiProperties.getConversationRobustnessDatasetVersion());
     }
 
+    /** Development-oriented subset run; case codes remain resolved from the versioned JSONL dataset. */
+    public ConversationEvaluationRunResponse submitRobustnessCases(Set<String> caseCodes) {
+        String datasetVersion = aiProperties.getConversationRobustnessDatasetVersion();
+        if (caseCodes == null || caseCodes.isEmpty()) return submitCases(datasetVersion);
+        List<AiConversationEvaluationCase> cases = activeCases(datasetVersion).stream()
+                .filter(item -> caseCodes.contains(item.getCaseCode()))
+                .collect(Collectors.toList());
+        if (cases.size() != caseCodes.size()) throw new IllegalArgumentException("存在未找到的 robustness caseCode");
+        AiConversationEvaluationRun run = createRun(datasetVersion, cases);
+        UserDTOSnapshot submitter = UserDTOSnapshot.capture(UserHolder.getUser());
+        evaluationExecutor.execute(() -> executeAsync(run, cases, submitter));
+        return response(run, Collections.emptyList());
+    }
+
     private ConversationEvaluationRunResponse runCases(String datasetVersion) {
         List<AiConversationEvaluationCase> cases = activeCases(datasetVersion);
         AiConversationEvaluationRun run = createRun(datasetVersion, cases);
@@ -451,14 +465,17 @@ public class AiConversationEvaluationService {
         AiChatSession state = conversationStateService.getOrCreate(chatId);
         ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
         snapshot.workingMemoryVersion = state.getVersion();
-        snapshot.activeCriteria = objectMapper.convertValue(memory.getActiveCriteria(), new TypeReference<Map<String, Object>>() { });
+        snapshot.activeCriteria = objectMapper.convertValue(conversationStateService.activeCriteria(memory), new TypeReference<Map<String, Object>>() { });
         snapshot.activeTaskId = memory.getActiveTaskId();
         snapshot.taskCount = memory.getTasks().size();
-        snapshot.candidatePool = recommendationIds(memory.getCandidatePool());
-        snapshot.shownShopIds = new ArrayList<>(memory.getShownShopIds());
+        com.hmdp.ai.dto.DecisionTaskState activeTask = conversationStateService.activeTask(memory);
+        snapshot.batchCount = activeTask == null || activeTask.getRecommendationBatches() == null ? 0 : activeTask.getRecommendationBatches().size();
+        snapshot.candidatePool = recommendationIds(conversationStateService.latestCandidatePool(memory));
+        snapshot.latestBatchShopIds = new ArrayList<Long>(snapshot.candidatePool);
+        snapshot.shownShopIds = conversationStateService.shownShopIds(memory);
         snapshot.focusedShopId = memory.getFocusedShopId();
         snapshot.activeDecisionSessionId = memory.getActiveDecisionSessionId();
-        snapshot.sourceDecisionSessionId = memory.getSourceDecisionSessionId();
+        snapshot.sourceDecisionSessionId = conversationStateService.latestSourceDecisionSessionId(memory);
         snapshot.dialogPhase = memory.getDialogPhase();
         return snapshot;
     }
@@ -1100,19 +1117,21 @@ public class AiConversationEvaluationService {
         if (conversationStateService == null) return false;
         Map<String, Object> expected = objectMapper.readValue(expectedMemoryJson, new TypeReference<Map<String, Object>>() { });
         ConversationWorkingMemory memory = conversationStateService.workingMemory(conversationStateService.getOrCreate(chatId));
+        com.hmdp.ai.dto.DecisionConstraints criteria = conversationStateService.activeCriteria(memory);
+        List<DecisionRecommendation> candidatePool = conversationStateService.latestCandidatePool(memory);
+        com.hmdp.ai.dto.ConversationLocationSlot searchLocation = conversationStateService.searchLocation(memory);
         String expectedSearchCity = stringValue(expected.get("searchCity"));
-        if (expectedSearchCity != null && (memory.getSearchLocation() == null
-                || !expectedSearchCity.equals(memory.getSearchLocation().getCity()))) return false;
+        if (expectedSearchCity != null && (searchLocation == null || !expectedSearchCity.equals(searchLocation.getCity()))) return false;
         String expectedPhase = stringValue(expected.get("dialogPhase"));
         if (expectedPhase != null && !equalsExpected(expectedPhase, memory.getDialogPhase())) return false;
         if (expected.containsKey("candidatePoolEmpty")) {
             boolean expectedEmpty = Boolean.parseBoolean(String.valueOf(expected.get("candidatePoolEmpty")));
-            boolean actualEmpty = memory.getCandidatePool() == null || memory.getCandidatePool().isEmpty();
+            boolean actualEmpty = candidatePool.isEmpty();
             if (expectedEmpty != actualEmpty) return false;
         }
         if (expected.containsKey("candidatePoolSize")) {
             Integer expectedSize = integerValue(expected.get("candidatePoolSize"));
-            int actualSize = memory.getCandidatePool() == null ? 0 : memory.getCandidatePool().size();
+            int actualSize = candidatePool.size();
             if (expectedSize != null && expectedSize != actualSize) return false;
         }
         if (expected.containsKey("focusedShopIdNull")) {
@@ -1120,20 +1139,16 @@ public class AiConversationEvaluationService {
             if (expectedNull != (memory.getFocusedShopId() == null)) return false;
         }
         String expectedCuisine = stringValue(expected.get("cuisine"));
-        if (expectedCuisine != null && (memory.getActiveCriteria() == null
-                || !expectedCuisine.equals(memory.getActiveCriteria().getCuisine()))) return false;
+        if (expectedCuisine != null && (criteria == null || !expectedCuisine.equals(criteria.getCuisine()))) return false;
         String expectedTargetArea = stringValue(expected.get("targetArea"));
-        if (expectedTargetArea != null && (memory.getActiveCriteria() == null
-                || !expectedTargetArea.equals(memory.getActiveCriteria().getTargetArea()))) return false;
+        if (expectedTargetArea != null && (criteria == null || !expectedTargetArea.equals(criteria.getTargetArea()))) return false;
         if (expected.containsKey("budgetPerPerson")) {
             Integer expectedBudget = integerValue(expected.get("budgetPerPerson"));
-            if (expectedBudget != null && (memory.getActiveCriteria() == null
-                    || !expectedBudget.equals(memory.getActiveCriteria().getBudgetPerPerson()))) return false;
+            if (expectedBudget != null && (criteria == null || !expectedBudget.equals(criteria.getBudgetPerPerson()))) return false;
         }
         if (expected.containsKey("hardConstraintsEmpty")) {
             boolean expectedEmpty = Boolean.parseBoolean(String.valueOf(expected.get("hardConstraintsEmpty")));
-            boolean actualEmpty = memory.getActiveCriteria() == null || memory.getActiveCriteria().getPreferences() == null
-                    || memory.getActiveCriteria().getPreferences().isEmpty();
+            boolean actualEmpty = criteria == null || criteria.getPreferences() == null || criteria.getPreferences().isEmpty();
             if (expectedEmpty != actualEmpty) return false;
         }
         return true;
@@ -1146,6 +1161,9 @@ public class AiConversationEvaluationService {
     }
 
     private void requireOwner(AiConversationEvaluationRun run) {
+        // Local/offline runs submitted through the unauthenticated evaluation endpoint
+        // deliberately have no owner; they are readable by that same local harness.
+        if (run.getUserId() == null) return;
         if (UserHolder.getUser() == null || run.getUserId() == null || !run.getUserId().equals(UserHolder.getUser().getId())) {
             throw new IllegalStateException("无权访问该对话评测运行记录");
         }
@@ -1205,6 +1223,7 @@ public class AiConversationEvaluationService {
         private Integer workingMemoryVersion;
         private Map<String, Object> activeCriteria = new LinkedHashMap<>();
         private List<Long> candidatePool = new ArrayList<>();
+        private List<Long> latestBatchShopIds = new ArrayList<>();
         private List<Long> shownShopIds = new ArrayList<>();
         private Long focusedShopId;
         private Long activeDecisionSessionId;
@@ -1213,6 +1232,7 @@ public class AiConversationEvaluationService {
         private String dialogPhase;
         private String activeTaskId;
         private Integer taskCount;
+        private Integer batchCount;
         private List<Map<String, Object>> toolCalls = new ArrayList<>();
         private List<Long> recommendations = new ArrayList<>();
 
@@ -1226,6 +1246,7 @@ public class AiConversationEvaluationService {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("activeCriteria", activeCriteria);
             result.put("candidatePool", candidatePool);
+            result.put("latestBatchShopIds", latestBatchShopIds);
             result.put("shownShopIds", shownShopIds);
             result.put("focusedShopId", focusedShopId);
             result.put("sourceDecisionSessionId", sourceDecisionSessionId);
@@ -1233,6 +1254,7 @@ public class AiConversationEvaluationService {
             result.put("dialogPhase", dialogPhase);
             result.put("activeTaskId", activeTaskId);
             result.put("taskCount", taskCount);
+            result.put("batchCount", batchCount);
             return result;
         }
 

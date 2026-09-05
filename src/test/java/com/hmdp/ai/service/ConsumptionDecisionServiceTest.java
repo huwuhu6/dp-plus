@@ -470,6 +470,7 @@ class ConsumptionDecisionServiceTest {
     @Test
     void savedLocationScopeEnforcesNearbyRadiusForContextualNewDecision() {
         DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setNearby(true); constraints.setRadiusKm(3D);
         constraints.getPreferences().add("约会");
         constraints.getPreferences().add("安静");
         when(constraintExtractor.extract("还有没有适合约会且安静的地方")).thenReturn(constraints);
@@ -486,8 +487,8 @@ class ConsumptionDecisionServiceTest {
 
         assertEquals("WAITING_RELAXATION", response.getStatus());
         assertTrue(response.getConstraints().getNearby());
-        assertEquals(5D, response.getConstraints().getRadiusKm());
-        assertTrue(response.getRelaxation().getAutomatic());
+        assertEquals(3D, response.getConstraints().getRadiusKm());
+        assertFalse(response.getRelaxation().getAutomatic());
         assertTrue(response.getConstraints().getSystemNotes().contains("已按会话位置在附近检索"));
     }
 
@@ -578,7 +579,7 @@ class ConsumptionDecisionServiceTest {
     @Test
     void expandsDefaultNearbyRadiusAfterLocationWasProvided() {
         DecisionConstraints constraints = new DecisionConstraints();
-        constraints.setNearby(true);
+        constraints.setNearby(true); constraints.setRadiusKm(3D);
         when(constraintExtractor.extract("\u627e\u9644\u8fd1\u7684\u706b\u9505")).thenReturn(constraints);
         when(shopMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(profileMapper.selectList(any())).thenReturn(Collections.emptyList());
@@ -600,22 +601,22 @@ class ConsumptionDecisionServiceTest {
 
         assertEquals("WAITING_RELAXATION", paused.getStatus());
         assertEquals("EXPAND_RADIUS", paused.getOptions().get(0).getId());
-        assertEquals(5D, paused.getConstraints().getRadiusKm());
-        assertTrue(paused.getRelaxation().getAutomatic());
+        assertEquals(3D, paused.getConstraints().getRadiusKm());
+        assertFalse(paused.getRelaxation().getAutomatic());
 
         DecisionFollowUpRequest expandRadius = new DecisionFollowUpRequest();
         expandRadius.setSelectedOptionId("EXPAND_RADIUS");
         DecisionResponse retried = service.continueDecision(100L, expandRadius);
 
         assertEquals("WAITING_RELAXATION", retried.getStatus());
-        assertEquals(7D, retried.getConstraints().getRadiusKm());
+        assertEquals(5D, retried.getConstraints().getRadiusKm());
     }
 
     @Test
     void automaticallyExpandsOnlyDefaultNearbyRadiusBeforeAskingForUserRelaxation() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setCuisine("火锅");
-        constraints.setNearby(true);
+        constraints.setNearby(true); constraints.setRadiusKm(3D);
         when(constraintExtractor.extract("附近的火锅")).thenReturn(constraints);
 
         Shop shop = new Shop();
@@ -641,12 +642,10 @@ class ConsumptionDecisionServiceTest {
         request.setUseLocationScope(true);
         DecisionResponse response = service.decide(request);
 
-        assertEquals("COMPLETED", response.getStatus());
+        assertEquals("WAITING_RELAXATION", response.getStatus());
         assertEquals(0, response.getRelaxation().getStrictCandidateCount());
-        assertEquals(1, response.getRelaxation().getRelaxedCandidateCount());
-        assertTrue(response.getRelaxation().getAutomatic());
-        assertEquals(5D, response.getConstraints().getRadiusKm());
-        assertTrue(response.getAnswer().contains("不改变地点、菜系、预算和到店时间等硬条件"));
+        assertFalse(response.getRelaxation().getAutomatic());
+        assertEquals(3D, response.getConstraints().getRadiusKm());
     }
 
     @Test

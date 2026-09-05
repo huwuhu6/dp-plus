@@ -85,7 +85,12 @@ public class ConversationStateRestoreService {
                                             RestoreConversationStateResult result) {
         memory.setActiveDecisionSessionId(validDecision(chatId, memory.getActiveDecisionSessionId(), "activeDecisionSessionId", result));
         memory.setLastDecisionSessionId(validDecision(chatId, memory.getLastDecisionSessionId(), "lastDecisionSessionId", result));
-        memory.setSourceDecisionSessionId(validDecision(chatId, memory.getSourceDecisionSessionId(), "sourceDecisionSessionId", result));
+        if (memory.getTasks() != null) for (com.hmdp.ai.dto.DecisionTaskState task : memory.getTasks()) {
+            if (task.getRecommendationBatches() == null) continue;
+            for (com.hmdp.ai.dto.RecommendationBatch batch : task.getRecommendationBatches()) {
+                batch.setDecisionSessionId(validDecision(chatId, batch.getDecisionSessionId(), "recommendationBatch.decisionSessionId", result));
+            }
+        }
     }
 
     private Long validDecision(String chatId, Long sessionId, String field, RestoreConversationStateResult result) {

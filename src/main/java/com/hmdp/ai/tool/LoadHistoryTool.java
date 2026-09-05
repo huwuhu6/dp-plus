@@ -42,7 +42,7 @@ public class LoadHistoryTool extends BaseAgentTool {
         facts.put("sourceVersion", snapshot.getVersion());
         facts.put("createdAt", snapshot.getCreatedAt());
         facts.put("activeDecisionSessionId", memory.getActiveDecisionSessionId());
-        facts.put("sourceDecisionSessionId", memory.getSourceDecisionSessionId());
+        facts.put("sourceDecisionSessionId", conversationStateService.latestSourceDecisionSessionId(memory));
         facts.put("relevantState", summary(memory));
         facts.put("linkedStateEvent", linkedEvent(snapshot.getId()));
         facts.put("recentMessages", chatMemoryService.load(chatId));
@@ -69,10 +69,10 @@ public class LoadHistoryTool extends BaseAgentTool {
     private Map<String, Object> summary(ConversationWorkingMemory memory) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("dialogPhase", memory.getDialogPhase());
-        result.put("candidateCount", memory.getCandidatePool().size());
-        result.put("shownShopIds", memory.getShownShopIds());
+        result.put("candidateCount", conversationStateService.latestCandidatePool(memory).size());
+        result.put("shownShopIds", conversationStateService.shownShopIds(memory));
         result.put("focusedShopId", memory.getFocusedShopId());
-        result.put("activeCriteria", memory.getActiveCriteria());
+        result.put("activeCriteria", conversationStateService.activeCriteria(memory));
         return result;
     }
 

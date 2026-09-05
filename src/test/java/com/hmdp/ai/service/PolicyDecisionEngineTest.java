@@ -36,7 +36,7 @@ class PolicyDecisionEngineTest {
     @Test
     void confirmedSearchDestinationAllowsRecommendation() {
         ConversationWorkingMemory memory = new ConversationWorkingMemory();
-        ConversationLocationSlot target = memory.getSearchLocation();
+        ConversationLocationSlot target = memory.ensureActiveTask().getSearchLocation();
         target.setStatus("AVAILABLE"); target.setLatitude(29.56D); target.setLongitude(106.55D);
 
         assertEquals(PolicyDecisionEngine.EXECUTE_RECOMMENDATION,

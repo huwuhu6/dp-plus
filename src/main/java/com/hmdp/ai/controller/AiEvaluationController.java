@@ -6,6 +6,7 @@ import com.hmdp.dto.Result;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -53,8 +54,8 @@ public class AiEvaluationController {
     }
 
     @PostMapping("/conversation-runs/robustness")
-    public Result runConversationRobustnessCases() {
-        return Result.ok(conversationEvaluationService.submitRobustnessCases());
+    public Result runConversationRobustnessCases(@RequestParam(required = false) java.util.Set<String> caseCodes) {
+        return Result.ok(conversationEvaluationService.submitRobustnessCases(caseCodes));
     }
 
     @GetMapping("/conversation-runs/{runId}")
