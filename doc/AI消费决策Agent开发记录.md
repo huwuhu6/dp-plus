@@ -1,5 +1,17 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-05：评测用例从 MySQL 迁移为 Git 版本化 JSONL
+
+对话评测用例（`AiConversationEvaluationCase`）的定义此前存放在 MySQL 表 `tbl_ai_conversation_evaluation_case` 中，通过 V23~V51 共 26 个迁移文件逐步 INSERT/UPDATE 演进。这种方式的问题：用例变更无法通过 Git diff 审查，跨环境数据不一致，新增/修改用例需要写 SQL 迁移而非直接编辑数据。
+
+本次将用例定义迁移为 classpath 下的 JSONL 文件：`src/main/resources/eval/datasets/{datasetVersion}.jsonl`。JSONL 采用原生嵌套结构（turns 为 List、expectedRoutes 为 List 等），免去字符串手工转义。
+
+新增 `ConversationEvaluationDatasetLoader`：优先从 classpath 加载 JSONL，逐行反序列化为 DTO 后转换为实体（复杂结构转回 JSON 字符串字段），赋递增虚拟 ID；文件不存在时降级回 MySQL 查询，保证向后兼容。`AiConversationEvaluationService.activeCases` 改为调用 Loader，流水线回放、异步执行、断言逻辑及结果落库完全不变。
+
+首批迁移 `conversation-v1` 数据集 40 条 active 用例（从数据库导出）。`conversation-holdout-v1`（16 条）和 `conversation-robustness-v1`（6 条）暂保留 MySQL，后续按需迁移。
+
+测试侧：`AiConversationEvaluationServiceTest` 中 5 个用例的 mock 从 `caseMapper.selectList` 改为 `datasetLoader.loadCases`。全量回归通过。
+
 ## 2026-08-25：轻量路由模型与零结果后的当前位置续接
 
 将聊天路由从主 Agent 模型中拆出为独立的 `ai.routing` 配置，默认使用 DashScope 的 `qwen-flash`，超时 4 秒；主推荐、约束抽取与工具规划仍保持 `deepseek-v4-flash`。`qwen-flash` 同时继续承担已有的 Query Rewrite 调用。路由 Client 复用 OpenAI-compatible 协议，但按独立模型、Endpoint、密钥和超时执行，配置不可用时回退原有主模型调用，再失败才使用 Java 规则路由。

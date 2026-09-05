@@ -52,11 +52,13 @@ class AiConversationEvaluationServiceTest {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
         AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
         ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
         ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
         ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
@@ -70,7 +72,7 @@ class AiConversationEvaluationServiceTest {
         evaluationCase.setExpectedRoutesJson("[\"START_DECISION\",\"BUSINESS_FOLLOW_UP\"]");
         evaluationCase.setExpectedFinalStatus("COMPLETED");
         evaluationCase.setExpectedToolNamesJson("[\"search_shop_evidence\"]");
-        when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
+        when(datasetLoader.loadCases(any())).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(12L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
         when(chatService.chat(any(), isNull(), any())).thenReturn(response("START_DECISION", "COMPLETED"), response("BUSINESS_FOLLOW_UP", "COMPLETED"));
@@ -95,11 +97,13 @@ class AiConversationEvaluationServiceTest {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
         AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
         ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
         ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
         ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
@@ -114,7 +118,7 @@ class AiConversationEvaluationServiceTest {
         evaluationCase.setExpectedToolNamesJson("[]");
         evaluationCase.setExpectedFinalStatus("COMPLETED");
         evaluationCase.setExpectedUnseenFromTurn(1);
-        when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
+        when(datasetLoader.loadCases(any())).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(16L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
         when(chatService.chat(any(), isNull(), any())).thenReturn(
@@ -166,11 +170,13 @@ class AiConversationEvaluationServiceTest {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
         AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
         ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
         ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
         ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
@@ -186,7 +192,7 @@ class AiConversationEvaluationServiceTest {
         evaluationCase.setExpectedRoutesJson("[\"START_DECISION\"]");
         evaluationCase.setExpectedToolNamesJson("[]");
         evaluationCase.setExpectedFinalStatus("COMPLETED");
-        when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
+        when(datasetLoader.loadCases(any())).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(14L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
         when(chatService.chat(any(), isNull(), any())).thenReturn(response("START_DECISION", "COMPLETED"));
@@ -205,11 +211,13 @@ class AiConversationEvaluationServiceTest {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
         AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
         ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
         ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
         ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
@@ -223,7 +231,7 @@ class AiConversationEvaluationServiceTest {
         evaluationCase.setExpectedRoutesJson("[\"START_DECISION\",\"BUSINESS_FOLLOW_UP\"]");
         evaluationCase.setExpectedContextRewritesJson("[null,{\"applied\":true,\"candidateOrdinal\":2}]");
         evaluationCase.setExpectedToolNamesJson("[]");
-        when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
+        when(datasetLoader.loadCases(any())).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(13L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
         when(chatService.chat(any(), isNull(), any())).thenReturn(responseWithCandidates("START_DECISION", "COMPLETED", "第一家", "筑地日本料理（上街店）"),
@@ -245,11 +253,13 @@ class AiConversationEvaluationServiceTest {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
         AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
         ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
         ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
         ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
@@ -265,7 +275,7 @@ class AiConversationEvaluationServiceTest {
         evaluationCase.setExpectedRecoveryRoutesJson("[\"START_DECISION\"]");
         evaluationCase.setExpectedToolNamesJson("[]");
         evaluationCase.setExpectedFinalStatus("COMPLETED");
-        when(caseMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.singletonList(evaluationCase));
+        when(datasetLoader.loadCases(any())).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(15L); return 1; })
                 .when(runMapper).insert(any(AiConversationEvaluationRun.class));
         when(chatService.chat(any(), isNull(), any())).thenThrow(new IllegalArgumentException("invalid option"))
@@ -333,9 +343,11 @@ class AiConversationEvaluationServiceTest {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
+        ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
         AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
+        ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
         ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
         when(runMapper.selectById(1L)).thenReturn(run(1L, 100L, "conversation-v1", 2, 2, 1, 2, 2, 100L));
         AiConversationEvaluationCaseResult passed = caseResult(1L, true, true);

@@ -50,6 +50,7 @@ import java.util.stream.Collectors;
 public class AiConversationEvaluationService {
     @Resource private ChatOrchestrationService chatOrchestrationService;
     @Resource private AiConversationEvaluationCaseMapper caseMapper;
+    @Resource private ConversationEvaluationDatasetLoader datasetLoader;
     @Resource private AiConversationEvaluationRunMapper runMapper;
     @Resource private AiConversationEvaluationCaseResultMapper resultMapper;
     @Resource private AiConversationEventMapper conversationEventMapper;
@@ -133,8 +134,8 @@ public class AiConversationEvaluationService {
     }
 
     private List<AiConversationEvaluationCase> activeCases(String datasetVersion) {
-        List<AiConversationEvaluationCase> cases = caseMapper.selectList(new QueryWrapper<AiConversationEvaluationCase>()
-                .eq("active", true).eq("dataset_version", datasetVersion).orderByAsc("id"));
+        // 优先从 Git 版本化 JSONL 加载，资源不存在时 Loader 内部降级到 MySQL
+        List<AiConversationEvaluationCase> cases = datasetLoader.loadCases(datasetVersion);
         if (cases.isEmpty()) throw new IllegalStateException("没有启用的对话轨迹评测用例");
         return cases;
     }
