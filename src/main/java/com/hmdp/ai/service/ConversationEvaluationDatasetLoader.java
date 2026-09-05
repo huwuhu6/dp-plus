@@ -100,6 +100,9 @@ public class ConversationEvaluationDatasetLoader {
         c.setExpectedMemoryJson(dto.getExpectedMemory() != null ? writeJson(dto.getExpectedMemory()) : null);
         c.setExpectedUnseenFromTurn(dto.getExpectedUnseenFromTurn());
         c.setExpectedUnseenPairsJson(writeJson(dto.getExpectedUnseenPairs()));
+        c.setExpectedTurnStatesJson(writeJson(dto.getExpectedTurnStates()));
+        c.setExpectedToolsByTurnJson(writeJson(dto.getExpectedToolsByTurn()));
+        c.setExpectedRelationsJson(writeJson(dto.getExpectedRelations()));
         c.setNotes(dto.getNotes());
         return c;
     }

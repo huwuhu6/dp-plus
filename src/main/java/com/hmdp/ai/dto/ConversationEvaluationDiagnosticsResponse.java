@@ -46,6 +46,8 @@ public class ConversationEvaluationDiagnosticsResponse {
         private Boolean recoveryMatched;
         private Boolean memoryMatched;
         private Boolean unseenRecommendationsMatched;
+        /** Structured per-turn assertion failures read from the persisted turn trace. */
+        private List<Map<String, Object>> turnAssertionFailures;
         private Long durationMs;
         private String errorMessage;
     }

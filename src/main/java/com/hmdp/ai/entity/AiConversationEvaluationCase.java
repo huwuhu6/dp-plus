@@ -3,6 +3,7 @@ package com.hmdp.ai.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Data;
 
 @Data
@@ -30,6 +31,13 @@ public class AiConversationEvaluationCase {
     private Integer expectedUnseenFromTurn;
     /** One-based source/target turn pairs whose recommendation sets must be disjoint. */
     private String expectedUnseenPairsJson;
+    /** JSONL-only fields. Marked non-persistent so legacy MySQL datasets remain readable. */
+    @TableField(exist = false)
+    private String expectedTurnStatesJson;
+    @TableField(exist = false)
+    private String expectedToolsByTurnJson;
+    @TableField(exist = false)
+    private String expectedRelationsJson;
     private Boolean active;
     private String notes;
 }

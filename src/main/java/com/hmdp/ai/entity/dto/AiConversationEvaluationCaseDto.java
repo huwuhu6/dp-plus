@@ -27,5 +27,11 @@ public class AiConversationEvaluationCaseDto {
     private Map<String, Object> expectedMemory;
     private Integer expectedUnseenFromTurn;
     private List<Object> expectedUnseenPairs;
+    /** Optional per-turn Working Memory assertions. */
+    private List<Map<String, Object>> expectedTurnStates;
+    /** Optional per-turn tool assertions. */
+    private List<Map<String, Object>> expectedToolsByTurn;
+    /** Optional relations between two captured evaluation turns. */
+    private List<Map<String, Object>> expectedRelations;
     private String notes;
 }

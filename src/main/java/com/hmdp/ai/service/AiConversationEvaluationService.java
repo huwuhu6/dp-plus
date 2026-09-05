@@ -17,6 +17,7 @@ import com.hmdp.ai.dto.ConversationWorkingMemory;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
+import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.entity.AiAgentToolCall;
 import com.hmdp.ai.entity.AiConversationEvent;
 import com.hmdp.ai.entity.AiDecisionMetric;
@@ -295,11 +296,15 @@ public class AiConversationEvaluationService {
             List<Map<String, Object>> outputs = new ArrayList<>();
             List<ContextRewriteResult> contextRewrites = new ArrayList<>();
             List<List<DecisionRecommendation>> recommendationSnapshots = new ArrayList<>();
+            List<EvaluationTurnSnapshot> turnSnapshots = new ArrayList<>();
+            List<Map<String, Object>> assertionFailures = new ArrayList<>();
             String finalStatus = null;
             int actualErrorCount = 0;
             boolean afterError = false;
             List<String> recoveryRoutes = new ArrayList<>();
-            for (Map<String, Object> turn : turns) {
+            for (int turnIndex = 0; turnIndex < turns.size(); turnIndex++) {
+                Map<String, Object> turn = turns.get(turnIndex);
+                int turnNo = turnIndex + 1;
                 ChatMessageRequest request = new ChatMessageRequest();
                 request.setChatId(chatId);
                 request.setMessage(String.valueOf(turn.get("message")));
@@ -324,6 +329,7 @@ public class AiConversationEvaluationService {
                     output.put("stages", stageTrace);
                     output.put("modelCalls", modelCallObservationSnapshot());
                     outputs.add(output);
+                    turnSnapshots.add(EvaluationTurnSnapshot.error(turnNo));
                     clearModelObservation();
                     continue;
                 }
@@ -342,6 +348,8 @@ public class AiConversationEvaluationService {
                 }
                 recommendationSnapshots.add(response.getDecision() == null
                         ? Collections.emptyList() : new ArrayList<>(response.getDecision().getRecommendations()));
+                turnSnapshots.add(captureTurnSnapshot(turnNo, chatId, response,
+                        recommendationSnapshots.get(recommendationSnapshots.size() - 1)));
                 Map<String, Object> output = new LinkedHashMap<>();
                 output.put("route", response.getRoute());
                 output.put("decisionStatus", response.getDecisionStatus());
@@ -362,7 +370,7 @@ public class AiConversationEvaluationService {
             result.setActualErrorCount(actualErrorCount);
             result.setRecoveryMatched(matchesRecovery(evaluationCase.getExpectedErrorCount(), actualErrorCount,
                     evaluationCase.getExpectedRecoveryRoutesJson(), recoveryRoutes));
-            result.setMemoryMatched(matchesMemory(evaluationCase.getExpectedMemoryJson(), chatId));
+            boolean finalMemoryMatched = matchesMemory(evaluationCase.getExpectedMemoryJson(), chatId);
             result.setUnseenRecommendationsMatched(matchesUnseenRecommendations(
                     evaluationCase.getExpectedUnseenFromTurn(), evaluationCase.getExpectedUnseenPairsJson(), recommendationSnapshots));
             ContextRewriteCoverage rewriteCoverage = evaluateContextRewriteCoverage(
@@ -371,6 +379,7 @@ public class AiConversationEvaluationService {
             result.setExpectedContextRewriteCount(rewriteCoverage.expectedCount);
             result.setMatchedContextRewriteCount(rewriteCoverage.matchedCount);
             List<AiAgentToolCall> actualToolCalls = toolCalls(decisionSessionIds);
+            attachToolCalls(turnSnapshots, actualToolCalls);
             List<String> actualTools = actualToolCalls.stream().map(AiAgentToolCall::getToolName).collect(Collectors.toList());
             result.setActualToolNamesJson(objectMapper.writeValueAsString(actualTools));
             result.setActualToolCallsJson(objectMapper.writeValueAsString(compactToolCalls(actualToolCalls)));
@@ -380,13 +389,21 @@ public class AiConversationEvaluationService {
             result.setExpectedToolCount(toolCoverage.expectedCount);
             result.setCoveredToolCount(toolCoverage.coveredCount);
             result.setUnexpectedToolCount(toolCoverage.unexpectedCount);
-            result.setToolMatched(toolCoverage.matched);
+            boolean turnToolsMatched = matchesToolsByTurn(evaluationCase.getExpectedToolsByTurnJson(), turnSnapshots, assertionFailures);
+            result.setToolMatched(toolCoverage.matched && turnToolsMatched);
             result.setToolArgumentsMatched(toolArgumentsMatched(evaluationCase.getExpectedToolArgumentsJson(), actualToolCalls));
+            boolean turnStatesMatched = matchesTurnStates(evaluationCase.getExpectedTurnStatesJson(), turnSnapshots, assertionFailures);
+            boolean relationsMatched = matchesRelations(evaluationCase.getExpectedRelationsJson(), turnSnapshots, assertionFailures);
+            result.setMemoryMatched(finalMemoryMatched && turnStatesMatched && relationsMatched);
             populateModelMetrics(result, decisionSessionIds);
             result.setLocalityMatched(matchesExpectedCity(evaluationCase.getExpectedCity(), finalShopIds));
             result.setFinalStatusMatched(equalsExpected(evaluationCase.getExpectedFinalStatus(), finalStatus));
             result.setShopMatched(expectedShopsMatched(evaluationCase.getExpectedShopIds(), finalShopIds));
-            result.setTurnOutputsJson(objectMapper.writeValueAsString(outputs));
+            Map<String, Object> turnTrace = new LinkedHashMap<>();
+            turnTrace.put("turns", outputs);
+            turnTrace.put("snapshots", compactTurnSnapshots(turnSnapshots));
+            turnTrace.put("assertionFailures", assertionFailures);
+            result.setTurnOutputsJson(objectMapper.writeValueAsString(turnTrace));
         } catch (Exception e) {
             result.setRouteMatched(false);
             result.setContextRewriteMatched(false);
@@ -419,6 +436,254 @@ public class AiConversationEvaluationService {
         item.put("stageLatencyMs", Math.max(0L, now - startedAt.getOrDefault(node, now)));
         item.put("metadata", event.getMetadata());
         trace.add(item);
+    }
+
+    /** Captures an evaluation-only projection; it never changes production Working Memory. */
+    private EvaluationTurnSnapshot captureTurnSnapshot(int turnNo, String chatId, ChatMessageResponse response,
+                                                        List<DecisionRecommendation> recommendations) {
+        EvaluationTurnSnapshot snapshot = new EvaluationTurnSnapshot();
+        snapshot.turnNo = turnNo;
+        snapshot.route = response == null ? null : response.getRoute();
+        snapshot.finalStatus = response == null ? null : response.getDecisionStatus();
+        snapshot.recommendations = recommendationIds(recommendations);
+        snapshot.decisionSessionId = response == null ? null : response.getDecisionSessionId();
+        if (conversationStateService == null) return snapshot;
+        AiChatSession state = conversationStateService.getOrCreate(chatId);
+        ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
+        snapshot.workingMemoryVersion = state.getVersion();
+        snapshot.activeCriteria = objectMapper.convertValue(memory.getActiveCriteria(), new TypeReference<Map<String, Object>>() { });
+        snapshot.candidatePool = recommendationIds(memory.getCandidatePool());
+        snapshot.shownShopIds = new ArrayList<>(memory.getShownShopIds());
+        snapshot.focusedShopId = memory.getFocusedShopId();
+        snapshot.activeDecisionSessionId = memory.getActiveDecisionSessionId();
+        snapshot.sourceDecisionSessionId = memory.getSourceDecisionSessionId();
+        snapshot.dialogPhase = memory.getDialogPhase();
+        return snapshot;
+    }
+
+    private List<Long> recommendationIds(List<DecisionRecommendation> recommendations) {
+        if (recommendations == null) return new ArrayList<>();
+        return recommendations.stream().map(DecisionRecommendation::getShopId)
+                .filter(java.util.Objects::nonNull).collect(Collectors.toList());
+    }
+
+    private void attachToolCalls(List<EvaluationTurnSnapshot> snapshots, List<AiAgentToolCall> calls) {
+        for (AiAgentToolCall call : calls) {
+            if (call.getTurnNo() == null || call.getTurnNo() < 1 || call.getTurnNo() > snapshots.size()) continue;
+            snapshots.get(call.getTurnNo() - 1).toolCalls.add(compactToolCall(call));
+        }
+    }
+
+    private Map<String, Object> compactToolCall(AiAgentToolCall call) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("name", call.getToolName());
+        value.put("turnNo", call.getTurnNo());
+        value.put("status", call.getStatus());
+        try {
+            value.put("arguments", call.getToolInputJson() == null || call.getToolInputJson().trim().isEmpty()
+                    ? Collections.emptyMap() : objectMapper.readValue(call.getToolInputJson(), new TypeReference<Map<String, Object>>() { }));
+        } catch (Exception ignored) {
+            value.put("arguments", Collections.emptyMap());
+        }
+        return value;
+    }
+
+    private boolean matchesTurnStates(String expectedJson, List<EvaluationTurnSnapshot> snapshots,
+                                      List<Map<String, Object>> failures) throws Exception {
+        if (expectedJson == null || expectedJson.trim().isEmpty()) return true;
+        List<Map<String, Object>> expectations = objectMapper.readValue(expectedJson, new TypeReference<List<Map<String, Object>>>() { });
+        boolean matched = true;
+        for (Map<String, Object> expectation : expectations) {
+            Integer turn = integerValue(expectation.get("turn"));
+            EvaluationTurnSnapshot snapshot = snapshotAt(snapshots, turn);
+            Object rawMemory = expectation.get("memory");
+            if (turn == null || snapshot == null || !(rawMemory instanceof Map)) {
+                failures.add(assertionFailure(turn, null, "turnState", rawMemory, null, "TURN_SNAPSHOT_UNAVAILABLE"));
+                matched = false;
+                continue;
+            }
+            Map<?, ?> memory = (Map<?, ?>) rawMemory;
+            Map<String, Object> actualMemory = snapshot.memoryProjection();
+            for (Map.Entry<?, ?> entry : memory.entrySet()) {
+                String path = String.valueOf(entry.getKey());
+                PathValue actual = resolvePath(actualMemory, path);
+                if (!matchesPathAssertion(entry.getValue(), actual)) {
+                    failures.add(assertionFailure(turn, path, assertionType(entry.getValue()), entry.getValue(),
+                            actual.present ? actual.value : null, actual.present ? null : "PATH_ABSENT"));
+                    matched = false;
+                }
+            }
+        }
+        return matched;
+    }
+
+    private boolean matchesToolsByTurn(String expectedJson, List<EvaluationTurnSnapshot> snapshots,
+                                       List<Map<String, Object>> failures) throws Exception {
+        if (expectedJson == null || expectedJson.trim().isEmpty()) return true;
+        List<Map<String, Object>> expectations = objectMapper.readValue(expectedJson, new TypeReference<List<Map<String, Object>>>() { });
+        boolean matched = true;
+        for (Map<String, Object> expectation : expectations) {
+            Integer turn = integerValue(expectation.get("turn"));
+            EvaluationTurnSnapshot snapshot = snapshotAt(snapshots, turn);
+            Object rawTools = expectation.get("tools");
+            if (turn == null || snapshot == null || !(rawTools instanceof List)) {
+                failures.add(assertionFailure(turn, "toolCalls", "tool", rawTools, null, "TURN_SNAPSHOT_UNAVAILABLE"));
+                matched = false;
+                continue;
+            }
+            for (Object rawTool : (List<?>) rawTools) {
+                if (!(rawTool instanceof Map) || !matchesExpectedTool((Map<?, ?>) rawTool, snapshot.toolCalls)) {
+                    failures.add(assertionFailure(turn, "toolCalls", "tool", rawTool, snapshot.toolCalls, null));
+                    matched = false;
+                }
+            }
+        }
+        return matched;
+    }
+
+    private boolean matchesExpectedTool(Map<?, ?> expected, List<Map<String, Object>> actualTools) {
+        Object name = expected.get("name");
+        Object expectedArguments = expected.get("arguments");
+        for (Map<String, Object> actual : actualTools) {
+            if (!java.util.Objects.equals(String.valueOf(name), String.valueOf(actual.get("name")))) continue;
+            if (!(expectedArguments instanceof Map) || containsMap((Map<?, ?>) expectedArguments, actual.get("arguments"))) return true;
+        }
+        return false;
+    }
+
+    private boolean containsMap(Map<?, ?> expected, Object actual) {
+        if (!(actual instanceof Map)) return false;
+        Map<?, ?> actualMap = (Map<?, ?>) actual;
+        for (Map.Entry<?, ?> entry : expected.entrySet()) {
+            Object actualValue = actualMap.get(entry.getKey());
+            if (entry.getValue() instanceof Map) {
+                if (!containsMap((Map<?, ?>) entry.getValue(), actualValue)) return false;
+            } else if (!java.util.Objects.equals(String.valueOf(entry.getValue()), String.valueOf(actualValue))) return false;
+        }
+        return true;
+    }
+
+    private boolean matchesRelations(String expectedJson, List<EvaluationTurnSnapshot> snapshots,
+                                     List<Map<String, Object>> failures) throws Exception {
+        if (expectedJson == null || expectedJson.trim().isEmpty()) return true;
+        List<Map<String, Object>> expectations = objectMapper.readValue(expectedJson, new TypeReference<List<Map<String, Object>>>() { });
+        boolean matched = true;
+        for (Map<String, Object> expectation : expectations) {
+            Integer fromTurn = integerValue(expectation.get("fromTurn"));
+            Integer toTurn = integerValue(expectation.get("toTurn"));
+            String type = stringValue(expectation.get("type"));
+            String relation = stringValue(expectation.get("relation"));
+            EvaluationTurnSnapshot from = snapshotAt(snapshots, fromTurn);
+            EvaluationTurnSnapshot to = snapshotAt(snapshots, toTurn);
+            boolean relationMatched = from != null && to != null && relationMatches(type, relation, from, to);
+            if (!relationMatched) {
+                Map<String, Object> actual = new LinkedHashMap<>();
+                actual.put("from", from == null ? null : from.relationProjection());
+                actual.put("to", to == null ? null : to.relationProjection());
+                failures.add(assertionFailure(toTurn, type, "relation", expectation, actual,
+                        from == null || to == null ? "TURN_SNAPSHOT_UNAVAILABLE" : null));
+                matched = false;
+            }
+        }
+        return matched;
+    }
+
+    private boolean relationMatches(String type, String relation, EvaluationTurnSnapshot from, EvaluationTurnSnapshot to) {
+        if ("candidatePool".equals(type)) {
+            if ("INVALIDATED".equals(relation)) return !from.candidatePool.isEmpty() && to.candidatePool.isEmpty();
+            if ("PRESERVED".equals(relation)) return from.candidatePool.equals(to.candidatePool);
+        }
+        if ("recommendations".equals(type) && "DISJOINT".equals(relation)) {
+            return !from.recommendations.isEmpty() && !to.recommendations.isEmpty()
+                    && Collections.disjoint(from.recommendations, to.recommendations);
+        }
+        if ("focusedShop".equals(type)) {
+            if ("CHANGED".equals(relation)) return !java.util.Objects.equals(from.focusedShopId, to.focusedShopId);
+            if ("PRESERVED".equals(relation)) return java.util.Objects.equals(from.focusedShopId, to.focusedShopId);
+        }
+        if ("decisionSession".equals(type)) {
+            Long fromId = from.activeDecisionSessionId == null ? from.decisionSessionId : from.activeDecisionSessionId;
+            Long toId = to.activeDecisionSessionId == null ? to.decisionSessionId : to.activeDecisionSessionId;
+            if ("SAME".equals(relation)) return java.util.Objects.equals(fromId, toId);
+            if ("CHANGED".equals(relation)) return fromId != null && toId != null && !fromId.equals(toId);
+        }
+        return false;
+    }
+
+    private EvaluationTurnSnapshot snapshotAt(List<EvaluationTurnSnapshot> snapshots, Integer turn) {
+        return turn == null || turn < 1 || turn > snapshots.size() ? null : snapshots.get(turn - 1);
+    }
+
+    private PathValue resolvePath(Map<String, Object> root, String path) {
+        Object current = root;
+        for (String segment : path.split("\\.")) {
+            if (!(current instanceof Map) || !((Map<?, ?>) current).containsKey(segment)) return PathValue.absent();
+            current = ((Map<?, ?>) current).get(segment);
+        }
+        return PathValue.present(current);
+    }
+
+    private boolean matchesPathAssertion(Object expected, PathValue actual) {
+        if (!(expected instanceof Map)) return actual.present && valuesEqual(expected, actual.value);
+        Map<?, ?> expression = (Map<?, ?>) expected;
+        if (expression.containsKey("equals")) return actual.present && valuesEqual(expression.get("equals"), actual.value);
+        if (Boolean.TRUE.equals(expression.get("null"))) return actual.present && actual.value == null;
+        if (Boolean.TRUE.equals(expression.get("absent"))) return !actual.present;
+        if (Boolean.TRUE.equals(expression.get("empty"))) return actual.present && isEmpty(actual.value);
+        if (expression.containsKey("contains")) return actual.present && containsValue(actual.value, expression.get("contains"));
+        if (expression.containsKey("size")) return actual.present
+                && java.util.Objects.equals(sizeOf(actual.value), integerValue(expression.get("size")));
+        return false;
+    }
+
+    private boolean valuesEqual(Object expected, Object actual) {
+        if (expected instanceof Number && actual instanceof Number) {
+            return java.math.BigDecimal.valueOf(((Number) expected).doubleValue())
+                    .compareTo(java.math.BigDecimal.valueOf(((Number) actual).doubleValue())) == 0;
+        }
+        return java.util.Objects.equals(objectMapper.convertValue(expected, Object.class), objectMapper.convertValue(actual, Object.class));
+    }
+
+    private boolean isEmpty(Object value) {
+        return value == null || (value instanceof java.util.Collection && ((java.util.Collection<?>) value).isEmpty())
+                || (value instanceof Map && ((Map<?, ?>) value).isEmpty()) || (value instanceof String && ((String) value).isEmpty());
+    }
+
+    private boolean containsValue(Object value, Object expected) {
+        if (value instanceof java.util.Collection) return ((java.util.Collection<?>) value).stream().anyMatch(item -> valuesEqual(expected, item));
+        if (value instanceof String) return ((String) value).contains(String.valueOf(expected));
+        if (value instanceof Map && expected instanceof Map) return containsMap((Map<?, ?>) expected, value);
+        return false;
+    }
+
+    private Integer sizeOf(Object value) {
+        if (value instanceof java.util.Collection) return ((java.util.Collection<?>) value).size();
+        if (value instanceof Map) return ((Map<?, ?>) value).size();
+        if (value instanceof String) return ((String) value).length();
+        return null;
+    }
+
+    private String assertionType(Object expected) {
+        if (!(expected instanceof Map)) return "equals";
+        for (String operation : java.util.Arrays.asList("equals", "null", "absent", "empty", "contains", "size")) {
+            if (((Map<?, ?>) expected).containsKey(operation)) return operation;
+        }
+        return "invalid";
+    }
+
+    private Map<String, Object> assertionFailure(Integer turnNo, String path, String type, Object expected,
+                                                  Object actual, String reason) {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        failure.put("turnNo", turnNo); failure.put("path", path); failure.put("assertionType", type);
+        failure.put("expected", expected); failure.put("actual", actual);
+        if (reason != null) failure.put("reason", reason);
+        return failure;
+    }
+
+    private List<Map<String, Object>> compactTurnSnapshots(List<EvaluationTurnSnapshot> snapshots) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (EvaluationTurnSnapshot snapshot : snapshots) result.add(snapshot.diagnosticProjection());
+        return result;
     }
 
     private void beginModelObservation() {
@@ -512,9 +777,27 @@ public class AiConversationEvaluationService {
         diagnostic.setRecoveryMatched(result.getRecoveryMatched());
         diagnostic.setMemoryMatched(result.getMemoryMatched());
         diagnostic.setUnseenRecommendationsMatched(result.getUnseenRecommendationsMatched());
+        diagnostic.setTurnAssertionFailures(turnAssertionFailures(result.getTurnOutputsJson()));
         diagnostic.setDurationMs(result.getDurationMs());
         diagnostic.setErrorMessage(result.getErrorMessage());
         return diagnostic;
+    }
+
+    private List<Map<String, Object>> turnAssertionFailures(String turnOutputsJson) {
+        if (turnOutputsJson == null || turnOutputsJson.trim().isEmpty()) return Collections.emptyList();
+        try {
+            Map<String, Object> trace = objectMapper.readValue(turnOutputsJson, new TypeReference<Map<String, Object>>() { });
+            Object failures = trace.get("assertionFailures");
+            if (!(failures instanceof List)) return Collections.emptyList();
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (Object failure : (List<?>) failures) {
+                if (failure instanceof Map) result.add((Map<String, Object>) failure);
+            }
+            return result;
+        } catch (Exception ignored) {
+            // Historical rows used a list-only turnOutputsJson format.
+            return Collections.emptyList();
+        }
     }
 
     private boolean expectedShopsMatched(String expected, List<Long> actual) {
@@ -873,6 +1156,69 @@ public class AiConversationEvaluationService {
             this.coveredCount = coveredCount;
             this.unexpectedCount = unexpectedCount;
             this.matched = matched;
+        }
+    }
+
+    private static final class PathValue {
+        private final boolean present;
+        private final Object value;
+
+        private PathValue(boolean present, Object value) { this.present = present; this.value = value; }
+        private static PathValue present(Object value) { return new PathValue(true, value); }
+        private static PathValue absent() { return new PathValue(false, null); }
+    }
+
+    /** Minimal, evaluation-local turn projection. It is deliberately not a production DTO. */
+    private static final class EvaluationTurnSnapshot {
+        private int turnNo;
+        private String route;
+        private String finalStatus;
+        private Integer workingMemoryVersion;
+        private Map<String, Object> activeCriteria = new LinkedHashMap<>();
+        private List<Long> candidatePool = new ArrayList<>();
+        private List<Long> shownShopIds = new ArrayList<>();
+        private Long focusedShopId;
+        private Long activeDecisionSessionId;
+        private Long sourceDecisionSessionId;
+        private Long decisionSessionId;
+        private String dialogPhase;
+        private List<Map<String, Object>> toolCalls = new ArrayList<>();
+        private List<Long> recommendations = new ArrayList<>();
+
+        private static EvaluationTurnSnapshot error(int turnNo) {
+            EvaluationTurnSnapshot snapshot = new EvaluationTurnSnapshot();
+            snapshot.turnNo = turnNo; snapshot.route = "ERROR";
+            return snapshot;
+        }
+
+        private Map<String, Object> memoryProjection() {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("activeCriteria", activeCriteria);
+            result.put("candidatePool", candidatePool);
+            result.put("shownShopIds", shownShopIds);
+            result.put("focusedShopId", focusedShopId);
+            result.put("sourceDecisionSessionId", sourceDecisionSessionId);
+            result.put("activeDecisionSessionId", activeDecisionSessionId);
+            result.put("dialogPhase", dialogPhase);
+            return result;
+        }
+
+        private Map<String, Object> relationProjection() {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("candidatePool", candidatePool);
+            result.put("recommendations", recommendations);
+            result.put("focusedShopId", focusedShopId);
+            result.put("activeDecisionSessionId", activeDecisionSessionId);
+            result.put("decisionSessionId", decisionSessionId);
+            return result;
+        }
+
+        private Map<String, Object> diagnosticProjection() {
+            Map<String, Object> result = memoryProjection();
+            result.put("turnNo", turnNo); result.put("route", route); result.put("finalStatus", finalStatus);
+            result.put("workingMemoryVersion", workingMemoryVersion); result.put("toolCalls", toolCalls);
+            result.put("recommendations", recommendations); result.put("decisionSessionId", decisionSessionId);
+            return result;
         }
     }
 

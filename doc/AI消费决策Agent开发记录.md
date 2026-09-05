@@ -1,5 +1,11 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-05：Conversation Evaluation 增加按轮状态断言
+
+Conversation Evaluation 在保留既有最终路由、最终 Working Memory、工具聚合和推荐去重断言的基础上，新增 JSONL 可选字段 `expectedTurnStates`、`expectedToolsByTurn` 与 `expectedRelations`。评测每轮聊天完成后仅以只读方式采集 Working Memory 投影、版本号、候选池、焦点商户、来源任务、响应推荐和按轮 Tool Call；不改变业务状态、路由或持久化模型。
+
+第一版状态断言限定为 `equals`、`null`、`absent`、`empty`、`contains`、`size`，跨轮关系限定为候选池失效/保留、推荐集合不重叠、焦点商户变化/保留和决策任务相同/变化。采集结果与结构化断言失败信息复用已有 `turnOutputsJson` 保存，Diagnostics 能返回失败轮次、JSON path、操作、期望值和实际值，因此无需新增数据库列，并保持 MySQL 旧数据集回退兼容。
+
 ## 2026-09-05：评测用例从 MySQL 迁移为 Git 版本化 JSONL
 
 对话评测用例（`AiConversationEvaluationCase`）的定义此前存放在 MySQL 表 `tbl_ai_conversation_evaluation_case` 中，通过 V23~V51 共 26 个迁移文件逐步 INSERT/UPDATE 演进。这种方式的问题：用例变更无法通过 Git diff 审查，跨环境数据不一致，新增/修改用例需要写 SQL 迁移而非直接编辑数据。

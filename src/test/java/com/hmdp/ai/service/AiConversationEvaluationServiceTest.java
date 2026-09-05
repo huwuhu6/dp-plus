@@ -8,11 +8,13 @@ import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.ConversationEvaluationRunResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunComparisonResponse;
+import com.hmdp.ai.dto.ConversationWorkingMemory;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
 import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
 import com.hmdp.ai.dto.ConversationEvaluationDiagnosticsResponse;
 import com.hmdp.ai.entity.AiAgentToolCall;
+import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseResultMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationRunMapper;
@@ -23,6 +25,8 @@ import com.hmdp.dto.UserDTO;
 import com.hmdp.utils.UserHolder;
 
 import java.util.Collections;
+import java.util.ArrayList;
+import java.util.Map;
 import java.util.List;
 import java.util.concurrent.Executor;
 
@@ -35,6 +39,66 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class AiConversationEvaluationServiceTest {
+    @Test
+    void evaluatesTurnStateToolsAndRelationsWithoutChangingLegacyAssertions() throws Exception {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
+        ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
+        AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
+        AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
+        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
+        ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
+        ReflectionTestUtils.setField(service, "runMapper", runMapper);
+        ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
+        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+
+        AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
+        evaluationCase.setId(91L); evaluationCase.setCaseCode("TURN_ASSERTIONS");
+        evaluationCase.setTurnsJson("[{\"message\":\"one\"},{\"message\":\"two\"},{\"message\":\"three\"},{\"message\":\"four\"}]");
+        evaluationCase.setExpectedRoutesJson("[\"START_DECISION\",\"START_DECISION\",\"START_DECISION\",\"BUSINESS_FOLLOW_UP\"]");
+        evaluationCase.setExpectedToolNamesJson("[\"get_shop_detail\"]");
+        evaluationCase.setExpectedTurnStatesJson("[{\"turn\":1,\"memory\":{\"activeCriteria.cuisine\":{\"equals\":\"火锅\"},\"candidatePool\":{\"size\":1},\"shownShopIds\":{\"contains\":1},\"focusedShopId\":{\"equals\":1}}},{\"turn\":2,\"memory\":{\"focusedShopId\":{\"null\":true},\"candidatePool\":{\"empty\":true},\"activeCriteria.nonexistent\":{\"absent\":true}}}]");
+        evaluationCase.setExpectedToolsByTurnJson("[{\"turn\":3,\"tools\":[{\"name\":\"get_shop_detail\",\"arguments\":{\"shopId\":2}}]}]");
+        evaluationCase.setExpectedRelationsJson("[{\"type\":\"candidatePool\",\"relation\":\"INVALIDATED\",\"fromTurn\":1,\"toTurn\":2},{\"type\":\"candidatePool\",\"relation\":\"PRESERVED\",\"fromTurn\":3,\"toTurn\":4},{\"type\":\"recommendations\",\"relation\":\"DISJOINT\",\"fromTurn\":1,\"toTurn\":3},{\"type\":\"focusedShop\",\"relation\":\"CHANGED\",\"fromTurn\":1,\"toTurn\":3},{\"type\":\"focusedShop\",\"relation\":\"PRESERVED\",\"fromTurn\":3,\"toTurn\":4},{\"type\":\"decisionSession\",\"relation\":\"CHANGED\",\"fromTurn\":1,\"toTurn\":3}]");
+        when(datasetLoader.loadCases(any())).thenReturn(Collections.singletonList(evaluationCase));
+        doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(91L); return 1; })
+                .when(runMapper).insert(any(AiConversationEvaluationRun.class));
+        when(chatService.chat(any(), isNull(), any())).thenReturn(
+                responseWithRecommendationIds("START_DECISION", "COMPLETED", 1L),
+                responseWithRecommendationIds("START_DECISION", "WAITING_RELAXATION"),
+                responseWithRecommendationIds("START_DECISION", "COMPLETED", 2L),
+                response("BUSINESS_FOLLOW_UP", "COMPLETED"));
+        AiChatSession session = new AiChatSession(); session.setVersion(4);
+        when(stateService.getOrCreate(any())).thenReturn(session);
+        when(stateService.workingMemory(session)).thenReturn(
+                memory("火锅", list(1L), list(1L), 1L, 10L),
+                memory("火锅", Collections.emptyList(), Collections.emptyList(), null, 10L),
+                memory("日料", list(2L), list(2L), 2L, 11L),
+                memory("日料", list(2L), list(2L), 2L, 11L));
+        AiAgentToolCall call = new AiAgentToolCall();
+        call.setToolName("get_shop_detail"); call.setToolInputJson("{\"shopId\":2,\"includeHours\":true}"); call.setTurnNo(3);
+        when(toolCallMapper.selectList(any())).thenReturn(Collections.singletonList(call));
+
+        ConversationEvaluationRunResponse response = service.runActiveCases();
+
+        AiConversationEvaluationCaseResult result = response.getCaseResults().get(0);
+        assertEquals(true, result.getMemoryMatched(), result.getTurnOutputsJson());
+        assertEquals(true, result.getToolMatched());
+        assertEquals(true, result.getTurnOutputsJson().contains("assertionFailures"));
+    }
+
+    @Test
+    void keepsLegacyCaseBehaviorWhenTurnAssertionsAreAbsent() {
+        AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
+        assertEquals(null, evaluationCase.getExpectedTurnStatesJson());
+        assertEquals(null, evaluationCase.getExpectedToolsByTurnJson());
+        assertEquals(null, evaluationCase.getExpectedRelationsJson());
+    }
     @Test
     void acceptsDeclaredSafeTerminalStatusAlternatives() {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
@@ -349,14 +413,16 @@ class AiConversationEvaluationServiceTest {
         ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
         ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
         ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         when(runMapper.selectById(1L)).thenReturn(run(1L, 100L, "conversation-v1", 2, 2, 1, 2, 2, 100L));
         AiConversationEvaluationCaseResult passed = caseResult(1L, true, true);
         AiConversationEvaluationCaseResult failed = caseResult(2L, true, false);
+        failed.setTurnOutputsJson("{\"assertionFailures\":[{\"turnNo\":2,\"path\":\"activeCriteria.cuisine\",\"assertionType\":\"equals\",\"expected\":\"日料\",\"actual\":\"火锅\"}]}");
         when(resultMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(passed, failed));
         AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
         evaluationCase.setId(2L);
         evaluationCase.setCaseCode("TOOL_COVERAGE_MISS");
-        when(caseMapper.selectBatchIds(any())).thenReturn(List.of(evaluationCase));
+        when(datasetLoader.loadCases("conversation-v1")).thenReturn(List.of(evaluationCase));
         UserDTO user = new UserDTO();
         user.setId(100L);
         UserHolder.saveUser(user);
@@ -364,6 +430,7 @@ class AiConversationEvaluationServiceTest {
             ConversationEvaluationDiagnosticsResponse response = service.getDiagnostics(1L);
             assertEquals(1, response.getFailures().size());
             assertEquals("TOOL_COVERAGE_MISS", response.getFailures().get(0).getCaseCode());
+            assertEquals(2, response.getFailures().get(0).getTurnAssertionFailures().get(0).get("turnNo"));
             assertEquals(1, response.getFailureCounts().get("toolCoverage"));
             assertEquals(0, response.getFailureCounts().get("route"));
         } finally {
@@ -436,6 +503,23 @@ class AiConversationEvaluationServiceTest {
         recommendation.setShopId(shopId);
         recommendation.setShopName("shop-" + shopId);
         return recommendation;
+    }
+
+    private ConversationWorkingMemory memory(String cuisine, List<Long> candidates, List<Long> shown,
+                                             Long focusedShopId, Long sessionId) {
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        memory.getActiveCriteria().setCuisine(cuisine);
+        memory.setCandidatePool(new ArrayList<DecisionRecommendation>());
+        for (Long candidate : candidates) memory.getCandidatePool().add(recommendation(candidate));
+        memory.setShownShopIds(new ArrayList<Long>(shown));
+        memory.setFocusedShopId(focusedShopId);
+        memory.setActiveDecisionSessionId(sessionId);
+        memory.setSourceDecisionSessionId(sessionId);
+        return memory;
+    }
+
+    private List<Long> list(Long value) {
+        return Collections.singletonList(value);
     }
 
     private AiConversationEvaluationCaseResult caseResult(Long caseId, boolean routeMatched, boolean toolMatched) {
