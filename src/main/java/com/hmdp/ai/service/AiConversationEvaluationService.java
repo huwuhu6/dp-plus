@@ -252,9 +252,9 @@ public class AiConversationEvaluationService {
         requireOwner(run);
         List<AiConversationEvaluationCaseResult> results = resultMapper.selectList(new QueryWrapper<AiConversationEvaluationCaseResult>()
                 .eq("run_id", runId).orderByAsc("id"));
-        Map<Long, AiConversationEvaluationCase> casesById = caseMapper.selectBatchIds(results.stream()
-                        .map(AiConversationEvaluationCaseResult::getCaseId).distinct().collect(Collectors.toList()))
-                .stream().collect(Collectors.toMap(AiConversationEvaluationCase::getId, item -> item));
+        // 用例可能来自 JSONL（虚拟 ID），从 Loader 加载而非数据库按 ID 查，避免虚拟 ID 与数据库 ID 冲突
+        Map<Long, AiConversationEvaluationCase> casesById = datasetLoader.loadCases(run.getDatasetVersion()).stream()
+                .collect(Collectors.toMap(AiConversationEvaluationCase::getId, item -> item));
         List<ConversationEvaluationDiagnosticsResponse.CaseDiagnostic> failures = results.stream()
                 .filter(this::hasFailure).map(result -> toDiagnostic(result, casesById.get(result.getCaseId())))
                 .collect(Collectors.toList());
@@ -810,6 +810,9 @@ public class AiConversationEvaluationService {
         String expectedCuisine = stringValue(expected.get("cuisine"));
         if (expectedCuisine != null && (memory.getActiveCriteria() == null
                 || !expectedCuisine.equals(memory.getActiveCriteria().getCuisine()))) return false;
+        String expectedTargetArea = stringValue(expected.get("targetArea"));
+        if (expectedTargetArea != null && (memory.getActiveCriteria() == null
+                || !expectedTargetArea.equals(memory.getActiveCriteria().getTargetArea()))) return false;
         if (expected.containsKey("budgetPerPerson")) {
             Integer expectedBudget = integerValue(expected.get("budgetPerPerson"));
             if (expectedBudget != null && (memory.getActiveCriteria() == null

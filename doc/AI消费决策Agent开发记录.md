@@ -8,9 +8,27 @@
 
 新增 `ConversationEvaluationDatasetLoader`：优先从 classpath 加载 JSONL，逐行反序列化为 DTO 后转换为实体（复杂结构转回 JSON 字符串字段），赋递增虚拟 ID；文件不存在时降级回 MySQL 查询，保证向后兼容。`AiConversationEvaluationService.activeCases` 改为调用 Loader，流水线回放、异步执行、断言逻辑及结果落库完全不变。
 
-首批迁移 `conversation-v1` 数据集 40 条 active 用例（从数据库导出）。`conversation-holdout-v1`（16 条）和 `conversation-robustness-v1`（6 条）暂保留 MySQL，后续按需迁移。
+首批迁移 `conversation-v1` 数据集 40 条 active 用例（从数据库导出）。后续补全 `conversation-holdout-v1`（16 条）和 `conversation-robustness-v1`（9 条，含 3 条新增深水区对抗用例），三个数据集全面摆脱数据库依赖。
 
 测试侧：`AiConversationEvaluationServiceTest` 中 5 个用例的 mock 从 `caseMapper.selectList` 改为 `datasetLoader.loadCases`。全量回归通过。
+
+### JSONL 迁移中的两个集成问题修复
+
+1. **DTO 类型不匹配**：`expectedContextRewrites` 是混合数组（null + Map），`expectedUnseenPairs` 是二维数组（`[[1,2],[1,3]]`），最初声明为 `List<String>` / `List<Map>` 导致 Jackson 反序列化失败。修正为 `List<Object>` / `Object`。
+2. **diagnostics 虚拟 ID 冲突**：`caseResult` 存储 JSONL 用例的虚拟 ID（1-9），但 `getDiagnostics` 通过 `caseMapper.selectBatchIds` 从数据库查用例信息，虚拟 ID 与数据库 ID 冲突导致 caseCode 显示错误。修正为从 `datasetLoader.loadCases(datasetVersion)` 加载用例而非数据库按 ID 查。
+
+### matchesMemory 新增 targetArea 断言
+
+`matchesMemory` 此前支持 searchCity/dialogPhase/cuisine/budgetPerPerson 等字段断言，新增 `targetArea` 字段的严格值比对，支持跨区域切换场景的内存状态验证。`budgetPerPerson: -1` 的负向断言已确认可正常工作（`integerValue(-1)` 返回 -1 非 null，不会被提前跳过）。
+
+### robustness 深水区对抗用例（3 条）
+
+在 `conversation-robustness-v1.jsonl` 追加 3 条边界用例：
+- `CASE_ROBUST_GHOST_INHERITANCE_BUDGET`：三次跨类目/区域/预算切换后，验证 Turn2 的 500 元预算不泄漏到 Turn3，菜系收敛为烤肉、区域收敛为朝阳区。
+- `CASE_ROBUST_COMPOUND_ORDINAL_CRITERIA`：同一句话中 critique（第一家太贵）与商户指代（第二家有插座）复合，验证指代解析不因候选池刷新丢失。
+- `CASE_ROBUST_LOCATION_REFUSAL_ESCAPE`：无坐标进入 CLARIFYING 后，用户以自然语言拒绝定位并要求全城搜索，验证能否逃离 CLARIFYING。
+
+Run #82 实测结果：9 条用例 Route 匹配 7/9（77.8%），FinalStatus 匹配 5/9。3 条新增用例暴露了真实系统边界：异地无数据时停在 CLARIFYING 而非 WAITING_RELAXATION、复合 critique+追问被路由为 START_DECISION、自然语言拒绝定位无法逃离 CLARIFYING——均为已知待改进项，用例本身作为回归锚点保留。
 
 ## 2026-08-25：轻量路由模型与零结果后的当前位置续接
 

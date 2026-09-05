@@ -16,9 +16,9 @@ public class AiConversationEvaluationCaseDto {
     private Boolean active;
     private List<Map<String, Object>> turns;
     private List<String> expectedRoutes;
-    private List<String> expectedContextRewrites;
+    private List<Object> expectedContextRewrites;
     private List<String> expectedToolNames;
-    private List<Map<String, Object>> expectedToolArguments;
+    private Object expectedToolArguments;
     private String expectedFinalStatus;
     private String expectedShopIds;
     private String expectedCity;
@@ -26,6 +26,6 @@ public class AiConversationEvaluationCaseDto {
     private List<String> expectedRecoveryRoutes;
     private Map<String, Object> expectedMemory;
     private Integer expectedUnseenFromTurn;
-    private List<Map<String, Object>> expectedUnseenPairs;
+    private List<Object> expectedUnseenPairs;
     private String notes;
 }
