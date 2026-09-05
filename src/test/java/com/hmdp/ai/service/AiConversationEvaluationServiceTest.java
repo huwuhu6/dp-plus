@@ -63,7 +63,7 @@ class AiConversationEvaluationServiceTest {
         evaluationCase.setExpectedRoutesJson("[\"START_DECISION\",\"START_DECISION\",\"START_DECISION\",\"BUSINESS_FOLLOW_UP\"]");
         evaluationCase.setExpectedToolNamesJson("[\"get_shop_detail\"]");
         evaluationCase.setExpectedTurnStatesJson("[{\"turn\":1,\"memory\":{\"activeCriteria.cuisine\":{\"equals\":\"火锅\"},\"candidatePool\":{\"size\":1},\"shownShopIds\":{\"contains\":1},\"focusedShopId\":{\"equals\":1}}},{\"turn\":2,\"memory\":{\"focusedShopId\":{\"null\":true},\"candidatePool\":{\"empty\":true},\"activeCriteria.nonexistent\":{\"absent\":true}}}]");
-        evaluationCase.setExpectedToolsByTurnJson("[{\"turn\":3,\"tools\":[{\"name\":\"get_shop_detail\",\"arguments\":{\"shopId\":2}}]}]");
+        evaluationCase.setExpectedToolsByTurnJson("[{\"turn\":3,\"tools\":[{\"name\":\"get_shop_detail\",\"arguments\":{\"shopId\":2},\"candidateFrom\":{\"turn\":3,\"ordinal\":1}}]}]");
         evaluationCase.setExpectedRelationsJson("[{\"type\":\"candidatePool\",\"relation\":\"INVALIDATED\",\"fromTurn\":1,\"toTurn\":2},{\"type\":\"candidatePool\",\"relation\":\"PRESERVED\",\"fromTurn\":3,\"toTurn\":4},{\"type\":\"recommendations\",\"relation\":\"DISJOINT\",\"fromTurn\":1,\"toTurn\":3},{\"type\":\"focusedShop\",\"relation\":\"CHANGED\",\"fromTurn\":1,\"toTurn\":3},{\"type\":\"focusedShop\",\"relation\":\"PRESERVED\",\"fromTurn\":3,\"toTurn\":4},{\"type\":\"decisionSession\",\"relation\":\"CHANGED\",\"fromTurn\":1,\"toTurn\":3}]");
         when(datasetLoader.loadCases(any())).thenReturn(Collections.singletonList(evaluationCase));
         doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(91L); return 1; })

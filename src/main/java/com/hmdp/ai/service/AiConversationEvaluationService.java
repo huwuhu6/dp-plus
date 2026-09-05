@@ -532,7 +532,7 @@ public class AiConversationEvaluationService {
                 continue;
             }
             for (Object rawTool : (List<?>) rawTools) {
-                if (!(rawTool instanceof Map) || !matchesExpectedTool((Map<?, ?>) rawTool, snapshot.toolCalls)) {
+                if (!(rawTool instanceof Map) || !matchesExpectedTool((Map<?, ?>) rawTool, snapshot.toolCalls, snapshots)) {
                     failures.add(assertionFailure(turn, "toolCalls", "tool", rawTool, snapshot.toolCalls, null));
                     matched = false;
                 }
@@ -541,14 +541,41 @@ public class AiConversationEvaluationService {
         return matched;
     }
 
-    private boolean matchesExpectedTool(Map<?, ?> expected, List<Map<String, Object>> actualTools) {
+    private boolean matchesExpectedTool(Map<?, ?> expected, List<Map<String, Object>> actualTools,
+                                        List<EvaluationTurnSnapshot> snapshots) {
         Object name = expected.get("name");
         Object expectedArguments = expected.get("arguments");
+        Long expectedCandidateShopId = candidateShopId(expected.get("candidateFrom"), snapshots);
         for (Map<String, Object> actual : actualTools) {
             if (!java.util.Objects.equals(String.valueOf(name), String.valueOf(actual.get("name")))) continue;
-            if (!(expectedArguments instanceof Map) || containsMap((Map<?, ?>) expectedArguments, actual.get("arguments"))) return true;
+            if (expectedArguments instanceof Map && !containsMap((Map<?, ?>) expectedArguments, actual.get("arguments"))) continue;
+            if (expected.containsKey("candidateFrom")
+                    && !java.util.Objects.equals(String.valueOf(expectedCandidateShopId),
+                    String.valueOf(toolShopId(actual.get("arguments"))))) continue;
+            return true;
         }
         return false;
+    }
+
+    private Long candidateShopId(Object candidateFrom, List<EvaluationTurnSnapshot> snapshots) {
+        if (!(candidateFrom instanceof Map)) return null;
+        Map<?, ?> source = (Map<?, ?>) candidateFrom;
+        Integer turn = integerValue(source.get("turn"));
+        Integer ordinal = integerValue(source.get("ordinal"));
+        EvaluationTurnSnapshot snapshot = snapshotAt(snapshots, turn);
+        if (snapshot == null || ordinal == null || ordinal < 1 || ordinal > snapshot.recommendations.size()) return null;
+        return snapshot.recommendations.get(ordinal - 1);
+    }
+
+    private Long toolShopId(Object arguments) {
+        if (!(arguments instanceof Map)) return null;
+        Object shopId = ((Map<?, ?>) arguments).get("shopId");
+        if (shopId instanceof Number) return ((Number) shopId).longValue();
+        try {
+            return shopId == null ? null : Long.valueOf(String.valueOf(shopId));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private boolean containsMap(Map<?, ?> expected, Object actual) {

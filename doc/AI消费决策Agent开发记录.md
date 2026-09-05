@@ -2066,3 +2066,20 @@ R1 修复后 GLM 建议补齐锚点链。探查发现：① Layer 5（上一轮�
 **封板后例外（2026-09-04）**：critique 相对反馈修复经用户批准重新开启（满足封板重开四条件：稳定复现 R1/R2/R3、明确影响核心正确性、现有架构无法解释——schema 只有绝对数值预算无法表达相对反馈、修复成本明确）。该修复计入 Known Limitations #24，处理完成后继续封板。
 
 当前代码、实验、文档已全部提交，文档一致性已通过静态检查。
+
+### Conversation Robustness Dataset v1 第一批状态轨迹 Baseline（2026-09-05）
+
+**目的**：原 robustness 集只有 9 条，且主要依赖最终 route/status，无法证明多轮中间状态是否被正确继承、清除或重新绑定。第一批新增 15 条高价值轨迹后，`conversation-robustness-v1` 从 **9 条扩至 24 条**；新增 Case 使用按轮 Working Memory、候选池/焦点/会话关系，以及按轮工具与推荐快照断言。为验证 ordinal 绑定，评测侧增加窄断言 `candidateFrom {turn, ordinal}`：将工具 `shopId` 与指定轮的推荐快照逐项比对，不改变生产 Tool 或对话状态行为。
+
+**覆盖的新增轨迹**：A→B→A、A→B→C→A、恢复 A 后追加约束、地点切换保留预算、radius/nearby 清除、preferences 和 keyword 的追加/否定/清除、失效池后的旧 ordinal、刷新池后的新 ordinal、跨轮 ordinal、focused 引用链、critique + factual query、位置澄清确认/命名地点，以及显式硬约束零结果。
+
+**Flat Working Memory Baseline**：Run **83**，提交前工作区版本 `9dd5c63-dirty`，模型 `deepseek-v4-flash`。24 条中 **4 条完全通过**；route 17/24，final status 20/24，聚合 tool 16/24；新增 15 条中 Working Memory/turn-state 通过 6/15、按轮 tool 通过 9/15。时延 P50/P95/P99 = 18,767 / 33,850 / 34,466 ms；prompt/completion token = 3,263 / 799。该 Run 使用真实模型、MySQL 和检索链路，因而作为当前实现的可复现基线，而非确定性单测成绩。
+
+**主要失败簇（只记录观测，不在本轮修复）**：
+1. **State Mutation / Ghost Inheritance**：`ROBUST_RETURN_A_AFTER_B` 与 `ROBUST_RETURN_A_AFTER_B_C` 回到 A 后预算仍为 B 的 300；`ROBUST_PREFERENCE_APPEND_NEGATE_CLEAR` 末轮仍保留日料/安静；`ROBUST_KEYWORD_REPLACE_AND_CLEAR` 末轮仍保留“筑地日本料理”。
+2. **Entity Reference / Tool Binding**：刷新池新 ordinal、长距离 ordinal、focused 链和复合 critique 用例的按轮工具断言失败；diagnostics 已保存具体 turn、预期候选快照和实际工具调用，不能再被“整条会话曾调用该 Tool”掩盖。
+3. **Candidate Invalidation / Routing**：失效候选池后的旧 ordinal 未按期望进入暂停解释路径；若干位置澄清轨迹在当前未配置地理编码服务时走 START_DECISION，而非 LOCATION_RESOLUTION。
+4. **Compound Intent**：`ROBUST_COMPOUND_CRITIQUE_AND_FACT` 的同轮工具绑定未满足，且实际预算收紧为 137、而用例对首家 110 元锚点预期为 94；该差异保留为基线数据，不能以调整 Ground Truth 提高通过率。
+5. **Clarification / Escape**：确认位置后持久化 `dialogPhase` 为 RECOMMENDING；命名地点路径则实际新开 session 并完成推荐，与“澄清中仅形成可确认候选”的 Ground Truth 不符。
+
+**验证**：`mvn -q test` 通过；`AiConversationEvaluationServiceTest` 14/14 通过。JSONL 加载正常，未发生 Dataset Schema 或 Loader 失败。
