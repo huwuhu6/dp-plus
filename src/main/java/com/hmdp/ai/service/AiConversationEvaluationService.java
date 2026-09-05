@@ -452,6 +452,8 @@ public class AiConversationEvaluationService {
         ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
         snapshot.workingMemoryVersion = state.getVersion();
         snapshot.activeCriteria = objectMapper.convertValue(memory.getActiveCriteria(), new TypeReference<Map<String, Object>>() { });
+        snapshot.activeTaskId = memory.getActiveTaskId();
+        snapshot.taskCount = memory.getTasks().size();
         snapshot.candidatePool = recommendationIds(memory.getCandidatePool());
         snapshot.shownShopIds = new ArrayList<>(memory.getShownShopIds());
         snapshot.focusedShopId = memory.getFocusedShopId();
@@ -1209,6 +1211,8 @@ public class AiConversationEvaluationService {
         private Long sourceDecisionSessionId;
         private Long decisionSessionId;
         private String dialogPhase;
+        private String activeTaskId;
+        private Integer taskCount;
         private List<Map<String, Object>> toolCalls = new ArrayList<>();
         private List<Long> recommendations = new ArrayList<>();
 
@@ -1227,6 +1231,8 @@ public class AiConversationEvaluationService {
             result.put("sourceDecisionSessionId", sourceDecisionSessionId);
             result.put("activeDecisionSessionId", activeDecisionSessionId);
             result.put("dialogPhase", dialogPhase);
+            result.put("activeTaskId", activeTaskId);
+            result.put("taskCount", taskCount);
             return result;
         }
 

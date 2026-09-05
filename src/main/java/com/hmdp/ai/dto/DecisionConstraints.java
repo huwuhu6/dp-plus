@@ -37,4 +37,6 @@ public class DecisionConstraints {
     private Set<String> lockedConstraints = new HashSet<>();
     /** Constraint fields the user explicitly abandons (e.g. "看看有没有别的吃的" clears cuisine/keyword). */
     private List<String> clearedFields = new ArrayList<>();
+    /** Explicit preference removals, extracted as structured delta rather than inferred by merger text rules. */
+    private List<String> removedPreferences = new ArrayList<>();
 }

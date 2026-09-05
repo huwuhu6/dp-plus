@@ -66,6 +66,9 @@ public class ConversationCriteriaMerger {
         if (Boolean.TRUE.equals(delta.getNearby())) replace(result, "nearby", String.valueOf(merged.getNearby()), "true", () -> merged.setNearby(true));
         // preferences: append explicit new tags (dedup); explicit negation removes the tag.
         append(result, "preferences", merged.getPreferences(), delta.getPreferences());
+        if (delta.getRemovedPreferences() != null) {
+            for (String preference : delta.getRemovedPreferences()) removePreference(result, merged, preference);
+        }
         if (containsAny(text, "不要安静", "不用安静", "不用太安静", "别太安静")) removePreference(result, merged, "安静");
         if (containsAny(text, "排队也行", "不用避开排队", "不想避开排队")) removePreference(result, merged, "不排队");
         if (containsAny(text, "不要辣", "不吃辣", "清淡", "少油", "不油腻")) addPreference(result, merged, "清淡");

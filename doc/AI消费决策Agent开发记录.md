@@ -2067,6 +2067,16 @@ R1 修复后 GLM 建议补齐锚点链。探查发现：① Layer 5（上一轮�
 
 当前代码、实验、文档已全部提交，文档一致性已通过静态检查。
 
+### Working Memory V2：Task 作用域主链（2026-09-05）
+
+Run 85 是正式 Flat baseline：24 case、完整通过 3，Route/Tool/Final Status 为 17/16/21。Run 83 仅作为 dirty 探索记录。
+
+本轮采用 Lightweight Task State，而非完整 Frame Registry：`ConversationWorkingMemory` 新增 `schemaVersion=2`、`activeTaskId` 与 `tasks`；`DecisionTaskState` 持有下一轮 merge 的 canonical `criteria`、task-local `searchLocation`、最小 `constraintSources` 和激活信息。设备位置、当前 phase、焦点实体与 active session 仍为 conversation interaction scope。Flat `activeCriteria` 与 `searchLocation` 不再持久化；现有 getter 只是从 active task 派生，避免双写。
+
+`ChatOrchestrationService.prepareDecision` 在 reducer 前执行三种确定性 Task transition：默认 UPDATE；显式“最开始/之前”激活历史 Task；同时替换目标城市和菜系时 CREATE 新 Task。切换后本轮 Delta 继续 merge 到恢复 Task，因此支持 A→B→A 与恢复后预算覆盖。`DecisionConstraints` 增加结构化 `removedPreferences`；Extractor 对预算/距离/keyword clear 和“不要安静”补入 clear/remove mutation，Merger 消费这些 mutation。`constraintSources` 记录 explicit replacement 与 relative budget/distance derived 来源。
+
+本轮不迁移 Recommendation Batch、candidatePool/shownShopIds/focused entity 的持久模型，也不处理 Compound Intent、Location Clarification 或全部 entity routing；这些保持为下一阶段独立范围。全量 `mvn -q test` 通过，新增 Task scope 单测覆盖 A→B→A 隔离、恢复后覆盖及 explicit/derived provenance。
+
 ### Conversation Robustness Dataset v1 第一批状态轨迹 Baseline（2026-09-05）
 
 **目的**：原 robustness 集只有 9 条，且主要依赖最终 route/status，无法证明多轮中间状态是否被正确继承、清除或重新绑定。第一批新增 15 条高价值轨迹后，`conversation-robustness-v1` 从 **9 条扩至 24 条**；新增 Case 使用按轮 Working Memory、候选池/焦点/会话关系，以及按轮工具与推荐快照断言。为验证 ordinal 绑定，评测侧增加窄断言 `candidateFrom {turn, ordinal}`：将工具 `shopId` 与指定轮的推荐快照逐项比对，不改变生产 Tool 或对话状态行为。

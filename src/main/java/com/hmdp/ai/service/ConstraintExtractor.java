@@ -33,10 +33,10 @@ public class ConstraintExtractor {
 
     public DecisionConstraints extract(String query) {
         try {
-            return enforceCurrentDeviceIntent(applyDirectionFallback(normalize(extractByModel(query)), query), query);
+            return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(normalize(extractByModel(query)), query), query), query);
         } catch (Exception e) {
             log.warn("[AI][model] action=CONSTRAINT_EXTRACTION event=FALLBACK reason={}", e.getClass().getSimpleName());
-            return enforceCurrentDeviceIntent(applyDirectionFallback(normalize(extractByRule(query)), query), query);
+            return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(normalize(extractByRule(query)), query), query), query);
         }
     }
 
@@ -52,6 +52,14 @@ public class ConstraintExtractor {
                 && containsAny(query, "更近", "近一点", "近点", "附近一点", "太远", "远一点")) {
             constraints.setRadiusDirection(-1);
         }
+        return constraints;
+    }
+
+    private DecisionConstraints applyMutations(DecisionConstraints constraints, String query) {
+        if (containsAny(query, "不限预算", "预算不限", "不限制预算")) constraints.getClearedFields().add("budgetPerPerson");
+        if (containsAny(query, "不限距离", "不限定距离", "不考虑距离")) { constraints.getClearedFields().add("radiusKm"); constraints.getClearedFields().add("nearby"); }
+        if (containsAny(query, "不限定店名", "不指定店名")) constraints.getClearedFields().add("keyword");
+        if (containsAny(query, "不用安静", "不用太安静", "不要安静", "不想安静")) constraints.getRemovedPreferences().add("安静");
         return constraints;
     }
 
@@ -152,6 +160,7 @@ public class ConstraintExtractor {
         if (constraints.getMissingInformation() == null) constraints.setMissingInformation(new ArrayList<String>());
         if (constraints.getLockedConstraints() == null) constraints.setLockedConstraints(new java.util.HashSet<String>());
         if (constraints.getClearedFields() == null) constraints.setClearedFields(new ArrayList<String>());
+        if (constraints.getRemovedPreferences() == null) constraints.setRemovedPreferences(new ArrayList<String>());
         return constraints;
     }
 
@@ -217,6 +226,7 @@ public class ConstraintExtractor {
         properties.put("preferences", arrayProperty("Open-set soft preferences as natural-language tags, e.g. 安静, 不排队, 约会, 便餐, 清淡, 辣, 适合聚餐, 氛围好, 性价比高. This is an open set — do not restrict to an enum. Do NOT include constraints the user explicitly cancelled or negated."));
         properties.put("missingInformation", arrayProperty("Information needed but not supplied."));
         properties.put("clearedFields", arrayProperty("Constraint fields the user explicitly abandons: cuisine, keyword, budgetPerPerson, radiusKm, nearby, targetCity, targetArea, arrivalTime, preferences. Empty array if none."));
+        properties.put("removedPreferences", arrayProperty("Explicitly removed preference tags, for example 安静 when user says 不用安静了."));
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "object");
         schema.put("properties", properties);

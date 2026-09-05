@@ -312,6 +312,16 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             return;
         }
         com.hmdp.ai.dto.DecisionConstraints extracted = constraintExtractor.extract(context.getEffectiveMessage());
+        // V2 task transition is deterministic and deliberately small: explicit historical wording wins;
+        // a simultaneous destination and cuisine replacement opens an independent recommendation task.
+        if (!conversationStateService.activateHistoricalTask(context.getWorkingMemory(), context.getOriginalMessage())) {
+            com.hmdp.ai.dto.DecisionConstraints previous = context.getWorkingMemory().getActiveCriteria();
+            boolean separateDemand = hasText(extracted.getTargetCity()) && hasText(extracted.getCuisine())
+                    && hasText(previous.getTargetCity()) && hasText(previous.getCuisine())
+                    && (!extracted.getTargetCity().equals(previous.getTargetCity())
+                    && !extracted.getCuisine().equals(previous.getCuisine()));
+            if (separateDemand) conversationStateService.createTask(context.getWorkingMemory(), extracted.getTargetCity() + extracted.getCuisine());
+        }
         // critique is a single source of truth: direction != 0 (LLM) OR refinement words (rule fast-path) both feed exclusion
         List<Long> excludedCandidates = refinementExclusions(context.getContextRewrite(), context.getWorkingMemory(), extracted);
         request.setExcludeShopIds(excludedCandidates);

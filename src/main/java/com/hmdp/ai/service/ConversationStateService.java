@@ -8,6 +8,8 @@ import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.ConversationSlots;
 import com.hmdp.ai.dto.ConversationWorkingMemory;
 import com.hmdp.ai.dto.CriteriaMergeResult;
+import com.hmdp.ai.dto.ConstraintSource;
+import com.hmdp.ai.dto.DecisionTaskState;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
@@ -29,6 +31,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class ConversationStateService {
@@ -101,6 +104,35 @@ public class ConversationStateService {
         } catch (Exception e) {
             throw new IllegalStateException("Conversation working memory cannot be read", e);
         }
+    }
+
+    public DecisionTaskState activeTask(ConversationWorkingMemory memory) {
+        return memory.activeTask();
+    }
+
+    public DecisionTaskState createTask(ConversationWorkingMemory memory, String title) {
+        DecisionTaskState task = new DecisionTaskState();
+        task.setTaskId(UUID.randomUUID().toString());
+        task.setTitle(title == null || title.isBlank() ? "新的推荐" : title);
+        task.setCreatedTurnNo(memory.getTasks().size() + 1);
+        task.setLastActivatedTurnNo(task.getCreatedTurnNo());
+        memory.getTasks().add(task); memory.setActiveTaskId(task.getTaskId());
+        memory.setFocusedShopId(null); memory.setFocusedShopName(null);
+        return task;
+    }
+
+    public boolean activateHistoricalTask(ConversationWorkingMemory memory, String message) {
+        if (memory.getTasks().size() < 2 || message == null) return false;
+        String text = message.replaceAll("\\s+", "");
+        DecisionTaskState candidate = null;
+        if (text.contains("最开始")) candidate = memory.getTasks().get(0);
+        else if (text.contains("之前") || text.contains("上一个")) {
+            for (int i = memory.getTasks().size() - 1; i >= 0; i--) if (!memory.getTasks().get(i).getTaskId().equals(memory.getActiveTaskId())) { candidate = memory.getTasks().get(i); break; }
+        }
+        if (candidate == null) return false;
+        memory.setActiveTaskId(candidate.getTaskId()); candidate.setLastActivatedTurnNo(candidate.getLastActivatedTurnNo() + 1);
+        memory.setFocusedShopId(null); memory.setFocusedShopName(null);
+        return true;
     }
 
     /** Parses and normalizes a historical snapshot without making it current state. */
@@ -206,7 +238,9 @@ public class ConversationStateService {
     public void reduceCriteria(AiChatSession state, CriteriaMergeResult reduction) {
         if (reduction == null || reduction.getConstraints() == null) return;
         ConversationWorkingMemory memory = workingMemory(state);
+        DecisionTaskState task = activeTask(memory);
         memory.setActiveCriteria(reduction.getConstraints());
+        markConstraintSources(task, reduction);
         synchronizeNamedSearchLocation(state, memory, reduction);
         if (changesCandidateUniverse(reduction)) {
             boolean hadFocusedShop = memory.getFocusedShopId() != null;
@@ -294,6 +328,21 @@ public class ConversationStateService {
         context.setDecisionConstraints(memory.getActiveCriteria());
         return context;
     }
+
+    private void markConstraintSources(DecisionTaskState task, CriteriaMergeResult reduction) {
+        for (String change : reduction.getReplaced()) {
+            String field = change.split(":", 2)[0];
+            if ("budgetPerPerson".equals(field) || "radiusKm".equals(field) || "nearby".equals(field)) task.getConstraintSources().put(field, ConstraintSource.USER_EXPLICIT);
+        }
+        for (String appended : reduction.getAppended()) {
+            if (appended.startsWith("relativeBudget") || appended.startsWith("relativeDistance")) {
+                task.getConstraintSources().put(appended.startsWith("relativeBudget") ? "budgetPerPerson" : "radiusKm", ConstraintSource.DERIVED);
+            }
+        }
+        for (String cleared : reduction.getCleared()) task.getConstraintSources().remove(cleared);
+    }
+
+    void markConstraintSourcesForTest(DecisionTaskState task, CriteriaMergeResult reduction) { markConstraintSources(task, reduction); }
 
     /**
      * Restores only BUSINESS_STATE fields from a historical snapshot. This always appends
