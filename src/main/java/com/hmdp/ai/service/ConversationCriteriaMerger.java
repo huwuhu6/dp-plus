@@ -54,6 +54,14 @@ public class ConversationCriteriaMerger {
             replace(result, "locationIntent", merged.getLocationIntent(), "CURRENT_DEVICE",
                     () -> merged.setLocationIntent("CURRENT_DEVICE"));
         } else {
+            boolean explicitTargetDelta = "EXPLICIT_TARGET".equalsIgnoreCase(delta.getLocationIntent())
+                    || hasText(delta.getTargetCity()) || hasText(delta.getTargetArea());
+            if (explicitTargetDelta && "CURRENT_DEVICE".equalsIgnoreCase(previous.getLocationIntent())
+                    && !Boolean.TRUE.equals(delta.getNearby())
+                    && (delta.getRadiusKm() == null || delta.getRadiusKm() <= 0D)) {
+                clear(result, "nearby", () -> merged.setNearby(false));
+                clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
+            }
             if (hasText(delta.getTargetCity())) replace(result, "targetCity", merged.getTargetCity(), delta.getTargetCity(), () -> merged.setTargetCity(delta.getTargetCity()));
             if (hasText(delta.getTargetArea())) replace(result, "targetArea", merged.getTargetArea(), delta.getTargetArea(), () -> merged.setTargetArea(delta.getTargetArea()));
             if (hasText(delta.getLocationIntent()) && !"UNSPECIFIED".equals(delta.getLocationIntent())) {

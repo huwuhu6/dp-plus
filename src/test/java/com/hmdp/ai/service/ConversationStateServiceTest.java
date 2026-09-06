@@ -1,6 +1,8 @@
 package com.hmdp.ai.service;
 
 import com.hmdp.ai.dto.*;
+import com.hmdp.ai.entity.AiChatSession;
+import com.hmdp.ai.entity.AiWorkingMemory;
 import org.junit.jupiter.api.Test;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -30,6 +32,47 @@ class ConversationStateServiceTest {
         explicit.setNearby(true); explicit.setRadiusKm(5D);
         assertFalse(ConversationStateService.normalizeNearbyRadius(explicit));
         assertEquals(5D, explicit.getRadiusKm());
+    }
+
+    @Test void currentDeviceProjectionClearsNamedTaskScope() throws Exception {
+        ConversationStateService service = new ConversationStateService();
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "objectMapper", mapper);
+        WorkingMemoryVersionService versionService = org.mockito.Mockito.mock(WorkingMemoryVersionService.class);
+        org.mockito.Mockito.when(versionService.append(org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    AiWorkingMemory committed = new AiWorkingMemory();
+                    committed.setVersion(1);
+                    committed.setMemoryJson(mapper.writeValueAsString(invocation.getArgument(3)));
+                    return committed;
+                });
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "workingMemoryVersionService", versionService);
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        DecisionTaskState task = service.createTask(memory, "北京日料");
+        task.getCriteria().setTargetCity("北京");
+        task.getCriteria().setLocationIntent("EXPLICIT_TARGET");
+        task.getSearchLocation().setStatus("RESOLVED_BY_NAME");
+        task.getSearchLocation().setCity("北京");
+        state.setWorkingMemoryJson(mapper.writeValueAsString(memory));
+
+        DecisionConstraints execution = new DecisionConstraints();
+        execution.setLocationIntent("CURRENT_DEVICE");
+        execution.setNearby(true);
+        execution.setRadiusKm(5D);
+        service.applyCurrentDeviceSearchScope(state, execution);
+
+        ConversationWorkingMemory projected = service.workingMemory(state);
+        assertEquals("CURRENT_DEVICE", projected.getTasks().get(0).getCriteria().getLocationIntent());
+        assertEquals("", projected.getTasks().get(0).getCriteria().getTargetCity());
+        assertEquals("", projected.getTasks().get(0).getCriteria().getTargetArea());
+        assertEquals(5D, projected.getTasks().get(0).getCriteria().getRadiusKm());
+        assertEquals("MISSING", projected.getTasks().get(0).getSearchLocation().getStatus());
     }
     private DecisionRecommendation shop(long id) { DecisionRecommendation value = new DecisionRecommendation(); value.setShopId(id); value.setShopName("shop-" + id); return value; }
     private List<Long> ids(List<DecisionRecommendation> values) { List<Long> result = new ArrayList<>(); for (DecisionRecommendation v : values) result.add(v.getShopId()); return result; }

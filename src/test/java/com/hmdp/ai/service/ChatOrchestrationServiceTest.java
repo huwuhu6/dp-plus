@@ -12,6 +12,7 @@ import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.ConversationSlots;
+import com.hmdp.ai.dto.ConversationWorkingMemory;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionResponse;
@@ -613,8 +614,33 @@ class ChatOrchestrationServiceTest {
         ArgumentCaptor<DecisionRequest> decisionRequest = ArgumentCaptor.forClass(DecisionRequest.class);
         verify(decisionService).decide(decisionRequest.capture());
         assertEquals(null, decisionRequest.getValue().getLatitude());
+        assertFalse(Boolean.TRUE.equals(decisionRequest.getValue().getUseLocationScope()));
         assertEquals("START_DECISION", response.getRoute());
         assertEquals(57L, response.getDecisionSessionId());
+    }
+
+    @Test
+    void namedSearchProjectionDoesNotEnableDeviceLocationScope() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        when(stateService.workingMemory(state)).thenReturn(memory);
+
+        DecisionRequest request = new DecisionRequest();
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetCity("北京");
+        constraints.setLocationIntent("EXPLICIT_TARGET");
+        ReflectionTestUtils.invokeMethod(service, "applyLocationSlot", request, state, constraints);
+
+        assertEquals("北京", request.getCity());
+        assertFalse(Boolean.TRUE.equals(request.getUseLocationScope()));
+        assertNull(request.getLatitude());
+        assertNull(request.getLongitude());
     }
 
     @Test

@@ -112,6 +112,46 @@ class ConversationCriteriaMergerTest {
     }
 
     @Test
+    void explicitDestinationDoesNotInheritCurrentDeviceRadius() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setLocationIntent("CURRENT_DEVICE");
+        previous.setNearby(true);
+        previous.setRadiusKm(5D);
+
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setLocationIntent("EXPLICIT_TARGET");
+        delta.setTargetCity("北京");
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "换成北京的日料");
+
+        assertEquals("EXPLICIT_TARGET", result.getConstraints().getLocationIntent());
+        assertEquals("北京", result.getConstraints().getTargetCity());
+        assertFalse(result.getConstraints().getNearby());
+        assertEquals(-1D, result.getConstraints().getRadiusKm());
+        assertTrue(result.getCleared().contains("nearby"));
+        assertTrue(result.getCleared().contains("radiusKm"));
+    }
+
+    @Test
+    void explicitDestinationCanDeclareItsOwnNearbyRadius() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setLocationIntent("CURRENT_DEVICE");
+        previous.setNearby(true);
+        previous.setRadiusKm(5D);
+
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setLocationIntent("EXPLICIT_TARGET");
+        delta.setTargetCity("北京");
+        delta.setNearby(true);
+        delta.setRadiusKm(2D);
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "北京国贸附近2公里");
+
+        assertTrue(result.getConstraints().getNearby());
+        assertEquals(2D, result.getConstraints().getRadiusKm());
+    }
+
+    @Test
     void derivesLowerBudgetFromFocusedCandidateForCheaperRefinement() {
         DecisionRecommendation focused = new DecisionRecommendation();
         focused.setShopId(2L); focused.setAvgPrice(120L);

@@ -392,6 +392,14 @@ public class ConversationStateService {
             criteria = new DecisionConstraints();
             task.setCriteria(criteria);
         }
+        boolean leavingNamedDestination = hasText(criteria.getTargetCity()) || hasText(criteria.getTargetArea())
+                || (task.getSearchLocation() != null && "RESOLVED_BY_NAME".equals(task.getSearchLocation().getStatus()));
+        if (leavingNamedDestination) {
+            criteria.setTargetCity("");
+            criteria.setTargetArea("");
+            clearLocation(task.getSearchLocation(), "MISSING");
+            invalidateCandidatePool(memory);
+        }
         criteria.setLocationIntent("CURRENT_DEVICE");
         criteria.setNearby(true);
         if (executionConstraints.getRadiusKm() != null && executionConstraints.getRadiusKm() > 0D) {

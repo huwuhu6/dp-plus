@@ -245,10 +245,11 @@ class ConsumptionDecisionServiceTest {
         followUp.setLatitude(26.08D);
         followUp.setLongitude(119.30D);
 
-        ReflectionTestUtils.invokeMethod(service, "applyProvidedLocation", request, followUp);
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        ReflectionTestUtils.invokeMethod(service, "applyProvidedLocation", request, followUp, constraints);
         assertTrue(request.getUseLocationScope());
 
-        DecisionConstraints constraints = new DecisionConstraints();
         constraints.setRadiusKm(-1D);
         ReflectionTestUtils.invokeMethod(service, "reconcileRequestFacts", constraints, request);
         assertTrue(constraints.getNearby());
@@ -265,9 +266,33 @@ class ConsumptionDecisionServiceTest {
         followUp.setLongitude(119.30D);
         followUp.setCity("福州");
 
-        ReflectionTestUtils.invokeMethod(service, "applyProvidedLocation", request, followUp);
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetCity("北京");
+        constraints.setLocationIntent("EXPLICIT_TARGET");
+        ReflectionTestUtils.invokeMethod(service, "applyProvidedLocation", request, followUp, constraints);
         assertEquals("北京", request.getCity());
         assertFalse(request.getUseLocationScope());
+    }
+
+    @Test
+    void reverseGeocodedRequestCityDoesNotBlockCurrentDeviceProjection() {
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("我附近");
+        request.setCity("福州");
+        request.setProvince("福建");
+        DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
+        followUp.setLatitude(26.08D);
+        followUp.setLongitude(119.30D);
+        followUp.setProvince("福建");
+        followUp.setCity("福州");
+
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        ReflectionTestUtils.invokeMethod(service, "applyProvidedLocation", request, followUp, constraints);
+
+        assertTrue(request.getUseLocationScope());
+        assertEquals("福州", request.getCity());
+        assertEquals("福建", request.getProvince());
     }
 
     @Test

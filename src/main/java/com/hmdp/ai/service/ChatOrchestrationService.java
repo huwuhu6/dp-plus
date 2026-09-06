@@ -1245,7 +1245,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             request.setLatitude(null);
             request.setLongitude(null);
             request.setLocationStatus("RESOLVED_BY_NAME");
-            request.setUseLocationScope(true);
+            request.setUseLocationScope(false);
             log.info("[AI][chat] event=NAMED_SEARCH_SCOPE_APPLIED chatId={} city={} area={} source=ACTIVE_CRITERIA",
                     state.getChatId(), request.getCity(), request.getDistrict());
             return;

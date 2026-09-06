@@ -2184,3 +2184,11 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 新增 6 条 robustness 语义矩阵 Case：两个不同表达的命名城市餐饮正样本、城市非餐饮负样本、食物知识负样本、默认附近半径恢复、显式半径恢复，并增加了真实多轮场景的抽象回归。定向 Run 120（9 条，含既有定位恢复 Case）中新增 6 条全部通过，快照确认北京/上海为 `EXPLICIT_TARGET`，定位恢复分别为 `CURRENT_DEVICE + 3km` 与 `CURRENT_DEVICE + 5km`。完整 Run 121 使用当前 30 条 Dataset，Route 29/30、Tool 29/30、Final Status 28/30；剩余失败来自既有 Location/暂停与模型抽取波动，不改变 Task/Working Memory/Batch 架构。
 
 本轮没有新增自然语言 `contains`/`startsWith` 词表或 Regex；仅有一处系统备注去重的结构性 `contains` 和一处 `CONFIRM_RESOLVED_LOCATION_` 选项 ID 前缀判断，均不参与用户语言理解。其余改动是路由结构化 prompt、统一半径 normalization，以及显式地点确认与设备定位恢复的边界保护。`mvn -q test` 全绿。
+
+### Location State / Projection provenance 审计与修复（2026-09-06）
+
+对 `EXPLICIT_TARGET` 与 `CURRENT_DEVICE` 切换做定向审计后确认了一个真实的来源混淆：`DecisionRequest.city/province/district` 是执行投影，既可能来自用户命名地点，也可能来自设备 GPS 的反向地理编码；原 `applyProvidedLocation()` 却用这些字段是否非空来反推“用户是否显式指定目的地”。Run 122 的 `EXPLICIT_DESTINATION_NO_DATA_DEVICE_LOCATION_RECOVERY` 证明该问题会把“我附近”留在 `重庆/EXPLICIT_TARGET`，而不是切到福州设备范围。
+
+修复保持最小范围：`DecisionConstraints.locationIntent` 成为显式目的地判断的唯一业务来源；`WAITING_RELAXATION + PROVIDE_LOCATION` 被视为用户明确离开命名地点、切换到 `CURRENT_DEVICE` 的 command 语义，清除 Task 的 `targetCity/targetArea/searchLocation`，保留用户已明确的 radius 或默认范围。`applyProvidedLocation()` 不再从 request 投影字段猜 provenance。`applyLocationSlot()` 对命名地点将 `useLocationScope=false`；设备→命名地点时，Merger 会清除未在新目的地中重新声明的 nearby/radius，避免福州设备半径泄漏到北京。命名地点确认仍由 `CONFIRM_RESOLVED_LOCATION_` 保护，不会误调用设备定位投影。
+
+新增/调整了 Explicit→Device、Device→Explicit、Explicit→Device→Explicit 三条 robustness 轨迹，并补充 Task scope 清除、反向地理编码 city 不阻塞 CURRENT_DEVICE、设备半径不继承到命名城市的单测。Run 123 定向 4/4；Run 124 当前 33 条 robustness：Route 32/33、Tool 32/33、Final Status 32/33，新增 location transition Case 全部通过。修复后 Run 125 conversation-v1（40 条）：Route 38/40、Tool 33/40、Final Status 40/40、Locality 40/40；关键 `EXPLICIT_DESTINATION_NO_DATA_DEVICE_LOCATION_RECOVERY` 已从修复前 Final FAIL 变为通过，快照轨迹为 `重庆/EXPLICIT_TARGET → 空目标/CURRENT_DEVICE + 3km`。剩余 v1 红灯是既有 Tool/Route probe 差异，不是 Location provenance 回归。

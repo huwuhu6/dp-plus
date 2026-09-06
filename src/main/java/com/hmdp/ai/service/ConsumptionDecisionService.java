@@ -154,8 +154,8 @@ public class ConsumptionDecisionService {
                     constraints.getSystemNotes().add("用户未提供位置，按全城搜索");
                     removeMissingInformation(constraints, "位置", "坐标", "起点");
                 } else {
-                    applyProvidedLocation(request, followUp);
-                    if (!hasExplicitDestination(constraints, request)) {
+                    applyProvidedLocation(request, followUp, constraints);
+                    if (!hasExplicitDestination(constraints)) {
                         constraints.setLocationIntent("CURRENT_DEVICE");
                         constraints.setNearby(true);
                     }
@@ -165,11 +165,11 @@ public class ConsumptionDecisionService {
             } else if ("WAITING_RELAXATION".equals(pausedStatus)) {
                 if (command == DecisionCommand.PROVIDE_LOCATION) {
                     // B 修复 #case30：WAITING_RELAXATION 态补充位置 → 保留约束换位置重搜
-                    applyProvidedLocation(request, followUp);
-                    if (!hasExplicitDestination(constraints, request)) {
-                        constraints.setLocationIntent("CURRENT_DEVICE");
-                        constraints.setNearby(true);
-                    }
+                    // The command itself is the explicit user choice to leave the
+                    // named search scope and use the current device location.
+                    switchToCurrentDevice(constraints);
+                    applyProvidedLocation(request, followUp, constraints);
+                    constraints.setNearby(true);
                     log.info("[AI][session={}] state=WAITING_RELAXATION action=LOCATION_ACCEPTED latitude={} longitude={}",
                             sessionId, request.getLatitude(), request.getLongitude());
                 } else {
@@ -559,28 +559,38 @@ public class ConsumptionDecisionService {
     }
 
     /** 应用用户提供的设备坐标 payload（CLARIFYING 与 WAITING_RELAXATION 共用）。 */
-    private void applyProvidedLocation(DecisionRequest request, DecisionFollowUpRequest followUp) {
+    private void applyProvidedLocation(DecisionRequest request, DecisionFollowUpRequest followUp,
+                                       DecisionConstraints constraints) {
         if (followUp == null || followUp.getLatitude() == null || followUp.getLongitude() == null) {
             throw new IllegalArgumentException("请提供 latitude 和 longitude 后继续附近搜索");
         }
-        boolean explicitDestination = hasText(request.getCity()) || hasText(request.getDistrict())
-                || hasText(request.getProvince());
+        boolean explicitDestination = hasExplicitDestination(constraints);
         request.setLatitude(followUp.getLatitude());
         request.setLongitude(followUp.getLongitude());
-        if (!explicitDestination) {
+        if (explicitDestination) {
+            request.setCity(constraints.getTargetCity());
+            request.setDistrict(constraints.getTargetArea());
+            request.setUseLocationScope(false);
+        } else {
             request.setProvince(followUp.getProvince());
             request.setCity(followUp.getCity());
             request.setDistrict(followUp.getDistrict());
+            request.setUseLocationScope(true);
         }
         request.setLocationStatus("AVAILABLE");
-        request.setUseLocationScope(!explicitDestination);
     }
 
-    private boolean hasExplicitDestination(DecisionConstraints constraints, DecisionRequest request) {
-        return (constraints != null && (hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())
-                || "EXPLICIT_TARGET".equalsIgnoreCase(constraints.getLocationIntent())))
-                || (request != null && (hasText(request.getCity()) || hasText(request.getDistrict())
-                || hasText(request.getProvince())));
+    private void switchToCurrentDevice(DecisionConstraints constraints) {
+        if (constraints == null) return;
+        constraints.setTargetCity("");
+        constraints.setTargetArea("");
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        constraints.setNearby(true);
+    }
+
+    private boolean hasExplicitDestination(DecisionConstraints constraints) {
+        return constraints != null && (hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())
+                || "EXPLICIT_TARGET".equalsIgnoreCase(constraints.getLocationIntent()));
     }
 
     private DecisionCommand resolveFollowUpCommand(DecisionFollowUpRequest followUp) {
