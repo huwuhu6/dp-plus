@@ -43,6 +43,17 @@ public class ConversationContextRewriter {
         if (!hasBusinessContext(context)) {
             return ContextRewriteResult.unchanged(query, "NO_WORKING_MEMORY");
         }
+        BatchAwareReferenceResolver.Resolution resolved = new BatchAwareReferenceResolver().resolve(query, context);
+        if (resolved != null && resolved.shopName() != null && !resolved.shopName().isBlank()) {
+            String rewritten = query.replace("第一家", resolved.shopName()).replace("第二家", resolved.shopName())
+                    .replace("第三家", resolved.shopName()).replace("首选", resolved.shopName())
+                    .replace("刚才那家", resolved.shopName()).replace("这家", resolved.shopName()).replace("那家", resolved.shopName());
+            ContextRewriteResult result = new ContextRewriteResult();
+            result.setOriginalQuery(query); result.setRewrittenQuery(rewritten);
+            result.setApplied(!query.equals(rewritten)); result.setUsedModel(false); result.setReason("BATCH_REFERENCE_RESOLVED");
+            result.setCandidateOrdinal(resolved.ordinal());
+            return result;
+        }
         if (!needsRewrite(query)) return ContextRewriteResult.unchanged(query, "SELF_CONTAINED");
         if (!queryRewriteClient.isConfigured()) return ContextRewriteResult.unchanged(query, "MODEL_UNAVAILABLE");
         try {
@@ -92,7 +103,8 @@ public class ConversationContextRewriter {
             candidates.add((index + 1) + ". " + item.getShopName() + "(id=" + item.getShopId() + ", 人均=" + item.getAvgPrice() + ")");
         }
         return "当前聚焦=" + context.getFocusedShopName() + "(id=" + context.getFocusedShopId() + ");活跃条件="
-                + context.getDecisionConstraints() + ";候选=" + candidates;
+                + context.getDecisionConstraints() + ";候选=" + candidates
+                + ";候选批次=" + context.getRecommendationBatches().size();
     }
 
     private boolean hasBusinessContext(AgentSessionContext context) {

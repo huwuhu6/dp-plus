@@ -66,6 +66,7 @@ public class AgentConversationService {
     @Resource private AgentToolStateReducer agentToolStateReducer = new AgentToolStateReducer();
     @Resource private AiProperties aiProperties;
     @Resource private ObjectMapper objectMapper;
+    private final BatchAwareReferenceResolver batchReferenceResolver = new BatchAwareReferenceResolver();
 
     public AgentConversationResponse converse(Long sessionId, AgentConversationRequest request, AgentSessionContext workingMemoryContext) {
         return converse(sessionId, request, workingMemoryContext, null);
@@ -542,6 +543,11 @@ public class AgentConversationService {
 
     private void addOrdinalMention(List<ShopMention> mentions, String message, String token, int candidateIndex,
                                    AgentSessionContext context) {
+        BatchAwareReferenceResolver.Resolution resolved = batchReferenceResolver.resolve(message, context);
+        if (resolved != null && message.contains(token)) {
+            mentions.add(new ShopMention(message.indexOf(token), resolved.recommendation()));
+            return;
+        }
         if (candidateIndex >= context.getCandidatePoolSnapshot().size()) return;
         int position = message.indexOf(token);
         if (position >= 0) mentions.add(new ShopMention(position, context.getCandidatePoolSnapshot().get(candidateIndex)));
@@ -574,6 +580,8 @@ public class AgentConversationService {
      * "另一家" means the only candidate other than the focused shop when that relation is unambiguous.
      */
     private DecisionRecommendation resolveOrdinalReference(String message, AgentSessionContext context) {
+        BatchAwareReferenceResolver.Resolution resolved = batchReferenceResolver.resolve(message, context);
+        if (resolved != null) return resolved.recommendation();
         if (message == null || context.getCandidatePoolSnapshot() == null || context.getCandidatePoolSnapshot().isEmpty()) return null;
         List<DecisionRecommendation> candidates = context.getCandidatePoolSnapshot();
         if (message.contains("第一家") || message.contains("首选")) return candidates.get(0);

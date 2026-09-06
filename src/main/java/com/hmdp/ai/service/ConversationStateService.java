@@ -457,6 +457,9 @@ public class ConversationStateService {
         context.setFocusedShopId(memory.getFocusedShopId()); context.setFocusedShopName(memory.getFocusedShopName());
         context.setCandidatePoolSnapshot(latestCandidatePool(memory));
         context.setShownShopIdsSnapshot(shownShopIds(memory));
+        DecisionTaskState task = activeTask(memory);
+        context.setRecommendationBatches(task == null || task.getRecommendationBatches() == null
+                ? new ArrayList<RecommendationBatch>() : new ArrayList<RecommendationBatch>(task.getRecommendationBatches()));
         context.setDecisionConstraints(activeCriteria(memory));
         return context;
     }

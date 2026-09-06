@@ -4,6 +4,8 @@ import com.hmdp.ai.client.QueryRewriteClient;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
+import com.hmdp.ai.dto.RecommendationBatch;
+import com.hmdp.ai.dto.RecommendationCandidateRef;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -16,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -36,6 +39,21 @@ class ConversationContextRewriterTest {
         assertEquals("第一家有优惠券吗？", result.getOriginalQuery());
         assertEquals("查询闽师东北菜（上街大学城店）当前可用的团购和优惠券", result.getRewrittenQuery());
         verify(textClient).rewrite(any());
+    }
+
+    @Test
+    void resolvesOrdinalFromBatchHistoryBeforeCallingRewriteModel() {
+        ConversationContextRewriter rewriter = new ConversationContextRewriter();
+        QueryRewriteClient textClient = mock(QueryRewriteClient.class);
+        ReflectionTestUtils.setField(rewriter, "queryRewriteClient", textClient);
+        AgentSessionContext context = workingMemory();
+        RecommendationBatch batch = new RecommendationBatch(); batch.setDecisionSessionId(1L);
+        RecommendationCandidateRef first = new RecommendationCandidateRef(); first.setShopId(101L); first.setShopName("第一批商户"); batch.getCandidates().add(first);
+        DecisionRecommendation firstRecommendation = new DecisionRecommendation(); firstRecommendation.setShopId(101L); firstRecommendation.setShopName("第一批商户");
+        context.setRecommendationBatches(Collections.singletonList(batch)); context.setCandidatePoolSnapshot(Collections.singletonList(firstRecommendation));
+        ContextRewriteResult result = rewriter.rewrite("最开始第一家有券吗？", Collections.emptyList(), context);
+        assertEquals("BATCH_REFERENCE_RESOLVED", result.getReason()); assertEquals(1, result.getCandidateOrdinal());
+        assertTrue(result.getRewrittenQuery().contains("第一批商户")); verifyNoInteractions(textClient);
     }
 
     @Test

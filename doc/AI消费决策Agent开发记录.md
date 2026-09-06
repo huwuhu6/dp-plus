@@ -2107,3 +2107,9 @@ Run 85 是正式 Flat baseline：24 case、完整通过 3，Route/Tool/Final Sta
 **评测反馈效率**：新增 `POST /ai/evaluations/conversation-runs/robustness?caseCodes=...`。无参数跑完整集；支持单/多 Case、去重；未知或混合非法 code 明确失败，Run.caseCount 反映实际执行量。Run90 是首次正式验证（4 Case、4/4），其目的仅是缩短定向迭代周期，不改变评测语义。
 
 **边界冻结**：剩余红灯归入独立后续问题：Compound Intent/Single Action Contract、Location Clarification、preference/radius mutation extraction、历史 batch ordinal resolver、refreshed-batch binding、部分 Routing/Tool binding；不再归因或扩展 Working Memory V2。
+
+### RecommendationBatch 历史 ordinal 引用收敛（2026-09-06）
+
+为修复刷新候选池和跨轮 ordinal 只消费 latest pool 的问题，新增轻量 `BatchAwareReferenceResolver`。`第一/二/三家` 默认解析最新非空 Batch；`最开始第一家` 解析最早非空 Batch；`刚才那家/这家` 通过 focusedShop 定位。Batch 为空时作为 invalidation boundary，不自动复活旧候选；`shownShopIds` 仍只用于展示历史和排除，不参与 ordinal 主解析。
+
+Resolver 结果显式携带 Batch、ordinal、shopId/shopName，并同时供 Context Rewrite 与 Agent Tool reference binding 使用。Run 92 验证：刷新池第二家绑定 Turn2 Batch ordinal 2（shopId 397）；长距离场景绑定原始 Turn1 ordinal 2/1（shopId 517/577）；失效池场景未复活历史候选。剩余红灯是 Tool 名称选择和失效后的 Routing/Policy 语义，不属于 Batch ordinal 解析。

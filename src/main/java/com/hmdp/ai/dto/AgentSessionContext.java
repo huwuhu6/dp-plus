@@ -16,6 +16,8 @@ public class AgentSessionContext {
     private List<DecisionRecommendation> candidatePoolSnapshot = new ArrayList<DecisionRecommendation>();
     /** Snapshot copied from Working Memory; never derive it from candidatePoolSnapshot. */
     private List<Long> shownShopIdsSnapshot = new ArrayList<Long>();
+    /** Task-local recommendation history used for ordinal references; never flatten this into shown IDs. */
+    private List<RecommendationBatch> recommendationBatches = new ArrayList<RecommendationBatch>();
     private DecisionRequest decisionRequest;
     private DecisionConstraints decisionConstraints;
 }
