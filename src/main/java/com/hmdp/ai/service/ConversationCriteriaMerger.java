@@ -49,21 +49,21 @@ public class ConversationCriteriaMerger {
             clear(result, "keyword", () -> merged.setKeyword(""));
         }
         if (isCurrentLocationIntent(text)) {
+            clear(result, "targetProvince", () -> merged.setTargetProvince(""));
             clear(result, "targetCity", () -> merged.setTargetCity(""));
             clear(result, "targetArea", () -> merged.setTargetArea(""));
             replace(result, "locationIntent", merged.getLocationIntent(), "CURRENT_DEVICE",
                     () -> merged.setLocationIntent("CURRENT_DEVICE"));
         } else {
             boolean explicitTargetDelta = "EXPLICIT_TARGET".equalsIgnoreCase(delta.getLocationIntent())
-                    || hasText(delta.getTargetCity()) || hasText(delta.getTargetArea());
+                    || hasText(delta.getTargetProvince()) || hasText(delta.getTargetCity()) || hasText(delta.getTargetArea());
             if (explicitTargetDelta && "CURRENT_DEVICE".equalsIgnoreCase(previous.getLocationIntent())
                     && !Boolean.TRUE.equals(delta.getNearby())
                     && (delta.getRadiusKm() == null || delta.getRadiusKm() <= 0D)) {
                 clear(result, "nearby", () -> merged.setNearby(false));
                 clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
             }
-            if (hasText(delta.getTargetCity())) replace(result, "targetCity", merged.getTargetCity(), delta.getTargetCity(), () -> merged.setTargetCity(delta.getTargetCity()));
-            if (hasText(delta.getTargetArea())) replace(result, "targetArea", merged.getTargetArea(), delta.getTargetArea(), () -> merged.setTargetArea(delta.getTargetArea()));
+            applyDestinationScope(result, merged, delta);
             if (hasText(delta.getLocationIntent()) && !"UNSPECIFIED".equals(delta.getLocationIntent())) {
                 replace(result, "locationIntent", merged.getLocationIntent(), delta.getLocationIntent(),
                         () -> merged.setLocationIntent(delta.getLocationIntent()));
@@ -241,7 +241,7 @@ public class ConversationCriteriaMerger {
     private DecisionConstraints copy(DecisionConstraints source) {
         DecisionConstraints target = new DecisionConstraints();
         if (source == null) return target;
-        target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword()); target.setLocationIntent(source.getLocationIntent());
+        target.setTargetProvince(source.getTargetProvince()); target.setTargetCity(source.getTargetCity()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword()); target.setLocationIntent(source.getLocationIntent());
         target.setCuisine(source.getCuisine()); target.setBudgetPerPerson(source.getBudgetPerPerson());
         target.setRadiusKm(source.getRadiusKm()); target.setNearby(source.getNearby());
         target.setArrivalTime(source.getArrivalTime());
@@ -270,6 +270,8 @@ public class ConversationCriteriaMerger {
                     clear(result, "radiusKm", () -> merged.setRadiusKm(-1D));
                 } else if ("nearby".equals(field) && Boolean.TRUE.equals(merged.getNearby())) {
                     clear(result, "nearby", () -> merged.setNearby(false));
+                } else if ("targetProvince".equals(field) && hasText(merged.getTargetProvince())) {
+                    clear(result, "targetProvince", () -> merged.setTargetProvince(""));
                 } else if ("targetCity".equals(field) && hasText(merged.getTargetCity())) {
                     clear(result, "targetCity", () -> merged.setTargetCity(""));
                 } else if ("targetArea".equals(field) && hasText(merged.getTargetArea())) {
@@ -289,6 +291,7 @@ public class ConversationCriteriaMerger {
 
     private void inherit(CriteriaMergeResult result, DecisionConstraints previous) {
         if (previous == null) return;
+        if (hasText(previous.getTargetProvince())) result.getInherited().add("targetProvince=" + previous.getTargetProvince());
         if (hasText(previous.getTargetCity())) result.getInherited().add("targetCity=" + previous.getTargetCity());
         if (hasText(previous.getTargetArea())) result.getInherited().add("targetArea=" + previous.getTargetArea());
         if (hasText(previous.getLocationIntent())) result.getInherited().add("locationIntent=" + previous.getLocationIntent());
@@ -297,6 +300,29 @@ public class ConversationCriteriaMerger {
         if (previous.getBudgetPerPerson() != null && previous.getBudgetPerPerson() > 0) result.getInherited().add("budgetPerPerson=" + previous.getBudgetPerPerson());
         if (previous.getRadiusKm() != null && previous.getRadiusKm() > 0) result.getInherited().add("radiusKm=" + previous.getRadiusKm());
         if (previous.getPreferences() != null && !previous.getPreferences().isEmpty()) result.getInherited().add("preferences=" + previous.getPreferences());
+    }
+
+    private void applyDestinationScope(CriteriaMergeResult result, DecisionConstraints merged, DecisionConstraints delta) {
+        boolean hasProvince = hasText(delta.getTargetProvince());
+        boolean hasCity = hasText(delta.getTargetCity());
+        boolean hasArea = hasText(delta.getTargetArea());
+        if (hasProvince) {
+            if (!delta.getTargetProvince().equals(merged.getTargetProvince())) {
+                replace(result, "targetProvince", merged.getTargetProvince(), delta.getTargetProvince(),
+                        () -> merged.setTargetProvince(delta.getTargetProvince()));
+            }
+            if (!hasCity && hasText(merged.getTargetCity())) clear(result, "targetCity", () -> merged.setTargetCity(""));
+            if (!hasArea && hasText(merged.getTargetArea())) clear(result, "targetArea", () -> merged.setTargetArea(""));
+        }
+        if (hasCity) {
+            if (!hasProvince && hasText(merged.getTargetProvince())) clear(result, "targetProvince", () -> merged.setTargetProvince(""));
+            if (!delta.getTargetCity().equals(merged.getTargetCity())) {
+                replace(result, "targetCity", merged.getTargetCity(), delta.getTargetCity(),
+                        () -> merged.setTargetCity(delta.getTargetCity()));
+                if (!hasArea && hasText(merged.getTargetArea())) clear(result, "targetArea", () -> merged.setTargetArea(""));
+            }
+        }
+        if (hasArea) replace(result, "targetArea", merged.getTargetArea(), delta.getTargetArea(), () -> merged.setTargetArea(delta.getTargetArea()));
     }
 
     private void replace(CriteriaMergeResult result, String field, String before, String after, Runnable mutation) {

@@ -152,6 +152,70 @@ class ConversationCriteriaMergerTest {
     }
 
     @Test
+    void provinceDestinationReplacesCityScope() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setTargetCity("上海市");
+        previous.setTargetArea("浦东新区");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setTargetProvince("福建省");
+        delta.setLocationIntent("EXPLICIT_TARGET");
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "那福建呢");
+
+        assertEquals("福建省", result.getConstraints().getTargetProvince());
+        assertEquals("", result.getConstraints().getTargetCity());
+        assertEquals("", result.getConstraints().getTargetArea());
+        assertTrue(result.getCleared().contains("targetCity"));
+        assertTrue(result.getCleared().contains("targetArea"));
+    }
+
+    @Test
+    void cityDestinationClearsPriorProvinceAndArea() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setTargetProvince("福建省");
+        previous.setTargetArea("闽侯县");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setTargetCity("厦门市");
+        delta.setLocationIntent("EXPLICIT_TARGET");
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "换厦门看看");
+
+        assertEquals("", result.getConstraints().getTargetProvince());
+        assertEquals("厦门市", result.getConstraints().getTargetCity());
+        assertEquals("", result.getConstraints().getTargetArea());
+    }
+
+    @Test
+    void provinceAndCityCanBeProvidedTogether() {
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setTargetProvince("福建省");
+        delta.setTargetCity("福州市");
+        delta.setTargetArea("鼓楼区");
+        delta.setLocationIntent("EXPLICIT_TARGET");
+
+        CriteriaMergeResult result = merger.merge(new DecisionConstraints(), delta, "福建福州鼓楼区");
+
+        assertEquals("福建省", result.getConstraints().getTargetProvince());
+        assertEquals("福州市", result.getConstraints().getTargetCity());
+        assertEquals("鼓楼区", result.getConstraints().getTargetArea());
+    }
+
+    @Test
+    void currentDeviceClearsPriorProvince() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setTargetProvince("福建省");
+        previous.setLocationIntent("EXPLICIT_TARGET");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setLocationIntent("CURRENT_DEVICE");
+        delta.setNearby(true);
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "我附近");
+
+        assertEquals("", result.getConstraints().getTargetProvince());
+        assertTrue(result.getCleared().contains("targetProvince"));
+    }
+
+    @Test
     void derivesLowerBudgetFromFocusedCandidateForCheaperRefinement() {
         DecisionRecommendation focused = new DecisionRecommendation();
         focused.setShopId(2L); focused.setAvgPrice(120L);

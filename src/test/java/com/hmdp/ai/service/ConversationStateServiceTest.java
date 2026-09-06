@@ -55,6 +55,7 @@ class ConversationStateServiceTest {
         state.setChatId("test-chat");
         ConversationWorkingMemory memory = new ConversationWorkingMemory();
         DecisionTaskState task = service.createTask(memory, "北京日料");
+        task.getCriteria().setTargetProvince("北京市");
         task.getCriteria().setTargetCity("北京");
         task.getCriteria().setLocationIntent("EXPLICIT_TARGET");
         task.getSearchLocation().setStatus("RESOLVED_BY_NAME");
@@ -69,6 +70,7 @@ class ConversationStateServiceTest {
 
         ConversationWorkingMemory projected = service.workingMemory(state);
         assertEquals("CURRENT_DEVICE", projected.getTasks().get(0).getCriteria().getLocationIntent());
+        assertEquals("", projected.getTasks().get(0).getCriteria().getTargetProvince());
         assertEquals("", projected.getTasks().get(0).getCriteria().getTargetCity());
         assertEquals("", projected.getTasks().get(0).getCriteria().getTargetArea());
         assertEquals(5D, projected.getTasks().get(0).getCriteria().getRadiusKm());

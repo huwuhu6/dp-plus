@@ -95,6 +95,7 @@ public class ConstraintExtractor {
         if (!containsCurrentDeviceReference(query)) return constraints;
         constraints.setLocationIntent("CURRENT_DEVICE");
         constraints.setNearby(true);
+        constraints.setTargetProvince("");
         constraints.setTargetCity("");
         constraints.setTargetArea("");
         return constraints;
@@ -102,7 +103,7 @@ public class ConstraintExtractor {
 
     private DecisionConstraints extractByModel(String query) throws Exception {
         List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(message("system", "你是餐饮消费决策需求解析器。只能根据用户原话提取约束；显式目标地点与设备当前位置必须分开：targetCity 是用户要求搜索的城市，targetArea 是用户要求搜索的行政区、商圈或地标，不能把它们放进 keyword。未知值使用空字符串、-1 或 false，不得臆测。"
+        messages.add(message("system", "你是餐饮消费决策需求解析器。只能根据用户原话提取约束；显式目标地点与设备当前位置必须分开：targetProvince 是用户明确要求搜索的省级行政范围，targetCity 是用户明确要求搜索的城市（上海/北京等直辖市也放这里），targetArea 是用户要求搜索的行政区、商圈或地标，不能把它们放进 keyword。用户只说城市时不要凭常识补填其所属省份；只有用户同时明确说出省和城市时才同时填写。短句或承接句也要提取其中明确地点，例如‘那厦门呢’应填写 targetCity=厦门市；城市和省份使用规范行政名称（如福州市、厦门市、上海市、福建省）。未知值使用空字符串、-1 或 false，不得臆测。"
                 + "字段语义：cuisine 只放可枚举菜系（如 川菜/湘菜/粤菜/江浙菜/东北菜/西北菜/闽菜/鲁菜/徽菜/云贵菜/湖北菜/火锅/烧烤/日料/韩餐/西餐/东南亚菜/港式/快餐简餐/面食/粉面/饺子馄饨/小吃/自助餐/海鲜/素食/咖啡/甜品饮品/面包烘焙/其他）；无法归入枚举的明确品类（如 沙县小吃）可保留原名。keyword 只放用户明确点名的实体（具体店名或招牌菜，如 闽师东北菜/锅包肉），不得把菜系放进 keyword。preferences 放开放式的软偏好自然短语（如 安静/不排队/约会/便餐/清淡/辣/适合聚餐/氛围好/性价比高），这是开放集，不要局限于枚举。"
                 + "当用户明确放弃或更换之前已存在的某个旧约束时，把该字段名加入 clearedFields（可选字段，例如“看看有没有别的吃的”放弃菜系→cuisine，“预算随便/预算不限”放弃预算→budgetPerPerson）。仅当用户在放弃旧约束时才加入；普通条件微调或新增约束不得加入。"
                 + "用户明确取消、放弃或否定的条件，不得放入任何字段（例如“聚会取消了，自己一个人简餐”→ 不得包含 适合聚餐/大桌）。"));
@@ -171,6 +172,7 @@ public class ConstraintExtractor {
     }
 
     private DecisionConstraints normalize(DecisionConstraints constraints) {
+        if (constraints.getTargetProvince() == null) constraints.setTargetProvince("");
         if (constraints.getTargetCity() == null) constraints.setTargetCity("");
         if (constraints.getTargetArea() == null) constraints.setTargetArea("");
         constraints.setLocationIntent(normalizeLocationIntent(constraints.getLocationIntent(), constraints));
@@ -226,7 +228,7 @@ public class ConstraintExtractor {
     private String normalizeLocationIntent(String locationIntent, DecisionConstraints constraints) {
         if ("CURRENT_DEVICE".equalsIgnoreCase(locationIntent)) return "CURRENT_DEVICE";
         if ("EXPLICIT_TARGET".equalsIgnoreCase(locationIntent)
-                || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())) return "EXPLICIT_TARGET";
+                || hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())) return "EXPLICIT_TARGET";
         return "UNSPECIFIED";
     }
 
@@ -240,6 +242,7 @@ public class ConstraintExtractor {
 
     private Map<String, Object> constraintSchema() {
         Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("targetProvince", property("string", "Explicit target province requested by the user, for example 福建省 or 广东省. Empty string if absent. Do not infer a parent province when the user only names a city."));
         properties.put("targetCity", property("string", "Explicit target city requested by the user, for example 重庆 or 福州. Empty string if absent."));
         properties.put("targetArea", property("string", "Explicit target district, business area, or landmark, for example 解放碑 or 鼓楼区. Empty string if absent."));
         properties.put("locationIntent", property("string", "EXPLICIT_TARGET for a named destination, CURRENT_DEVICE for the user's current location, or UNSPECIFIED."));
@@ -253,7 +256,7 @@ public class ConstraintExtractor {
         properties.put("arrivalTime", property("string", "Arrival time HH:mm. Empty string if unknown."));
         properties.put("preferences", arrayProperty("Open-set soft preferences as natural-language tags, e.g. 安静, 不排队, 约会, 便餐, 清淡, 辣, 适合聚餐, 氛围好, 性价比高. This is an open set — do not restrict to an enum. Do NOT include constraints the user explicitly cancelled or negated."));
         properties.put("missingInformation", arrayProperty("Information needed but not supplied."));
-        properties.put("clearedFields", arrayProperty("Constraint fields the user explicitly abandons: cuisine, keyword, budgetPerPerson, radiusKm, nearby, targetCity, targetArea, arrivalTime, preferences. Empty array if none."));
+        properties.put("clearedFields", arrayProperty("Constraint fields the user explicitly abandons: cuisine, keyword, budgetPerPerson, radiusKm, nearby, targetProvince, targetCity, targetArea, arrivalTime, preferences. Empty array if none."));
         properties.put("removedPreferences", arrayProperty("Explicitly removed preference tags, for example 安静 when user says 不用安静了."));
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "object");

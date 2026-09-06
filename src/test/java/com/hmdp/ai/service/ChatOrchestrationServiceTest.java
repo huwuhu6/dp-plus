@@ -644,6 +644,52 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    void provinceSearchProjectsToProvinceNotCity() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        when(stateService.workingMemory(state)).thenReturn(new ConversationWorkingMemory());
+
+        DecisionRequest request = new DecisionRequest();
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetProvince("福建省");
+        constraints.setLocationIntent("EXPLICIT_TARGET");
+        ReflectionTestUtils.invokeMethod(service, "applyLocationSlot", request, state, constraints);
+
+        assertEquals("福建省", request.getProvince());
+        assertNull(request.getCity());
+        assertFalse(Boolean.TRUE.equals(request.getUseLocationScope()));
+        assertNull(request.getLatitude());
+        assertNull(request.getLongitude());
+    }
+
+    @Test
+    void provinceAndCityProjectionPreservesBothAdministrativeLevels() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        when(stateService.workingMemory(state)).thenReturn(new ConversationWorkingMemory());
+
+        DecisionRequest request = new DecisionRequest();
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetProvince("福建省");
+        constraints.setTargetCity("福州市");
+        constraints.setLocationIntent("EXPLICIT_TARGET");
+        ReflectionTestUtils.invokeMethod(service, "applyLocationSlot", request, state, constraints);
+
+        assertEquals("福建省", request.getProvince());
+        assertEquals("福州市", request.getCity());
+        assertFalse(Boolean.TRUE.equals(request.getUseLocationScope()));
+    }
+
+    @Test
     @org.junit.jupiter.api.Disabled("Gateway location regex extraction was removed in favor of the structured NLU contract.")
     void nearbySearchPhraseDoesNotTreatActionWordsAsAnExplicitLocation() {
         ChatOrchestrationService service = new ChatOrchestrationService();

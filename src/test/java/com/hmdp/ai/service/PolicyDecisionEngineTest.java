@@ -34,6 +34,16 @@ class PolicyDecisionEngineTest {
     }
 
     @Test
+    void explicitProvinceIsAValidRecommendationScope() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetProvince("福建省");
+        constraints.setLocationIntent("EXPLICIT_TARGET");
+
+        assertEquals(PolicyDecisionEngine.EXECUTE_RECOMMENDATION,
+                engine.decideRecommendation(new DecisionRequest(), constraints, new ConversationWorkingMemory()).getAction());
+    }
+
+    @Test
     void confirmedSearchDestinationAllowsRecommendation() {
         ConversationWorkingMemory memory = new ConversationWorkingMemory();
         ConversationLocationSlot target = memory.ensureActiveTask().getSearchLocation();

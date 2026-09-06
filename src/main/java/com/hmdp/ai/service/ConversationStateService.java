@@ -224,30 +224,33 @@ public class ConversationStateService {
 
     private boolean isIndependentDemand(DecisionConstraints active, DemandSignature resolved) {
         DemandSignature current = DemandSignature.of(active);
-        return current.hasCityAndCuisine() && resolved.hasCityAndCuisine()
-                && !current.city.equals(resolved.city) && !current.cuisine.equals(resolved.cuisine);
+        return current.hasDestinationAndCuisine() && resolved.hasDestinationAndCuisine()
+                && (!current.province.equals(resolved.province) || !current.city.equals(resolved.city))
+                && !current.cuisine.equals(resolved.cuisine);
     }
 
     public record TaskTransition(String action, String reason, String activeTaskIdBefore, String activeTaskIdAfter) { }
 
-    private record DemandSignature(String city, String area, String cuisine) {
+    private record DemandSignature(String province, String city, String area, String cuisine) {
         private static DemandSignature of(DecisionConstraints criteria) {
-            return new DemandSignature(normalizeCity(criteria == null ? null : criteria.getTargetCity()),
+            return new DemandSignature(normalize(criteria == null ? null : criteria.getTargetProvince()),
+                    normalizeCity(criteria == null ? null : criteria.getTargetCity()),
                     normalize(criteria == null ? null : criteria.getTargetArea()),
                     normalize(criteria == null ? null : criteria.getCuisine()));
         }
         private static DemandSignature resolve(DecisionConstraints previous, DecisionConstraints delta) {
             DemandSignature base = of(previous);
-            return new DemandSignature(hasText(delta == null ? null : delta.getTargetCity()) ? normalizeCity(delta.getTargetCity()) : base.city,
+            return new DemandSignature(hasText(delta == null ? null : delta.getTargetProvince()) ? normalize(delta.getTargetProvince()) : (hasText(delta == null ? null : delta.getTargetCity()) ? "" : base.province),
+                    hasText(delta == null ? null : delta.getTargetCity()) ? normalizeCity(delta.getTargetCity()) : (hasText(delta == null ? null : delta.getTargetProvince()) ? "" : base.city),
                     hasText(delta == null ? null : delta.getTargetArea()) ? normalize(delta.getTargetArea()) : base.area,
                     hasText(delta == null ? null : delta.getCuisine()) ? normalize(delta.getCuisine()) : base.cuisine);
         }
-        private boolean hasCityAndCuisine() { return !city.isEmpty() && !cuisine.isEmpty(); }
+        private boolean hasDestinationAndCuisine() { return (!province.isEmpty() || !city.isEmpty()) && !cuisine.isEmpty(); }
         private boolean matches(DemandSignature other) {
-            return hasCityAndCuisine() && other.hasCityAndCuisine()
-                    && city.equals(other.city) && area.equals(other.area) && cuisine.equals(other.cuisine);
+            return hasDestinationAndCuisine() && other.hasDestinationAndCuisine()
+                    && province.equals(other.province) && city.equals(other.city) && area.equals(other.area) && cuisine.equals(other.cuisine);
         }
-        private String title() { return city + (area.isEmpty() ? "" : area) + cuisine; }
+        private String title() { return province + city + (area.isEmpty() ? "" : area) + cuisine; }
         private static String normalizeCity(String value) {
             String normalized = normalize(value);
             return normalized.endsWith("市") ? normalized.substring(0, normalized.length() - 1) : normalized;
@@ -382,6 +385,7 @@ public class ConversationStateService {
      */
     public void applyCurrentDeviceSearchScope(AiChatSession state, DecisionConstraints executionConstraints) {
         if (state == null || executionConstraints == null
+                || hasText(executionConstraints.getTargetProvince())
                 || hasText(executionConstraints.getTargetCity())
                 || hasText(executionConstraints.getTargetArea())
                 || "EXPLICIT_TARGET".equalsIgnoreCase(executionConstraints.getLocationIntent())) return;
@@ -392,9 +396,10 @@ public class ConversationStateService {
             criteria = new DecisionConstraints();
             task.setCriteria(criteria);
         }
-        boolean leavingNamedDestination = hasText(criteria.getTargetCity()) || hasText(criteria.getTargetArea())
+        boolean leavingNamedDestination = hasText(criteria.getTargetProvince()) || hasText(criteria.getTargetCity()) || hasText(criteria.getTargetArea())
                 || (task.getSearchLocation() != null && "RESOLVED_BY_NAME".equals(task.getSearchLocation().getStatus()));
         if (leavingNamedDestination) {
+            criteria.setTargetProvince("");
             criteria.setTargetCity("");
             criteria.setTargetArea("");
             clearLocation(task.getSearchLocation(), "MISSING");
@@ -608,19 +613,20 @@ public class ConversationStateService {
      * so a later turn cannot accidentally reuse coordinates from a different city.
      */
     public void applyNamedSearchLocation(AiChatSession state, DecisionConstraints criteria) {
-        if (criteria == null || !hasText(criteria.getTargetCity())) return;
+        if (criteria == null || (!hasText(criteria.getTargetProvince()) && !hasText(criteria.getTargetCity()))) return;
         ConversationWorkingMemory memory = workingMemory(state);
         ConversationLocationSlot target = ensureActiveTask(memory).getSearchLocation();
-        boolean changed = !criteria.getTargetCity().equals(target.getCity())
+        boolean changed = !sameText(criteria.getTargetProvince(), target.getProvince())
+                || !sameText(criteria.getTargetCity(), target.getCity())
                 || !sameText(criteria.getTargetArea(), target.getDistrict());
         if (!changed && "RESOLVED_BY_NAME".equals(target.getStatus())
                 && target.getLatitude() == null && target.getLongitude() == null) {
             return;
         }
         target.setStatus("RESOLVED_BY_NAME");
+        target.setProvince(criteria.getTargetProvince());
         target.setCity(criteria.getTargetCity());
         target.setDistrict(criteria.getTargetArea());
-        target.setProvince(null);
         target.setLatitude(null);
         target.setLongitude(null);
         target.setSource("USER_EXPLICIT_DESTINATION");
@@ -632,8 +638,8 @@ public class ConversationStateService {
                     state.getChatId(), previousCandidateCount);
         }
         updateWorkingMemory(state, memory);
-        log.info("[AI][state] event=SEARCH_LOCATION_NAMED chatId={} city={} area={}", state.getChatId(),
-                target.getCity(), target.getDistrict());
+        log.info("[AI][state] event=SEARCH_LOCATION_NAMED chatId={} province={} city={} area={}", state.getChatId(),
+                target.getProvince(), target.getCity(), target.getDistrict());
     }
     private String writeLegacySlots(ConversationWorkingMemory memory) { ConversationSlots slots = new ConversationSlots(); slots.setLocation(memory.getLocation()); slots.setPendingLocationCandidates(memory.getPendingLocationCandidates()); try { return objectMapper.writeValueAsString(slots); } catch (Exception e) { throw new IllegalStateException("Conversation location slots cannot be saved", e); } }
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
@@ -657,7 +663,7 @@ public class ConversationStateService {
     }
 
     private boolean isSearchDomainField(String field) {
-        return "targetCity".equals(field) || "targetArea".equals(field) || "cuisine".equals(field) || "budgetPerPerson".equals(field) || "radiusKm".equals(field)
+        return "targetProvince".equals(field) || "targetCity".equals(field) || "targetArea".equals(field) || "cuisine".equals(field) || "budgetPerPerson".equals(field) || "radiusKm".equals(field)
                 || "nearby".equals(field) || "arrivalTime".equals(field) || "occasion".equals(field)
                 || "quiet".equals(field) || "avoidQueue".equals(field) || "hardConstraints".equals(field)
                 || "softPreferences".equals(field);
@@ -667,25 +673,27 @@ public class ConversationStateService {
     private void synchronizeNamedSearchLocation(AiChatSession state, ConversationWorkingMemory memory,
                                                 CriteriaMergeResult reduction) {
         DecisionConstraints criteria = reduction.getConstraints();
-        if (!hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea())) {
-            if (containsClearedField(reduction.getCleared(), "targetCity") || containsClearedField(reduction.getCleared(), "targetArea")) {
+        if (!hasText(criteria.getTargetProvince()) && !hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea())) {
+            if (containsClearedField(reduction.getCleared(), "targetProvince") || containsClearedField(reduction.getCleared(), "targetCity") || containsClearedField(reduction.getCleared(), "targetArea")) {
                 DecisionTaskState task = activeTask(memory);
                 if (task != null) clearLocation(task.getSearchLocation(), "MISSING");
                 log.info("[AI][state] event=NAMED_SEARCH_LOCATION_CLEARED chatId={} action=USE_DEVICE_LOCATION_IF_AUTHORIZED", state.getChatId());
             }
             return;
         }
-        if (!containsField(reduction.getReplaced(), "targetCity")
+        if (!containsField(reduction.getReplaced(), "targetProvince")
+                && !containsField(reduction.getReplaced(), "targetCity")
                 && !containsField(reduction.getReplaced(), "targetArea")) return;
 
         ConversationLocationSlot target = ensureActiveTask(memory).getSearchLocation();
         clearLocation(target, "RESOLVED_BY_NAME");
+        target.setProvince(criteria.getTargetProvince());
         target.setCity(criteria.getTargetCity());
         target.setDistrict(criteria.getTargetArea());
         target.setSource("USER_EXPLICIT");
         target.setCapturedAt(LocalDateTime.now());
-        log.info("[AI][state] event=NAMED_SEARCH_LOCATION_REDUCED chatId={} targetCity={} targetArea={} action=CLEAR_TARGET_COORDINATES",
-                state.getChatId(), criteria.getTargetCity(), criteria.getTargetArea());
+        log.info("[AI][state] event=NAMED_SEARCH_LOCATION_REDUCED chatId={} targetProvince={} targetCity={} targetArea={} action=CLEAR_TARGET_COORDINATES",
+                state.getChatId(), criteria.getTargetProvince(), criteria.getTargetCity(), criteria.getTargetArea());
     }
 
     private boolean containsField(List<String> changes, String field) {

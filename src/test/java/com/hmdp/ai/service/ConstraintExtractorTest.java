@@ -6,6 +6,9 @@ import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.dto.DecisionConstraints;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -32,6 +35,31 @@ class ConstraintExtractorTest {
         assertEquals("火锅", constraints.getKeyword());
         assertEquals(Integer.valueOf(100), constraints.getBudgetPerPerson());
         assertTrue(constraints.getPreferences().contains("约会"));
+    }
+
+    @Test
+    void preservesStructuredProvinceWithoutInferringParentForCity() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        Map<String, Object> extracted = new LinkedHashMap<>();
+        extracted.put("targetProvince", "福建省"); extracted.put("targetCity", "福州市"); extracted.put("targetArea", "");
+        extracted.put("locationIntent", "EXPLICIT_TARGET"); extracted.put("keyword", ""); extracted.put("cuisine", "");
+        extracted.put("budgetPerPerson", -1); extracted.put("radiusKm", -1); extracted.put("nearby", false);
+        extracted.put("arrivalTime", ""); extracted.put("preferences", List.of()); extracted.put("missingInformation", List.of());
+        Map<String, Object> function = Map.of("arguments", objectMapper.writeValueAsString(extracted));
+        Map<String, Object> toolCall = Map.of("function", function);
+        Map<String, Object> message = Map.of("tool_calls", List.of(toolCall));
+        JsonNode modelResponse = objectMapper.valueToTree(Map.of("choices", List.of(Map.of("message", message))));
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("福建福州有什么好吃的");
+
+        assertEquals("福建省", constraints.getTargetProvince());
+        assertEquals("福州市", constraints.getTargetCity());
+        assertEquals("EXPLICIT_TARGET", constraints.getLocationIntent());
     }
 
     @Test

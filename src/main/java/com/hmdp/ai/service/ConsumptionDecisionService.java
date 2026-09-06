@@ -344,7 +344,7 @@ public class ConsumptionDecisionService {
         if (request.getLatitude() != null && request.getLongitude() != null) return false;
         // A user-selected city is a valid non-GPS search anchor.  Coordinates are
         // required only for nearby/radius calculation, not for a city-wide search.
-        if (hasText(request.getCity())) return false;
+        if (hasText(request.getProvince()) || hasText(request.getCity())) return false;
         return !"DECLINED".equals(request.getLocationStatus());
     }
 
@@ -568,6 +568,7 @@ public class ConsumptionDecisionService {
         request.setLatitude(followUp.getLatitude());
         request.setLongitude(followUp.getLongitude());
         if (explicitDestination) {
+            request.setProvince(constraints.getTargetProvince());
             request.setCity(constraints.getTargetCity());
             request.setDistrict(constraints.getTargetArea());
             request.setUseLocationScope(false);
@@ -582,6 +583,7 @@ public class ConsumptionDecisionService {
 
     private void switchToCurrentDevice(DecisionConstraints constraints) {
         if (constraints == null) return;
+        constraints.setTargetProvince("");
         constraints.setTargetCity("");
         constraints.setTargetArea("");
         constraints.setLocationIntent("CURRENT_DEVICE");
@@ -589,7 +591,7 @@ public class ConsumptionDecisionService {
     }
 
     private boolean hasExplicitDestination(DecisionConstraints constraints) {
-        return constraints != null && (hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())
+        return constraints != null && (hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())
                 || "EXPLICIT_TARGET".equalsIgnoreCase(constraints.getLocationIntent()));
     }
 
@@ -874,6 +876,7 @@ public class ConsumptionDecisionService {
         query = removeToken(query, request.getCity());
         query = removeToken(query, request.getDistrict());
         query = removeToken(query, constraints == null ? null : constraints.getTargetCity());
+        query = removeToken(query, constraints == null ? null : constraints.getTargetProvince());
         query = removeToken(query, constraints == null ? null : constraints.getTargetArea());
         query = query.replaceAll("\\s+", " ").trim();
         if (hasText(query)) return query;

@@ -12,6 +12,7 @@ import java.util.Set;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DecisionConstraints {
     /** User's explicit search destination. It is never a substitute for device location. */
+    private String targetProvince = "";
     private String targetCity = "";
     private String targetArea = "";
     /** Explicit destination, current device, or unspecified location intent. */

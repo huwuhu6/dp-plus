@@ -2192,3 +2192,10 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 修复保持最小范围：`DecisionConstraints.locationIntent` 成为显式目的地判断的唯一业务来源；`WAITING_RELAXATION + PROVIDE_LOCATION` 被视为用户明确离开命名地点、切换到 `CURRENT_DEVICE` 的 command 语义，清除 Task 的 `targetCity/targetArea/searchLocation`，保留用户已明确的 radius 或默认范围。`applyProvidedLocation()` 不再从 request 投影字段猜 provenance。`applyLocationSlot()` 对命名地点将 `useLocationScope=false`；设备→命名地点时，Merger 会清除未在新目的地中重新声明的 nearby/radius，避免福州设备半径泄漏到北京。命名地点确认仍由 `CONFIRM_RESOLVED_LOCATION_` 保护，不会误调用设备定位投影。
 
 新增/调整了 Explicit→Device、Device→Explicit、Explicit→Device→Explicit 三条 robustness 轨迹，并补充 Task scope 清除、反向地理编码 city 不阻塞 CURRENT_DEVICE、设备半径不继承到命名城市的单测。Run 123 定向 4/4；Run 124 当前 33 条 robustness：Route 32/33、Tool 32/33、Final Status 32/33，新增 location transition Case 全部通过。修复后 Run 125 conversation-v1（40 条）：Route 38/40、Tool 33/40、Final Status 40/40、Locality 40/40；关键 `EXPLICIT_DESTINATION_NO_DATA_DEVICE_LOCATION_RECOVERY` 已从修复前 Final FAIL 变为通过，快照轨迹为 `重庆/EXPLICIT_TARGET → 空目标/CURRENT_DEVICE + 3km`。剩余 v1 红灯是既有 Tool/Route probe 差异，不是 Location provenance 回归。
+### 行政范围 canonical state 与执行投影修复（2026-09-06）
+
+真实评测暴露出地点字符串投影仍缺少行政层级：省名被错误地当作 `city`，执行层又把“只有省、没有 city”误判为必须请求 GPS。修复新增 `DecisionConstraints.targetProvince`，并让 ConstraintExtractor 的结构化结果明确区分 province/city/area；Merger 按 Province→Province、Province→City、City→Province、City→City 的替换/清除语义更新 canonical criteria。`ConversationStateService`、`ChatOrchestrationService`、`ConsumptionDecisionService` 和 `PolicyDecisionEngine` 均从 canonical 字段投影执行范围，province 写入 request.province，city 写入 request.city，不再通过字符串外观猜测层级。行政范围变更仍会失效当前候选池但保留历史 RecommendationBatch。
+
+本轮还修复了两个边界：省级范围本身是有效的非 GPS 搜索锚点；带坐标的“那我附近呢”在澄清态直接继续设备范围推荐，不再误进入命名地点解析。ConstraintExtractor 提示补充了承接句（如“那厦门呢”）和规范行政名称示例，未增加省市名单、CaseCode 特判或用户语言 contains/Regex 词表。
+
+新增 9 条行政范围 robustness 矩阵，覆盖省级正向、直辖市、普通城市、省/市互换、设备切换和非餐饮负向。定向 Run 126 暴露省级执行门槛和短承接句抽取问题；修复与提示收敛后 Run 131 九条全部通过（Complete/Route/Final/Working Memory 均 9/9）。旧 snapshot 无 `targetProvince` 时按空字符串兼容，schemaVersion 无需迁移。`mvn -q test` 在当前代码上全绿。

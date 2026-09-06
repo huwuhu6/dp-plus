@@ -182,7 +182,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT, "selected_option_for_paused_decision");
             return;
         }
-        if (isLocationClarification(activeDecision) && isPotentialNamedLocation(message)) {
+        if (isLocationClarification(activeDecision) && request.getLocation() == null && isPotentialNamedLocation(message)) {
             selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.LOCATION_RESOLUTION, "named_location_for_clarification");
             assessment.setSource("RULE");
             ChatMessageResponse locationResponse = resolveNamedLocation(context.getChatId(), message,
@@ -401,7 +401,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private boolean hasMutation(com.hmdp.ai.dto.DecisionConstraints constraints) {
         if (constraints == null) return false;
-        return hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())
+        return hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())
                 || hasText(constraints.getCuisine()) || hasText(constraints.getKeyword())
                 || constraints.getBudgetPerPerson() != null && constraints.getBudgetPerPerson() > 0
                 || constraints.getRadiusKm() != null && constraints.getRadiusKm() > 0
@@ -656,6 +656,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         com.hmdp.ai.dto.DecisionConstraints criteria = memory == null ? null : conversationStateService.activeCriteria(memory);
         if (criteria == null) return "尚未确认搜索条件。";
         List<String> facts = new ArrayList<>();
+        if (hasText(criteria.getTargetProvince())) facts.add("已锁定目标省份=" + criteria.getTargetProvince());
         if (hasText(criteria.getTargetCity())) facts.add("已锁定目标城市=" + criteria.getTargetCity());
         if (hasText(criteria.getTargetArea())) facts.add("已锁定目标区域=" + criteria.getTargetArea());
         if (hasText(criteria.getCuisine())) facts.add("菜系=" + criteria.getCuisine());
@@ -928,9 +929,10 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         response.setDecisionSessionId(activeSessionId);
         response.setDecisionStatus(decision.getStatus());
         com.hmdp.ai.dto.DecisionConstraints constraints = decision.getConstraints();
+        String province = constraints == null ? "" : constraints.getTargetProvince();
         String city = constraints == null ? "" : constraints.getTargetCity();
         String area = constraints == null ? "" : constraints.getTargetArea();
-        String scope = hasText(area) ? area : city;
+        String scope = hasText(area) ? area : (hasText(city) ? city : province);
         if ("ZERO_RESULT_NO_DATA".equals(decision.getStatus())) {
             response.setAnswer("我记得你要找" + (hasText(scope) ? scope : "指定城市")
                     + "的餐饮商户。当前暂停不是因为条件需要放宽，而是该范围暂无入库商户；可以切换城市或周边区域后再搜。");
@@ -954,7 +956,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         com.hmdp.ai.dto.DecisionConstraints criteria = conversationStateService.activeCriteria(conversationStateService.workingMemory(state));
         if (criteria == null) return false;
         boolean hasActiveDemand = hasText(criteria.getCuisine()) || hasText(criteria.getKeyword())
-                || hasText(criteria.getTargetCity()) || Boolean.TRUE.equals(criteria.getNearby());
+                || hasText(criteria.getTargetProvince()) || hasText(criteria.getTargetCity()) || Boolean.TRUE.equals(criteria.getNearby());
         boolean hasRefinement = message.contains("安静") || message.contains("便宜") || message.contains("更近")
                 || message.contains("换") || message.contains("清淡") || message.contains("推荐") || message.contains("找");
         return hasActiveDemand && hasRefinement;
@@ -1237,17 +1239,17 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         com.hmdp.ai.dto.ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
         boolean mayUseDeviceLocation = criteria == null
                 || (!"EXPLICIT_TARGET".equalsIgnoreCase(criteria.getLocationIntent())
-                && !hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea()));
-        if (criteria != null && hasText(criteria.getTargetCity())) {
-            request.setCity(criteria.getTargetCity());
-            // Keep an unresolved area as a semantic preference, not a strict SQL filter.
+                && !hasText(criteria.getTargetProvince()) && !hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea()));
+        if (criteria != null && (hasText(criteria.getTargetProvince()) || hasText(criteria.getTargetCity()))) {
+            request.setProvince(hasText(criteria.getTargetProvince()) ? criteria.getTargetProvince() : null);
+            request.setCity(hasText(criteria.getTargetCity()) ? criteria.getTargetCity() : null);
             request.setDistrict(null);
             request.setLatitude(null);
             request.setLongitude(null);
             request.setLocationStatus("RESOLVED_BY_NAME");
             request.setUseLocationScope(false);
-            log.info("[AI][chat] event=NAMED_SEARCH_SCOPE_APPLIED chatId={} city={} area={} source=ACTIVE_CRITERIA",
-                    state.getChatId(), request.getCity(), request.getDistrict());
+            log.info("[AI][chat] event=NAMED_SEARCH_SCOPE_APPLIED chatId={} province={} city={} area={} source=ACTIVE_CRITERIA",
+                    state.getChatId(), request.getProvince(), request.getCity(), request.getDistrict());
             return;
         }
         ConversationLocationSlot location = conversationStateService.usableSearchLocation(state);
@@ -1274,6 +1276,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private String cleanRetrievalQuery(String query, com.hmdp.ai.dto.DecisionConstraints constraints) {
         String cleaned = query == null ? "" : query;
         if (hasText(constraints.getTargetCity())) cleaned = cleaned.replace(constraints.getTargetCity(), " ");
+        if (hasText(constraints.getTargetProvince())) cleaned = cleaned.replace(constraints.getTargetProvince(), " ");
         if (hasText(constraints.getTargetArea())) cleaned = cleaned.replace(constraints.getTargetArea(), " ");
         cleaned = cleaned.replaceAll("\\s+", " ").trim();
         return hasText(cleaned) ? cleaned : (hasText(constraints.getKeyword()) ? constraints.getKeyword() : query);
