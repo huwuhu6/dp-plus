@@ -1123,6 +1123,10 @@ class ChatOrchestrationServiceTest {
         assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "附近有什么好玩的"));
         assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "帮我看看附近有没有羽毛球馆"));
         assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "附近有什么推荐"));
+        assertEquals("START_DECISION", ReflectionTestUtils.invokeMethod(service, "fallbackRoute",
+                "北京有什么好吃的", "NONE"));
+        assertEquals("GENERAL_CHAT", ReflectionTestUtils.invokeMethod(service, "fallbackRoute",
+                "北京天气怎么样", "NONE"));
     }
     @Test
     void critiqueWordsDoNotSwallowShopInquiry() {

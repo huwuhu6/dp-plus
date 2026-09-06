@@ -2172,3 +2172,15 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 **评测结果**：Run 109（收口前）robustness 为 Complete 19/24、Route 21/24、Tool 22/24、Final 22/24；Run 115 定向复合/幽灵预算 subset 为 2/3，唯一失败是模型偶发遗漏“北京朝阳”的区域约束，未增加字符串特判。最终 Run 116（`dev,eval` fixture）robustness 24 条：Complete **21/24**、Route **22/24**、Tool **23/24**、Final Status **23/24**、Locality **22/24**、Context Rewrite **7/7**，P50/P95/P99=24,112/46,803/64,540ms，prompt/completion=3,358/818。剩余失败集中于位置拒绝恢复、城市切换后的 follow-up 路由、澄清到命名地点的退出语义；不属于 Task Scope、Batch 引用或 Working Memory 回归。
 
 同一代码运行 v1 Run 117（40 条）：Complete **30/40**、Route **39/40**、Tool **34/40**、Final Status **40/40**、Locality **40/40**、Context Rewrite **2/2**；holdout Run 118（16 条）：Complete **7/16**、Route **14/16**、Tool **14/16**、Final Status **11/16**、Locality **15/16**。Holdout 的失败主要是历史暂停/澄清语义和 Tool/状态终态契约差异，未观察到 Working Memory projection 回归。
+
+### 命名地点餐饮推荐与定位恢复契约修复（2026-09-06）
+
+真实对话暴露了两个相互独立的 Projection 问题：第一，`北京有啥好吃的` 被路由为 `GENERAL_CHAT`，导致显式目的地没有进入 Task；后续“随便推荐”只能成为没有地点的新需求。第二，`CLARIFYING → PROVIDE_LOCATION` 虽然把浏览器 GPS 写入了 Conversation scope，但 DecisionRequest 没有完整投影 `useLocationScope`，恢复路径也没有统一补齐 `nearby/radius`，因此可能返回数百公里外的候选。
+
+本轮没有让 `GENERAL_CHAT` 偷写业务状态，也没有增加城市名单或句子级 phrase 特判。路由模型契约改为识别“可信命名目的地 + 餐饮消费/推荐意图”的结构组合；城市名但天气、景点、个人经历或食物知识问题仍保持 `GENERAL_CHAT`。显式命名目的地优先于设备位置，设备 GPS 只保留在 Conversation scope，不覆盖 Task 的 `targetCity/targetArea`。
+
+定位恢复统一复用 `ConversationStateService.normalizeNearbyRadius`：无显式目的地的 `PROVIDE_LOCATION` 会设置 `useLocationScope=true`、`locationIntent=CURRENT_DEVICE`、`nearby=true`，半径未指定时进入 `3km + SYSTEM_DEFAULT`；用户明确 `5km` 时保留显式半径。命名地点确认不会被误判为设备定位恢复。这样首次带设备位置与澄清后恢复进入执行前产生同一 Location Search Contract。
+
+新增 6 条 robustness 语义矩阵 Case：两个不同表达的命名城市餐饮正样本、城市非餐饮负样本、食物知识负样本、默认附近半径恢复、显式半径恢复，并增加了真实多轮场景的抽象回归。定向 Run 120（9 条，含既有定位恢复 Case）中新增 6 条全部通过，快照确认北京/上海为 `EXPLICIT_TARGET`，定位恢复分别为 `CURRENT_DEVICE + 3km` 与 `CURRENT_DEVICE + 5km`。完整 Run 121 使用当前 30 条 Dataset，Route 29/30、Tool 29/30、Final Status 28/30；剩余失败来自既有 Location/暂停与模型抽取波动，不改变 Task/Working Memory/Batch 架构。
+
+本轮没有新增自然语言 `contains`/`startsWith` 词表或 Regex；仅有一处系统备注去重的结构性 `contains` 和一处 `CONFIRM_RESOLVED_LOCATION_` 选项 ID 前缀判断，均不参与用户语言理解。其余改动是路由结构化 prompt、统一半径 normalization，以及显式地点确认与设备定位恢复的边界保护。`mvn -q test` 全绿。

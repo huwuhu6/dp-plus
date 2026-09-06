@@ -238,6 +238,39 @@ class ConsumptionDecisionServiceTest {
     }
 
     @Test
+    void providedLocationEnablesNearbyScopeAndDefaultRadius() {
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("随便推荐");
+        DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
+        followUp.setLatitude(26.08D);
+        followUp.setLongitude(119.30D);
+
+        ReflectionTestUtils.invokeMethod(service, "applyProvidedLocation", request, followUp);
+        assertTrue(request.getUseLocationScope());
+
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setRadiusKm(-1D);
+        ReflectionTestUtils.invokeMethod(service, "reconcileRequestFacts", constraints, request);
+        assertTrue(constraints.getNearby());
+        assertEquals(3D, constraints.getRadiusKm());
+    }
+
+    @Test
+    void providedLocationDoesNotOverrideExplicitDestination() {
+        DecisionRequest request = new DecisionRequest();
+        request.setQuery("北京有什么好吃的");
+        request.setCity("北京");
+        DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
+        followUp.setLatitude(26.08D);
+        followUp.setLongitude(119.30D);
+        followUp.setCity("福州");
+
+        ReflectionTestUtils.invokeMethod(service, "applyProvidedLocation", request, followUp);
+        assertEquals("北京", request.getCity());
+        assertFalse(request.getUseLocationScope());
+    }
+
+    @Test
     void treatsBarbecueAndGrilledMeatAsOneCuisineFamily() {
         DecisionConstraints constraints = new DecisionConstraints();
         constraints.setCuisine("烧烤");

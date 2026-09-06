@@ -39,6 +39,15 @@ import java.util.UUID;
 public class ConversationStateService {
     private static final Logger log = LoggerFactory.getLogger(ConversationStateService.class);
     private static final int LOCATION_TTL_MINUTES = 30;
+    public static final double DEFAULT_NEARBY_RADIUS_KM = 3D;
+
+    /** Shared nearby-radius normalization used by both chat state and decision resume paths. */
+    public static boolean normalizeNearbyRadius(DecisionConstraints constraints) {
+        if (constraints == null || !Boolean.TRUE.equals(constraints.getNearby())
+                || (constraints.getRadiusKm() != null && constraints.getRadiusKm() > 0D)) return false;
+        constraints.setRadiusKm(DEFAULT_NEARBY_RADIUS_KM);
+        return true;
+    }
 
     @Resource private AiChatSessionMapper chatSessionMapper;
     @Resource private AiWorkingMemoryMapper workingMemoryMapper;
@@ -366,6 +375,34 @@ public class ConversationStateService {
         reduceCriteria(state, workingMemory(state), reduction);
     }
 
+    /**
+     * Projects a resumed device-location decision into the canonical task criteria.
+     * Explicit named destinations remain authoritative; this method only applies to
+     * a current-device search that was waiting for coordinates.
+     */
+    public void applyCurrentDeviceSearchScope(AiChatSession state, DecisionConstraints executionConstraints) {
+        if (state == null || executionConstraints == null
+                || hasText(executionConstraints.getTargetCity())
+                || hasText(executionConstraints.getTargetArea())
+                || "EXPLICIT_TARGET".equalsIgnoreCase(executionConstraints.getLocationIntent())) return;
+        ConversationWorkingMemory memory = workingMemory(state);
+        DecisionTaskState task = ensureActiveTask(memory);
+        DecisionConstraints criteria = task.getCriteria();
+        if (criteria == null) {
+            criteria = new DecisionConstraints();
+            task.setCriteria(criteria);
+        }
+        criteria.setLocationIntent("CURRENT_DEVICE");
+        criteria.setNearby(true);
+        if (executionConstraints.getRadiusKm() != null && executionConstraints.getRadiusKm() > 0D) {
+            criteria.setRadiusKm(executionConstraints.getRadiusKm());
+        }
+        boolean defaulted = criteria.getRadiusKm() == null || criteria.getRadiusKm() <= 0D;
+        if (defaulted) criteria.setRadiusKm(DEFAULT_NEARBY_RADIUS_KM);
+        if (defaulted) task.getConstraintSources().put("radiusKm", ConstraintSource.SYSTEM_DEFAULT);
+        updateWorkingMemory(state, memory);
+    }
+
     /** Persists a reduction against the pipeline snapshot so a task transition is not lost between nodes. */
     public void reduceCriteria(AiChatSession state, ConversationWorkingMemory memory, CriteriaMergeResult reduction) {
         if (reduction == null || reduction.getConstraints() == null) return;
@@ -480,8 +517,7 @@ public class ConversationStateService {
 
     private void normalizeNearbyDefault(DecisionTaskState task, CriteriaMergeResult reduction) {
         DecisionConstraints constraints = reduction.getConstraints();
-        if (Boolean.TRUE.equals(constraints.getNearby()) && (constraints.getRadiusKm() == null || constraints.getRadiusKm() <= 0D)) {
-            constraints.setRadiusKm(3D);
+        if (normalizeNearbyRadius(constraints)) {
             if (!constraints.getSystemNotes().contains("“附近”按默认 3km 解释")) constraints.getSystemNotes().add("“附近”按默认 3km 解释");
             if (!reduction.getReplaced().contains("radiusKm:-1.0->3.0")) reduction.getReplaced().add("radiusKm:-1.0->3.0");
             task.getConstraintSources().put("radiusKm", ConstraintSource.SYSTEM_DEFAULT);

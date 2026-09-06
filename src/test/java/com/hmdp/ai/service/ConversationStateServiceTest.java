@@ -20,6 +20,17 @@ class ConversationStateServiceTest {
         assertEquals(Arrays.asList(4L,5L,6L), ids(service.latestCandidatePool(memory)));
         assertEquals(Arrays.asList(1L,2L,3L,4L,5L,6L), service.shownShopIds(memory)); assertEquals(2, service.activeTask(memory).getRecommendationBatches().size()); assertEquals(11L, service.latestSourceDecisionSessionId(memory));
     }
+    @Test void nearbyNormalizationUsesDefaultOnlyWhenRadiusIsUnspecified() {
+        DecisionConstraints unspecified = new DecisionConstraints();
+        unspecified.setNearby(true); unspecified.setRadiusKm(-1D);
+        assertTrue(ConversationStateService.normalizeNearbyRadius(unspecified));
+        assertEquals(3D, unspecified.getRadiusKm());
+
+        DecisionConstraints explicit = new DecisionConstraints();
+        explicit.setNearby(true); explicit.setRadiusKm(5D);
+        assertFalse(ConversationStateService.normalizeNearbyRadius(explicit));
+        assertEquals(5D, explicit.getRadiusKm());
+    }
     private DecisionRecommendation shop(long id) { DecisionRecommendation value = new DecisionRecommendation(); value.setShopId(id); value.setShopName("shop-" + id); return value; }
     private List<Long> ids(List<DecisionRecommendation> values) { List<Long> result = new ArrayList<>(); for (DecisionRecommendation v : values) result.add(v.getShopId()); return result; }
 }

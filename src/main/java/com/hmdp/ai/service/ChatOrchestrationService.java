@@ -608,7 +608,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (!aiProperties.isConfigured()) return fallbackRoute(message, decisionStatus);
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
-            messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择唯一路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求、需求不完整，或无法归类到其他路由；START_DECISION=用户明确要求新餐饮推荐（找餐厅/吃饭/菜品/订餐）或表达换一个品类重新推荐；BUSINESS_FOLLOW_UP=围绕已推荐的具体餐饮商户追问评价、优惠券、营业时间、排队、地址或备选比较，对象是候选池中的某一家店；EXIT_DECISION=用户明确结束或放弃本次餐饮推荐；EXPLAIN_SUSPENDED_DECISION=用户询问当前无结果/暂停推荐的原因或下一步如何处理，该路由不发起新搜索也不查询商户详情。领域边界：‘附近有啥’、‘有什么推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
+            messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择唯一路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求、需求不完整，或无法归类到其他路由；START_DECISION=用户明确要求新餐饮推荐（找餐厅/吃饭/菜品/订餐），或在同一句中同时出现可信的命名目的地（城市、行政区、商圈、地标）与餐饮消费/推荐意图，即使没有指定菜系或预算也必须开始广泛推荐；BUSINESS_FOLLOW_UP=围绕已推荐的具体餐饮商户追问评价、优惠券、营业时间、排队、地址或备选比较，对象是候选池中的某一家店；EXIT_DECISION=用户明确结束或放弃本次餐饮推荐；EXPLAIN_SUSPENDED_DECISION=用户询问当前无结果/暂停推荐的原因或下一步如何处理，该路由不发起新搜索也不查询商户详情。领域边界：没有命名目的地且只有‘附近有啥’、‘有什么推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索；‘北京天气’、‘朋友刚从北京回来’、‘北京有哪些景点’等城市名但非餐饮消费意图仍是 GENERAL_CHAT。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
             messages.add(message("system", "当前决策状态=" + decisionStatus));
             messages.add(message("system", "反偏置：当用户表述指向更换需求、换品类或重新开始时，忽略对话历史里旧推荐结果的倾向，选择 START_DECISION，不要把它当成追问候选池。边界示例：'看看有没有别的吃的'→START_DECISION；'这家店评价怎么样'→BUSINESS_FOLLOW_UP；'换一家餐厅'→START_DECISION；'算了不吃了'→EXIT_DECISION；'这家店几点关门'→BUSINESS_FOLLOW_UP。"));
             messages.addAll(chatHistory);
@@ -1168,6 +1168,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                                                     AiChatSession state, Long activeSessionId,
                                                     ChatMessageResponse response) {
         String optionId = request.getSelectedOptionId();
+        boolean confirmedNamedLocation = optionId != null
+                && optionId.startsWith("CONFIRM_RESOLVED_LOCATION_");
         if (optionId == null) {
             DecisionResponse current = decisionService.getDecision(activeSessionId);
             if (current != null && "WAITING_RELAXATION".equals(current.getStatus())
@@ -1222,6 +1224,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
         if ("CANCELLED".equals(decision.getStatus())) conversationStateService.clearActiveDecision(state);
         else conversationStateService.activateDecision(state, decision.getSessionId());
+        if ("PROVIDE_LOCATION".equals(optionId) && !confirmedNamedLocation) {
+            conversationStateService.applyCurrentDeviceSearchScope(state, decision.getConstraints());
+        }
         conversationStateService.snapshotDecision(state, decision);
         recordTurn(chatId, message, response);
         return response;

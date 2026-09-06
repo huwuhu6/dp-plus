@@ -155,6 +155,10 @@ public class ConsumptionDecisionService {
                     removeMissingInformation(constraints, "位置", "坐标", "起点");
                 } else {
                     applyProvidedLocation(request, followUp);
+                    if (!hasExplicitDestination(constraints, request)) {
+                        constraints.setLocationIntent("CURRENT_DEVICE");
+                        constraints.setNearby(true);
+                    }
                     log.info("[AI][session={}] state=CLARIFYING action=LOCATION_ACCEPTED latitude={} longitude={}",
                             sessionId, request.getLatitude(), request.getLongitude());
                 }
@@ -162,6 +166,10 @@ public class ConsumptionDecisionService {
                 if (command == DecisionCommand.PROVIDE_LOCATION) {
                     // B 修复 #case30：WAITING_RELAXATION 态补充位置 → 保留约束换位置重搜
                     applyProvidedLocation(request, followUp);
+                    if (!hasExplicitDestination(constraints, request)) {
+                        constraints.setLocationIntent("CURRENT_DEVICE");
+                        constraints.setNearby(true);
+                    }
                     log.info("[AI][session={}] state=WAITING_RELAXATION action=LOCATION_ACCEPTED latitude={} longitude={}",
                             sessionId, request.getLatitude(), request.getLongitude());
                 } else {
@@ -345,6 +353,10 @@ public class ConsumptionDecisionService {
             removeMissingInformation(constraints, "位置", "坐标", "起点");
             if (Boolean.TRUE.equals(request.getUseLocationScope())) {
                 constraints.setNearby(true);
+                if (ConversationStateService.normalizeNearbyRadius(constraints)
+                        && !constraints.getSystemNotes().contains("“附近”按默认 3km 解释")) {
+                    constraints.getSystemNotes().add("“附近”按默认 3km 解释");
+                }
                 if (!constraints.getSystemNotes().contains("已按会话位置在附近检索")) {
                     constraints.getSystemNotes().add("已按会话位置在附近检索");
                 }
@@ -551,12 +563,24 @@ public class ConsumptionDecisionService {
         if (followUp == null || followUp.getLatitude() == null || followUp.getLongitude() == null) {
             throw new IllegalArgumentException("请提供 latitude 和 longitude 后继续附近搜索");
         }
+        boolean explicitDestination = hasText(request.getCity()) || hasText(request.getDistrict())
+                || hasText(request.getProvince());
         request.setLatitude(followUp.getLatitude());
         request.setLongitude(followUp.getLongitude());
-        request.setProvince(followUp.getProvince());
-        request.setCity(followUp.getCity());
-        request.setDistrict(followUp.getDistrict());
+        if (!explicitDestination) {
+            request.setProvince(followUp.getProvince());
+            request.setCity(followUp.getCity());
+            request.setDistrict(followUp.getDistrict());
+        }
         request.setLocationStatus("AVAILABLE");
+        request.setUseLocationScope(!explicitDestination);
+    }
+
+    private boolean hasExplicitDestination(DecisionConstraints constraints, DecisionRequest request) {
+        return (constraints != null && (hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())
+                || "EXPLICIT_TARGET".equalsIgnoreCase(constraints.getLocationIntent())))
+                || (request != null && (hasText(request.getCity()) || hasText(request.getDistrict())
+                || hasText(request.getProvince())));
     }
 
     private DecisionCommand resolveFollowUpCommand(DecisionFollowUpRequest followUp) {
