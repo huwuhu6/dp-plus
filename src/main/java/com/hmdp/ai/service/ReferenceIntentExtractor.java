@@ -32,8 +32,29 @@ public class ReferenceIntentExtractor {
     public List<ReferenceIntent> extract(String message) {
         if (message == null || message.trim().isEmpty()) return new ArrayList<>();
         List<ReferenceIntent> rules = extractByRule(message);
-        if (!rules.isEmpty()) return rules;
-        return extractByModel(message);
+        // Always ask the structured extractor about the uncovered spans.  A rule hit is
+        // not evidence that the rest of the sentence contains no reference.
+        return mergeRuleAndModel(message, rules, extractByModel(message));
+    }
+
+    private List<ReferenceIntent> mergeRuleAndModel(String message, List<ReferenceIntent> rules,
+                                                     List<ReferenceIntent> modelIntents) {
+        List<ReferenceIntent> merged = new ArrayList<>(rules);
+        for (ReferenceIntent candidate : modelIntents) {
+            if (overlapsAny(candidate, rules) || overlapsAny(candidate, merged)) continue;
+            merged.add(candidate);
+        }
+        merged.sort(Comparator.comparingInt(item -> item.getStart() == null ? Integer.MAX_VALUE : item.getStart()));
+        return merged;
+    }
+
+    private boolean overlapsAny(ReferenceIntent candidate, List<ReferenceIntent> existing) {
+        for (ReferenceIntent item : existing) {
+            if (item.getStart() == null || item.getEnd() == null
+                    || candidate.getStart() == null || candidate.getEnd() == null) continue;
+            if (candidate.getStart() < item.getEnd() && item.getStart() < candidate.getEnd()) return true;
+        }
+        return false;
     }
 
     private List<ReferenceIntent> extractByRule(String message) {
@@ -86,7 +107,9 @@ public class ReferenceIntentExtractor {
                 intent.setSurface(item.path("surface").asText(null));
                 intent.setStart(item.hasNonNull("start") ? item.path("start").asInt() : null);
                 intent.setEnd(item.hasNonNull("end") ? item.path("end").asInt() : null);
-                if ((intent.getScope() == ReferenceIntent.Scope.FOCUSED || (intent.getOrdinal() != null && intent.getOrdinal() > 0))) {
+                if (validateSpan(message, intent)
+                        && (intent.getScope() == ReferenceIntent.Scope.FOCUSED
+                        || (intent.getOrdinal() != null && intent.getOrdinal() > 0))) {
                     result.add(intent);
                 }
             }
@@ -96,6 +119,24 @@ public class ReferenceIntentExtractor {
             log.debug("[AI][reference] event=EXTRACTION_FALLBACK errorType={}", e.getClass().getSimpleName());
             return new ArrayList<>();
         }
+    }
+
+    /**
+     * Model positions are untrusted. Prefer the supplied span, otherwise accept only a
+     * unique surface occurrence; never guess among multiple occurrences.
+     */
+    private boolean validateSpan(String message, ReferenceIntent intent) {
+        String surface = intent.getSurface();
+        if (surface == null || surface.isEmpty()) return false;
+        Integer start = intent.getStart();
+        Integer end = intent.getEnd();
+        if (start != null && end != null && start >= 0 && start < end && end <= message.length()
+                && message.substring(start, end).equals(surface)) return true;
+        int first = message.indexOf(surface);
+        if (first < 0 || message.indexOf(surface, first + surface.length()) >= 0) return false;
+        intent.setStart(first);
+        intent.setEnd(first + surface.length());
+        return true;
     }
 
     private ObjectMapper mapper() {

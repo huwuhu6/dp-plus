@@ -2128,3 +2128,9 @@ Resolver 结果显式携带 Batch、ordinal、shopId/shopName，并同时供 Con
 - `ROBUST_COMPOUND_CRITIQUE_AND_FACT`：同句两个 span 分别解析为最新 Batch ordinal 1/2，rewrite 得到对应两家商户；本轮不改变 Single Action Contract，因此该 Case 仍暴露复合意图的独立失败。
 
 本轮新增的引用语义字符串判断为一处集中式 regex fast path（两个模式：ordinal 与 focused），没有为具体 Case 继续增加 `contains`/`if-else` 补丁；Resolver 内为零。剩余 `contains` 仅属于既有事实工具信号、店名匹配和非引用路由，不承担 ordinal 解析。`mvn -q test` 全绿；新增 `ReferenceIntentExtractorTest` 覆盖多引用 span、scope，Resolver 单测覆盖最新/最早 Batch 与失效边界。
+
+### ReferenceIntent 混合 Rule/Model 提取修正（2026-09-06）
+
+发现上一版 `extract()` 以“Rule 结果非空”直接跳过模型，导致“第一家太贵了，第二个有插座吗？”只保留第一家。现改为 Rule 与结构化 Model 都产出候选后合并：Rule span 优先，Model 与已知 span 重叠时丢弃；Model 的 start/end 必须合法且 substring 与 surface 一致，错误位置只有在 surface 全文唯一出现时才重定位，否则丢弃，不猜测。没有修改 Task、Working Memory、RecommendationBatch、Resolver 或 Routing，也没有新增具体表达式 Regex。
+
+新增测试覆盖混合提取、纯非标准表达的真实 Model mock 调用、错误 span 丢弃及标准多引用回归。Run 94（四条 subset）与 Run 93 相比 Rewrite/Memory/Final Status 保持一致：刷新池和长距离 Case 仍绑定正确 Batch/ordinal/shopId，失效池仍不复活历史引用，复合 Case 仍由既有 Single Action Contract 失败。Run 94 的 Model call count=6；剩余失败属于原有 Routing/Tool/Compound 语义，不归因于本次 extractor 修正。
