@@ -8,6 +8,8 @@ import com.hmdp.ai.dto.AgentConversationResponse;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.RecommendationBatch;
+import com.hmdp.ai.dto.RecommendationCandidateRef;
 import com.hmdp.ai.entity.AiAgentToolCall;
 import com.hmdp.ai.entity.AiDecisionSession;
 import com.hmdp.ai.mapper.AiAgentToolCallMapper;
@@ -268,6 +270,14 @@ class AgentConversationServiceTest {
             context.getCandidatePoolSnapshot().add(recommendation);
             context.getShownShopIdsSnapshot().add(8L + index);
         }
+        RecommendationBatch batch = new RecommendationBatch();
+        for (int index = 0; index < names.length; index++) {
+            RecommendationCandidateRef candidate = new RecommendationCandidateRef();
+            candidate.setShopId(8L + index);
+            candidate.setShopName(names[index]);
+            batch.getCandidates().add(candidate);
+        }
+        context.getRecommendationBatches().add(batch);
         context.setFocusedShopId(8L);
         context.setFocusedShopName(names[0]);
         return context;

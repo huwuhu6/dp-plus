@@ -2113,3 +2113,18 @@ Run 85 是正式 Flat baseline：24 case、完整通过 3，Route/Tool/Final Sta
 为修复刷新候选池和跨轮 ordinal 只消费 latest pool 的问题，新增轻量 `BatchAwareReferenceResolver`。`第一/二/三家` 默认解析最新非空 Batch；`最开始第一家` 解析最早非空 Batch；`刚才那家/这家` 通过 focusedShop 定位。Batch 为空时作为 invalidation boundary，不自动复活旧候选；`shownShopIds` 仍只用于展示历史和排除，不参与 ordinal 主解析。
 
 Resolver 结果显式携带 Batch、ordinal、shopId/shopName，并同时供 Context Rewrite 与 Agent Tool reference binding 使用。Run 92 验证：刷新池第二家绑定 Turn2 Batch ordinal 2（shopId 397）；长距离场景绑定原始 Turn1 ordinal 2/1（shopId 517/577）；失效池场景未复活历史候选。剩余红灯是 Tool 名称选择和失效后的 Routing/Policy 语义，不属于 Batch ordinal 解析。
+
+### ReferenceIntent 分层与多引用解析（2026-09-06）
+
+上一版 Resolver 同时做自然语言判断和 Batch 状态定位，导致 `contains` 词表既难扩展又只能返回一个引用。本轮没有修改 Task、Working Memory 或 RecommendationBatch 数据模型，而是拆成：`User Message → ReferenceIntentExtractor → BatchAwareReferenceResolver → ResolvedShopReference`。`ReferenceIntent` 只保存 `LATEST/EARLIEST/FOCUSED`、ordinal、surface 和字符 span；Resolver 不再读取用户原文，只按结构化意图在 Batch 内确定 Batch、序数和实体。
+
+高置信的“第一/二/三家、首选、最开始、刚才那家/这家/那家”由一个正则 fast path 统一产出意图；未命中 fast path 时才调用现有 `OpenAiCompatibleClient` 的结构化 function tool fallback。Context Rewrite 将解析结果放入本轮 `ContextRewriteResult`，执行 Follow-up 时传入 Agent context，Tool binding 复用同一组意图，不再对改写后的商户名称重新猜 ordinal。一句话多个引用按 span 从右到左替换，并由同一组解析结果分别绑定工具，例如“第一家太贵，第二家有插座”不会互相覆盖。
+
+普通 ordinal 仍不能穿透最新空 Batch；显式 `EARLIEST` 才能访问历史非空 Batch。`shownShopIds` 没有参与 ordinal 解析。Run 93（四条定向 Case）观察到：
+
+- `ROBUST_REFRESHED_POOL_NEW_ORDINAL`：Turn2 最新 Batch ordinal 2 → shopId **397**；rewrite 已稳定命中，剩余失败是既有 Tool 名称/绑定断言（实际 `search_shop_evidence`）。
+- `ROBUST_LONG_DISTANCE_ORDINAL`：Turn2 最新 Batch ordinal 2 → shopId **517**；Turn3 `EARLIEST` Batch ordinal 1 → shopId **577**；两次 rewrite 和实体绑定均命中，剩余为 Dataset 期望 Tool 名称差异。
+- `ROBUST_INVALIDATE_THEN_OLD_ORDINAL`：最新 Batch 为空，普通 ordinal 未解析、未复活旧实体，返回 `REFERENCE_UNRESOLVED`；该 Case 仍受既有 Routing/Policy 语义影响。
+- `ROBUST_COMPOUND_CRITIQUE_AND_FACT`：同句两个 span 分别解析为最新 Batch ordinal 1/2，rewrite 得到对应两家商户；本轮不改变 Single Action Contract，因此该 Case 仍暴露复合意图的独立失败。
+
+本轮新增的引用语义字符串判断为一处集中式 regex fast path（两个模式：ordinal 与 focused），没有为具体 Case 继续增加 `contains`/`if-else` 补丁；Resolver 内为零。剩余 `contains` 仅属于既有事实工具信号、店名匹配和非引用路由，不承担 ordinal 解析。`mvn -q test` 全绿；新增 `ReferenceIntentExtractorTest` 覆盖多引用 span、scope，Resolver 单测覆盖最新/最早 Batch 与失效边界。

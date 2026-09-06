@@ -1,45 +1,39 @@
 package com.hmdp.ai.service;
 
 import com.hmdp.ai.dto.AgentSessionContext;
-import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.RecommendationBatch;
 import com.hmdp.ai.dto.RecommendationCandidateRef;
+import com.hmdp.ai.dto.ReferenceIntent;
+import com.hmdp.ai.dto.ResolvedShopReference;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Resolves shop references without losing recommendation-batch boundaries. */
 public final class BatchAwareReferenceResolver {
-    public Resolution resolve(String message, AgentSessionContext context) {
-        if (message == null || context == null) return null;
-        int ordinal = ordinal(message);
-        if (ordinal > 0) {
-            boolean earliest = message.contains("最开始");
-            RecommendationBatch batch = earliest ? firstNonEmpty(context.getRecommendationBatches())
-                    : latestNonEmpty(context.getRecommendationBatches());
-            // An invalidation is a hard boundary. Do not resurrect its predecessor for a casual ordinal.
-            if (batch == null || (!earliest && latestIsEmpty(context.getRecommendationBatches()))) return null;
-            if (batch.getCandidates().size() < ordinal) return null;
-            RecommendationCandidateRef candidate = batch.getCandidates().get(ordinal - 1);
-            return new Resolution(batch, ordinal, candidate.getShopId(), candidate.getShopName());
-        }
-        if (message.contains("刚才那家") || message.contains("这家") || message.contains("那家")) {
-            Long focusedId = context.getFocusedShopId();
-            if (focusedId != null) {
-                for (RecommendationBatch batch : safe(context.getRecommendationBatches())) {
-                    for (RecommendationCandidateRef candidate : safe(batch.getCandidates())) {
-                        if (focusedId.equals(candidate.getShopId())) return new Resolution(batch, indexOf(batch, focusedId), candidate.getShopId(), candidate.getShopName());
-                    }
-                }
-            }
-        }
-        return null;
+    public ResolvedShopReference resolve(ReferenceIntent intent, AgentSessionContext context) {
+        if (intent == null || context == null) return null;
+        if (intent.getScope() == ReferenceIntent.Scope.FOCUSED) return resolveFocused(intent, context);
+        int ordinal = intent.getOrdinal() == null ? 0 : intent.getOrdinal();
+        if (ordinal < 1) return null;
+        List<RecommendationBatch> batches = safe(context.getRecommendationBatches());
+        RecommendationBatch batch = intent.getScope() == ReferenceIntent.Scope.EARLIEST
+                ? firstNonEmpty(batches) : latestNonEmpty(batches);
+        // An empty latest batch is an invalidation boundary for an ordinary ordinal.
+        if (batch == null || (intent.getScope() != ReferenceIntent.Scope.EARLIEST && latestIsEmpty(batches))) return null;
+        List<RecommendationCandidateRef> candidates = safe(batch.getCandidates());
+        if (candidates.size() < ordinal) return null;
+        RecommendationCandidateRef candidate = candidates.get(ordinal - 1);
+        return new ResolvedShopReference(intent, batch, ordinal, candidate.getShopId(), candidate.getShopName());
     }
 
-    private int ordinal(String message) {
-        if (message.contains("第一家") || message.contains("首选")) return 1;
-        if (message.contains("第二家")) return 2;
-        if (message.contains("第三家")) return 3;
-        return 0;
+    public List<ResolvedShopReference> resolveAll(List<ReferenceIntent> intents, AgentSessionContext context) {
+        List<ResolvedShopReference> resolved = new ArrayList<>();
+        if (intents == null) return resolved;
+        for (ReferenceIntent intent : intents) {
+            ResolvedShopReference item = resolve(intent, context);
+            if (item != null) resolved.add(item);
+        }
+        return resolved;
     }
 
     private RecommendationBatch latestNonEmpty(List<RecommendationBatch> batches) {
@@ -58,17 +52,22 @@ public final class BatchAwareReferenceResolver {
         return !safe.isEmpty() && safe(safe.get(safe.size() - 1).getCandidates()).isEmpty();
     }
 
-    private int indexOf(RecommendationBatch batch, Long shopId) {
-        List<RecommendationCandidateRef> candidates = safe(batch.getCandidates());
-        for (int i = 0; i < candidates.size(); i++) if (shopId.equals(candidates.get(i).getShopId())) return i + 1;
-        return 0;
+    private ResolvedShopReference resolveFocused(ReferenceIntent intent, AgentSessionContext context) {
+        Long focusedId = context.getFocusedShopId();
+        if (focusedId == null) return null;
+        for (RecommendationBatch batch : safe(context.getRecommendationBatches())) {
+            List<RecommendationCandidateRef> candidates = safe(batch.getCandidates());
+            for (int index = 0; index < candidates.size(); index++) {
+                RecommendationCandidateRef candidate = candidates.get(index);
+                if (focusedId.equals(candidate.getShopId())) {
+                    return new ResolvedShopReference(intent, batch, index + 1,
+                            candidate.getShopId(), candidate.getShopName());
+                }
+            }
+        }
+        return null;
     }
 
     private <T> List<T> safe(List<T> values) { return values == null ? new ArrayList<T>() : values; }
 
-    public record Resolution(RecommendationBatch batch, int ordinal, Long shopId, String shopName) {
-        public DecisionRecommendation recommendation() {
-            DecisionRecommendation item = new DecisionRecommendation(); item.setShopId(shopId); item.setShopName(shopName); return item;
-        }
-    }
 }

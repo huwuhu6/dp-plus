@@ -2,6 +2,9 @@ package com.hmdp.ai.dto;
 
 import lombok.Data;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Data
 public class ContextRewriteResult {
     private String originalQuery;
@@ -11,6 +14,7 @@ public class ContextRewriteResult {
     private String reason;
     private RewriteIntentType intentType = RewriteIntentType.GENERAL_CHAT;
     private Integer candidateOrdinal;
+    private List<ReferenceIntent> referenceIntents = new ArrayList<ReferenceIntent>();
 
     public static ContextRewriteResult unchanged(String query, String reason) {
         ContextRewriteResult result = new ContextRewriteResult();

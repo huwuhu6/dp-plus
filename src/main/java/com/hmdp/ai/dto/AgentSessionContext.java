@@ -18,6 +18,9 @@ public class AgentSessionContext {
     private List<Long> shownShopIdsSnapshot = new ArrayList<Long>();
     /** Task-local recommendation history used for ordinal references; never flatten this into shown IDs. */
     private List<RecommendationBatch> recommendationBatches = new ArrayList<RecommendationBatch>();
+    /** Parsed once at the chat boundary and reused by rewrite and tool binding. */
+    private List<ReferenceIntent> referenceIntents = new ArrayList<ReferenceIntent>();
+    private String referenceIntentMessage;
     private DecisionRequest decisionRequest;
     private DecisionConstraints decisionConstraints;
 }

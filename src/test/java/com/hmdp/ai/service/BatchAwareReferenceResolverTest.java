@@ -3,6 +3,7 @@ package com.hmdp.ai.service;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.RecommendationBatch;
 import com.hmdp.ai.dto.RecommendationCandidateRef;
+import com.hmdp.ai.dto.ReferenceIntent;
 import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
@@ -14,8 +15,8 @@ class BatchAwareReferenceResolverTest {
     @Test
     void resolvesOrdinalFromLatestBatchAndEarliestQualifiedBatch() {
         AgentSessionContext context = context(batch(10L, 101L, 102L), batch(11L, 201L, 202L));
-        assertEquals(202L, resolver.resolve("第二家有插座吗", context).shopId());
-        BatchAwareReferenceResolver.Resolution earliest = resolver.resolve("最开始第一家有券吗", context);
+        assertEquals(202L, resolver.resolve(intent(ReferenceIntent.Scope.LATEST, 2), context).shopId());
+        var earliest = resolver.resolve(intent(ReferenceIntent.Scope.EARLIEST, 1), context);
         assertEquals(101L, earliest.shopId());
         assertEquals(10L, earliest.batch().getDecisionSessionId());
     }
@@ -23,8 +24,12 @@ class BatchAwareReferenceResolverTest {
     @Test
     void treatsEmptyLatestBatchAsInvalidationBoundary() {
         AgentSessionContext context = context(batch(10L, 101L), batch(11L));
-        assertNull(resolver.resolve("刚才第一家几点关门", context));
-        assertEquals(101L, resolver.resolve("最开始第一家有券吗", context).shopId());
+        assertNull(resolver.resolve(intent(ReferenceIntent.Scope.LATEST, 1), context));
+        assertEquals(101L, resolver.resolve(intent(ReferenceIntent.Scope.EARLIEST, 1), context).shopId());
+    }
+
+    private ReferenceIntent intent(ReferenceIntent.Scope scope, int ordinal) {
+        return new ReferenceIntent(scope, ordinal, "ref", 0, 3);
     }
 
     private AgentSessionContext context(RecommendationBatch... batches) {

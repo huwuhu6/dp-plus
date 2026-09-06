@@ -15,6 +15,8 @@ import com.hmdp.ai.dto.AgentToolTraceItem;
 import com.hmdp.ai.dto.ChatStreamEventData;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.ReferenceIntent;
+import com.hmdp.ai.dto.ResolvedShopReference;
 import com.hmdp.ai.entity.AiAgentToolCall;
 import com.hmdp.ai.entity.AiConversationEvent;
 import com.hmdp.ai.entity.AiDecisionMessage;
@@ -66,6 +68,7 @@ public class AgentConversationService {
     @Resource private AgentToolStateReducer agentToolStateReducer = new AgentToolStateReducer();
     @Resource private AiProperties aiProperties;
     @Resource private ObjectMapper objectMapper;
+    @Resource private ReferenceIntentExtractor referenceIntentExtractor;
     private final BatchAwareReferenceResolver batchReferenceResolver = new BatchAwareReferenceResolver();
 
     public AgentConversationResponse converse(Long sessionId, AgentConversationRequest request, AgentSessionContext workingMemoryContext) {
@@ -89,8 +92,10 @@ public class AgentConversationService {
             AgentSessionContext context = workingMemoryContext;
             context.setTurnNo(context.getTurnNo() + 1);
             String userMessage = request.getMessage().trim();
-            List<BoundFactTask> compoundTasks = resolveCompoundFactTasks(userMessage, context);
-            ReferenceResolution reference = resolveShopReference(userMessage, context);
+            String referenceMessage = context.getReferenceIntentMessage() == null
+                    ? userMessage : context.getReferenceIntentMessage();
+            List<BoundFactTask> compoundTasks = resolveCompoundFactTasks(referenceMessage, context);
+            ReferenceResolution reference = resolveShopReference(referenceMessage, context);
             if (reference.isAmbiguous()) {
                 log.info("[AI][agent] event=REFERENCE_AMBIGUOUS sessionId={} query={} candidates={}", sessionId,
                         compact(userMessage), reference.candidateNames);
@@ -167,7 +172,7 @@ public class AgentConversationService {
      * from ConversationWorkingMemory; it deliberately does not read a decision-session cache.
      */
     public boolean hasCandidateReference(String message, AgentSessionContext context) {
-        if (context == null || context.getCandidatePoolSnapshot() == null || context.getCandidatePoolSnapshot().isEmpty()) return false;
+        if (context == null) return false;
         ReferenceResolution reference = resolveShopReference(message == null ? "" : message.trim(), context);
         return reference.shop != null || reference.isAmbiguous()
                 || !resolveCompoundFactTasks(message == null ? "" : message.trim(), context).isEmpty();
@@ -480,8 +485,9 @@ public class AgentConversationService {
         if (!resolveCompoundFactTasks(message, context).isEmpty()) {
             return new ReferenceResolution(null, new ArrayList<String>());
         }
-        DecisionRecommendation ordinalShop = resolveOrdinalReference(message, context);
-        if (ordinalShop != null) return new ReferenceResolution(ordinalShop, new ArrayList<String>());
+        List<ResolvedShopReference> structured = resolvedReferences(message, context);
+        if (structured.size() == 1) return new ReferenceResolution(structured.get(0).recommendation(), new ArrayList<String>());
+        if (structured.size() > 1) return new ReferenceResolution(null, new ArrayList<String>());
 
         List<DecisionRecommendation> exactMatches = new ArrayList<DecisionRecommendation>();
         for (DecisionRecommendation item : context.getCandidatePoolSnapshot()) {
@@ -499,7 +505,7 @@ public class AgentConversationService {
         if (!names.isEmpty()) return new ReferenceResolution(null, names);
 
         DecisionRecommendation focusedShop = focusedShop(context);
-        if (focusedShop != null && (hasFocusedShopPronoun(message, context) || isImplicitFocusedFactQuery(message))) {
+        if (focusedShop != null && isImplicitFocusedFactQuery(message)) {
             return new ReferenceResolution(focusedShop, new ArrayList<String>());
         }
         return new ReferenceResolution(null, names);
@@ -521,11 +527,12 @@ public class AgentConversationService {
 
     private List<ShopMention> explicitShopMentions(String message, AgentSessionContext context) {
         List<ShopMention> mentions = new ArrayList<ShopMention>();
-        if (message == null || context == null || context.getCandidatePoolSnapshot() == null) return mentions;
-        addOrdinalMention(mentions, message, "\u7b2c\u4e00\u5bb6", 0, context);
-        addOrdinalMention(mentions, message, "\u9996\u9009", 0, context);
-        addOrdinalMention(mentions, message, "\u7b2c\u4e8c\u5bb6", 1, context);
-        addOrdinalMention(mentions, message, "\u7b2c\u4e09\u5bb6", 2, context);
+        if (message == null || context == null) return mentions;
+        for (ResolvedShopReference reference : resolvedReferences(message, context)) {
+            ReferenceIntent intent = reference.intent();
+            int position = intent.getStart() == null ? message.indexOf(intent.getSurface()) : intent.getStart();
+            if (position >= 0) mentions.add(new ShopMention(position, reference.recommendation()));
+        }
         for (DecisionRecommendation shop : context.getCandidatePoolSnapshot()) {
             if (shop.getShopName() == null || shop.getShopName().trim().isEmpty()) continue;
             int position = message.indexOf(shop.getShopName());
@@ -539,18 +546,6 @@ public class AgentConversationService {
             if (!duplicate) unique.add(mention);
         }
         return unique;
-    }
-
-    private void addOrdinalMention(List<ShopMention> mentions, String message, String token, int candidateIndex,
-                                   AgentSessionContext context) {
-        BatchAwareReferenceResolver.Resolution resolved = batchReferenceResolver.resolve(message, context);
-        if (resolved != null && message.contains(token)) {
-            mentions.add(new ShopMention(message.indexOf(token), resolved.recommendation()));
-            return;
-        }
-        if (candidateIndex >= context.getCandidatePoolSnapshot().size()) return;
-        int position = message.indexOf(token);
-        if (position >= 0) mentions.add(new ShopMention(position, context.getCandidatePoolSnapshot().get(candidateIndex)));
     }
 
     private boolean containsVoucherSignal(String text) {
@@ -575,30 +570,21 @@ public class AgentConversationService {
         return normalizedName.length() >= 2 && normalizedMessage.contains(normalizedName);
     }
 
-    /**
-     * Candidate ordinals are resolved from durable working memory before the tool planner sees the query.
-     * "另一家" means the only candidate other than the focused shop when that relation is unambiguous.
-     */
-    private DecisionRecommendation resolveOrdinalReference(String message, AgentSessionContext context) {
-        BatchAwareReferenceResolver.Resolution resolved = batchReferenceResolver.resolve(message, context);
-        if (resolved != null) return resolved.recommendation();
-        if (message == null || context.getCandidatePoolSnapshot() == null || context.getCandidatePoolSnapshot().isEmpty()) return null;
-        List<DecisionRecommendation> candidates = context.getCandidatePoolSnapshot();
-        if (message.contains("第一家") || message.contains("首选")) return candidates.get(0);
-        if (message.contains("第三家") && candidates.size() >= 3) return candidates.get(2);
-        if (message.contains("第二家")) return candidates.size() >= 2 ? candidates.get(1) : null;
-        if (message.contains("另一家") || message.contains("另外一家")) {
-            DecisionRecommendation focusedShop = focusedShop(context);
-            if (focusedShop != null) {
-                List<DecisionRecommendation> alternatives = new ArrayList<DecisionRecommendation>();
-                for (DecisionRecommendation candidate : candidates) {
-                    if (!focusedShop.getShopId().equals(candidate.getShopId())) alternatives.add(candidate);
-                }
-                if (alternatives.size() == 1) return alternatives.get(0);
-            }
-            return candidates.size() == 2 ? candidates.get(1) : null;
+    private List<ResolvedShopReference> resolvedReferences(String message, AgentSessionContext context) {
+        List<ReferenceIntent> intents;
+        if (message != null && message.equals(context.getReferenceIntentMessage())
+                && context.getReferenceIntents() != null) {
+            intents = context.getReferenceIntents();
+        } else {
+            intents = extractor().extract(message);
+            context.setReferenceIntents(intents);
+            context.setReferenceIntentMessage(message);
         }
-        return null;
+        return batchReferenceResolver.resolveAll(intents, context);
+    }
+
+    private ReferenceIntentExtractor extractor() {
+        return referenceIntentExtractor == null ? new ReferenceIntentExtractor() : referenceIntentExtractor;
     }
 
     private DecisionRecommendation focusedShop(AgentSessionContext context) {
@@ -624,12 +610,6 @@ public class AgentConversationService {
 
     private String normalizeShopText(String text) {
         return text.replaceAll("[（(].*?[）)]", "").replaceAll("[，。？?！!\\s]", "");
-    }
-
-    private boolean hasFocusedShopPronoun(String message, AgentSessionContext context) {
-        if (message == null || context.getFocusedShopId() == null) return false;
-        return message.contains("这家") || message.contains("这个店") || message.contains("那家")
-                || message.contains("上一家") || message.contains("刚才那家");
     }
 
     /** A factual predicate can safely inherit the current focus without inventing a new restaurant request. */

@@ -411,6 +411,10 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         recordPolicy(context.getChatSession(), context.getChatId(), sessionId, policy);
         applyPolicy(response, policy);
         AgentSessionContext agentContext = conversationStateService.agentContext(context.getChatSession());
+        if (agentContext != null && context.getContextRewrite() != null) {
+            agentContext.setReferenceIntents(context.getContextRewrite().getReferenceIntents());
+            agentContext.setReferenceIntentMessage(context.getOriginalMessage());
+        }
         response.setConversation(context.getEventConsumer() == null
                 ? conversationService.converse(sessionId, followUp, agentContext)
                 : conversationService.converse(sessionId, followUp, agentContext, context.getEventConsumer()));

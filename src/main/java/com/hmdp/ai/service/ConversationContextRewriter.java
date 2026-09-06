@@ -4,6 +4,8 @@ import com.hmdp.ai.client.QueryRewriteClient;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
+import com.hmdp.ai.dto.ReferenceIntent;
+import com.hmdp.ai.dto.ResolvedShopReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,8 @@ import java.util.Map;
 public class ConversationContextRewriter {
     private static final Logger log = LoggerFactory.getLogger(ConversationContextRewriter.class);
     @Resource private QueryRewriteClient queryRewriteClient;
+    @Resource private ReferenceIntentExtractor referenceIntentExtractor;
+    private final BatchAwareReferenceResolver batchReferenceResolver = new BatchAwareReferenceResolver();
 
     public ContextRewriteResult rewrite(String query, List<Map<String, Object>> history, AgentSessionContext context) {
         return rewrite(query, history, context, false);
@@ -43,18 +47,29 @@ public class ConversationContextRewriter {
         if (!hasBusinessContext(context)) {
             return ContextRewriteResult.unchanged(query, "NO_WORKING_MEMORY");
         }
-        BatchAwareReferenceResolver.Resolution resolved = new BatchAwareReferenceResolver().resolve(query, context);
-        if (resolved != null && resolved.shopName() != null && !resolved.shopName().isBlank()) {
-            String rewritten = query.replace("第一家", resolved.shopName()).replace("第二家", resolved.shopName())
-                    .replace("第三家", resolved.shopName()).replace("首选", resolved.shopName())
-                    .replace("刚才那家", resolved.shopName()).replace("这家", resolved.shopName()).replace("那家", resolved.shopName());
+        List<ReferenceIntent> intents = extractor().extract(query);
+        if (context != null) {
+            context.setReferenceIntents(intents);
+            context.setReferenceIntentMessage(query);
+        }
+        List<ResolvedShopReference> resolved = batchReferenceResolver.resolveAll(intents, context);
+        if (!intents.isEmpty() && resolved.size() < intents.size()
+                && context != null && context.getRecommendationBatches() != null
+                && !context.getRecommendationBatches().isEmpty()) {
+            ContextRewriteResult result = ContextRewriteResult.unchanged(query, "REFERENCE_UNRESOLVED");
+            result.setReferenceIntents(intents);
+            return result;
+        }
+        if (!resolved.isEmpty()) {
+            String rewritten = replaceResolvedReferences(query, resolved);
             ContextRewriteResult result = new ContextRewriteResult();
             result.setOriginalQuery(query); result.setRewrittenQuery(rewritten);
             result.setApplied(!query.equals(rewritten)); result.setUsedModel(false); result.setReason("BATCH_REFERENCE_RESOLVED");
-            result.setCandidateOrdinal(resolved.ordinal());
+            result.setCandidateOrdinal(resolved.get(0).ordinal());
+            result.setReferenceIntents(intents);
             return result;
         }
-        if (!needsRewrite(query)) return ContextRewriteResult.unchanged(query, "SELF_CONTAINED");
+        if (intents.isEmpty() && !needsRewrite(query)) return ContextRewriteResult.unchanged(query, "SELF_CONTAINED");
         if (!queryRewriteClient.isConfigured()) return ContextRewriteResult.unchanged(query, "MODEL_UNAVAILABLE");
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
@@ -84,9 +99,31 @@ public class ConversationContextRewriter {
     }
 
     private boolean needsRewrite(String query) {
-        String[] signals = {"第一家", "第二家", "第三家", "这家", "那家", "上一家", "刚才那家", "走过去", "多远", "多久", "有包厢", "有优惠", "有券", "团购", "营业", "排队", "地址", "预约", "附近呢"};
+        String[] signals = {"走过去", "多远", "多久", "有包厢", "有优惠", "有券", "团购", "营业", "排队", "地址", "预约", "附近呢"};
         for (String signal : signals) if (query.contains(signal)) return true;
         return false;
+    }
+
+    private ReferenceIntentExtractor extractor() {
+        return referenceIntentExtractor == null ? new ReferenceIntentExtractor() : referenceIntentExtractor;
+    }
+
+    private String replaceResolvedReferences(String query, List<ResolvedShopReference> references) {
+        String rewritten = query;
+        List<ResolvedShopReference> ordered = new ArrayList<>(references);
+        ordered.sort((left, right) -> Integer.compare(start(right), start(left)));
+        for (ResolvedShopReference reference : ordered) {
+            ReferenceIntent intent = reference.intent();
+            if (intent.getStart() == null || intent.getEnd() == null || reference.shopName() == null) continue;
+            int start = Math.max(0, Math.min(intent.getStart(), rewritten.length()));
+            int end = Math.max(start, Math.min(intent.getEnd(), rewritten.length()));
+            rewritten = rewritten.substring(0, start) + reference.shopName() + rewritten.substring(end);
+        }
+        return rewritten;
+    }
+
+    private int start(ResolvedShopReference reference) {
+        return reference.intent().getStart() == null ? Integer.MAX_VALUE : reference.intent().getStart();
     }
 
     private boolean refersToCurrentDeviceLocation(String query) {
