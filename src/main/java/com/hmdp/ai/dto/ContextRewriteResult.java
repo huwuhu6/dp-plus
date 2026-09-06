@@ -15,6 +15,8 @@ public class ContextRewriteResult {
     private RewriteIntentType intentType = RewriteIntentType.GENERAL_CHAT;
     private Integer candidateOrdinal;
     private List<ReferenceIntent> referenceIntents = new ArrayList<ReferenceIntent>();
+    /** Request-scoped pre-mutation bindings; never persisted as conversation state. */
+    private List<ResolvedShopReference> resolvedReferences = new ArrayList<ResolvedShopReference>();
 
     public static ContextRewriteResult unchanged(String query, String reason) {
         ContextRewriteResult result = new ContextRewriteResult();

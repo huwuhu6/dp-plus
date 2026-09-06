@@ -390,7 +390,11 @@ public class AiConversationEvaluationService {
             result.setActualErrorCount(actualErrorCount);
             result.setRecoveryMatched(matchesRecovery(evaluationCase.getExpectedErrorCount(), actualErrorCount,
                     evaluationCase.getExpectedRecoveryRoutesJson(), recoveryRoutes));
-            boolean finalMemoryMatched = matchesMemory(evaluationCase.getExpectedMemoryJson(), chatId);
+            // Legacy expectedMemory assertions are evaluated against the same final
+            // turn snapshot captured during the chat call. This keeps the assertion
+            // aligned with the V2 task projection and avoids a second state read
+            // observing a different persistence version.
+            boolean finalMemoryMatched = matchesMemory(evaluationCase.getExpectedMemoryJson(), chatId, turnSnapshots);
             result.setUnseenRecommendationsMatched(matchesUnseenRecommendations(
                     evaluationCase.getExpectedUnseenFromTurn(), evaluationCase.getExpectedUnseenPairsJson(), recommendationSnapshots));
             ContextRewriteCoverage rewriteCoverage = evaluateContextRewriteCoverage(
@@ -479,6 +483,8 @@ public class AiConversationEvaluationService {
         snapshot.candidatePool = recommendationIds(conversationStateService.latestCandidatePool(memory));
         snapshot.latestBatchShopIds = new ArrayList<Long>(snapshot.candidatePool);
         snapshot.shownShopIds = conversationStateService.shownShopIds(memory);
+        com.hmdp.ai.dto.ConversationLocationSlot searchLocation = conversationStateService.searchLocation(memory);
+        snapshot.searchCity = searchLocation == null ? null : searchLocation.getCity();
         snapshot.focusedShopId = memory.getFocusedShopId();
         snapshot.activeDecisionSessionId = memory.getActiveDecisionSessionId();
         snapshot.sourceDecisionSessionId = conversationStateService.latestSourceDecisionSessionId(memory);
@@ -1134,8 +1140,45 @@ public class AiConversationEvaluationService {
         return expectedRoutes.equals(actualRecoveryRoutes);
     }
 
-    private boolean matchesMemory(String expectedMemoryJson, String chatId) throws Exception {
+    private boolean matchesMemory(String expectedMemoryJson, String chatId,
+                                  List<EvaluationTurnSnapshot> snapshots) throws Exception {
         if (expectedMemoryJson == null || expectedMemoryJson.trim().isEmpty()) return true;
+        if (snapshots != null && !snapshots.isEmpty()) {
+            EvaluationTurnSnapshot snapshot = snapshots.get(snapshots.size() - 1);
+            Map<String, Object> expected = objectMapper.readValue(expectedMemoryJson,
+                    new TypeReference<Map<String, Object>>() { });
+            return matchesMemoryProjection(expected, snapshot);
+        }
+        return matchesPersistedMemory(expectedMemoryJson, chatId);
+    }
+
+    private boolean matchesMemoryProjection(Map<String, Object> expected, EvaluationTurnSnapshot snapshot) {
+        String expectedSearchCity = stringValue(expected.get("searchCity"));
+        if (expectedSearchCity != null && !expectedSearchCity.equals(snapshot.searchCity)) return false;
+        String expectedPhase = stringValue(expected.get("dialogPhase"));
+        if (expectedPhase != null && !equalsExpected(expectedPhase, snapshot.dialogPhase)) return false;
+        if (expected.containsKey("candidatePoolEmpty")
+                && Boolean.parseBoolean(String.valueOf(expected.get("candidatePoolEmpty"))) != snapshot.candidatePool.isEmpty()) return false;
+        if (expected.containsKey("candidatePoolSize")
+                && !java.util.Objects.equals(integerValue(expected.get("candidatePoolSize")), snapshot.candidatePool.size())) return false;
+        if (expected.containsKey("focusedShopIdNull")
+                && Boolean.parseBoolean(String.valueOf(expected.get("focusedShopIdNull"))) != (snapshot.focusedShopId == null)) return false;
+        Object criteriaObject = snapshot.activeCriteria == null ? Collections.emptyMap() : snapshot.activeCriteria;
+        String expectedCuisine = stringValue(expected.get("cuisine"));
+        if (expectedCuisine != null && !expectedCuisine.equals(String.valueOf(((Map<?, ?>) criteriaObject).get("cuisine")))) return false;
+        String expectedTargetArea = stringValue(expected.get("targetArea"));
+        if (expectedTargetArea != null && !expectedTargetArea.equals(String.valueOf(((Map<?, ?>) criteriaObject).get("targetArea")))) return false;
+        if (expected.containsKey("budgetPerPerson")
+                && !java.util.Objects.equals(integerValue(expected.get("budgetPerPerson")), integerValue(((Map<?, ?>) criteriaObject).get("budgetPerPerson")))) return false;
+        if (expected.containsKey("hardConstraintsEmpty")) {
+            Object preferences = ((Map<?, ?>) criteriaObject).get("preferences");
+            boolean actualEmpty = preferences == null || isEmpty(preferences);
+            if (Boolean.parseBoolean(String.valueOf(expected.get("hardConstraintsEmpty"))) != actualEmpty) return false;
+        }
+        return true;
+    }
+
+    private boolean matchesPersistedMemory(String expectedMemoryJson, String chatId) throws Exception {
         if (conversationStateService == null) return false;
         Map<String, Object> expected = objectMapper.readValue(expectedMemoryJson, new TypeReference<Map<String, Object>>() { });
         ConversationWorkingMemory memory = conversationStateService.workingMemory(conversationStateService.getOrCreate(chatId));
@@ -1248,6 +1291,7 @@ public class AiConversationEvaluationService {
         private List<Long> latestBatchShopIds = new ArrayList<>();
         private List<Long> shownShopIds = new ArrayList<>();
         private Long focusedShopId;
+        private String searchCity;
         private Long activeDecisionSessionId;
         private Long sourceDecisionSessionId;
         private Long decisionSessionId;

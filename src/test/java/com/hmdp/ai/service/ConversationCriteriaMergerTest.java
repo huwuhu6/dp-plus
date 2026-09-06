@@ -349,4 +349,19 @@ class ConversationCriteriaMergerTest {
         assertEquals(0, result.getConstraints().getBudgetDirection());
     }
 
+    @Test
+    void explicitMutationAnchorWinsOverFocusedShop() {
+        DecisionRecommendation first = new DecisionRecommendation();
+        first.setShopId(1L); first.setAvgPrice(110L);
+        DecisionRecommendation second = new DecisionRecommendation();
+        second.setShopId(2L); second.setAvgPrice(200L);
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setBudgetDirection(-1);
+
+        CriteriaMergeResult result = merger.merge(new DecisionConstraints(), delta, "第一家太贵，第二家有插座",
+                java.util.Arrays.asList(first, second), 2L, java.util.Arrays.asList(1L, 2L), 1L);
+
+        assertEquals(94, result.getConstraints().getBudgetPerPerson());
+    }
+
 }

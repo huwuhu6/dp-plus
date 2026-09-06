@@ -41,7 +41,12 @@ public class ReferenceIntentExtractor {
                                                      List<ReferenceIntent> modelIntents) {
         List<ReferenceIntent> merged = new ArrayList<>(rules);
         for (ReferenceIntent candidate : modelIntents) {
-            if (overlapsAny(candidate, rules) || overlapsAny(candidate, merged)) continue;
+            ReferenceIntent overlap = overlapping(candidate, rules);
+            if (overlap != null) {
+                if (candidate.isMutationAnchor()) overlap.setMutationAnchor(true);
+                continue;
+            }
+            if (overlapsAny(candidate, merged)) continue;
             merged.add(candidate);
         }
         merged.sort(Comparator.comparingInt(item -> item.getStart() == null ? Integer.MAX_VALUE : item.getStart()));
@@ -55,6 +60,15 @@ public class ReferenceIntentExtractor {
             if (candidate.getStart() < item.getEnd() && item.getStart() < candidate.getEnd()) return true;
         }
         return false;
+    }
+
+    private ReferenceIntent overlapping(ReferenceIntent candidate, List<ReferenceIntent> existing) {
+        for (ReferenceIntent item : existing) {
+            if (item.getStart() == null || item.getEnd() == null
+                    || candidate.getStart() == null || candidate.getEnd() == null) continue;
+            if (candidate.getStart() < item.getEnd() && item.getStart() < candidate.getEnd()) return item;
+        }
+        return null;
     }
 
     private List<ReferenceIntent> extractByRule(String message) {
@@ -81,7 +95,7 @@ public class ReferenceIntentExtractor {
         if (aiClient == null) return new ArrayList<>();
         try {
             List<Map<String, Object>> messages = new ArrayList<>();
-            messages.add(message("system", "从用户消息中提取商户指代。只输出结构化引用数组，不回答问题。scope 只能是 LATEST（当前最新候选批次）、EARLIEST（明确指最开始/历史候选批次）或 FOCUSED（刚才/当前聚焦商户）。ordinal 是从1开始的序数；FOCUSED 不填 ordinal。每个 intent 必须保留原文 surface 及其 start/end 字符位置，支持一句话多个引用。无法确定引用时返回空数组。"));
+            messages.add(message("system", "从用户消息中提取商户指代。只输出结构化引用数组，不回答问题。scope 只能是 LATEST（当前最新候选批次）、EARLIEST（明确指最开始/历史候选批次）或 FOCUSED（刚才/当前聚焦商户）。ordinal 是从1开始的序数；FOCUSED 不填 ordinal。每个 intent 必须保留原文 surface 及其 start/end 字符位置，支持一句话多个引用。若该引用是用户明确评价/批评所针对的商户，将 mutationAnchor=true，否则为false。无法确定引用时返回空数组。"));
             messages.add(message("user", message));
             Map<String, Object> function = new LinkedHashMap<>();
             function.put("name", "extract_reference_intents");
@@ -107,6 +121,7 @@ public class ReferenceIntentExtractor {
                 intent.setSurface(item.path("surface").asText(null));
                 intent.setStart(item.hasNonNull("start") ? item.path("start").asInt() : null);
                 intent.setEnd(item.hasNonNull("end") ? item.path("end").asInt() : null);
+                intent.setMutationAnchor(item.path("mutationAnchor").asBoolean(false));
                 if (validateSpan(message, intent)
                         && (intent.getScope() == ReferenceIntent.Scope.FOCUSED
                         || (intent.getOrdinal() != null && intent.getOrdinal() > 0))) {
@@ -152,6 +167,7 @@ public class ReferenceIntentExtractor {
         props.put("surface", Map.of("type", "string"));
         props.put("start", Map.of("type", "integer", "minimum", 0));
         props.put("end", Map.of("type", "integer", "minimum", 0));
+        props.put("mutationAnchor", Map.of("type", "boolean"));
         intent.put("properties", props);
         intent.put("required", List.of("scope", "surface", "start", "end"));
         Map<String, Object> schema = new LinkedHashMap<>();

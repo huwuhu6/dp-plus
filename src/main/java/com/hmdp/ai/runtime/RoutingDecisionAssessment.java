@@ -1,6 +1,7 @@
 package com.hmdp.ai.runtime;
 
 import com.hmdp.ai.service.pipeline.ChatProcessingAction;
+import com.hmdp.ai.dto.TurnPlan;
 import lombok.Data;
 
 /** Transient evidence for why a chat route was accepted or escalated. */
@@ -15,4 +16,5 @@ public class RoutingDecisionAssessment {
     private boolean stateAllowed;
     private boolean shouldEscalate;
     private String reason;
+    private TurnPlan turnPlan = new TurnPlan();
 }

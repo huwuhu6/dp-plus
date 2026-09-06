@@ -2160,3 +2160,15 @@ Resolver 结果显式携带 Batch、ordinal、shopId/shopName，并同时供 Con
 5. `ROBUST_CLARIFY_LOCATION_CONFIRM`：地点解析服务不可用时没有 pending candidate，第三轮确认自然得到 `ERROR`；属于外部地理解析前置条件，不能伪造候选或放宽确认安全规则。
 
 工具审计结论：`get_shop_detail` 只读 MySQL 商户基础事实，`search_shop_evidence` 读取评价/探店/评论证据，`query_shop_vouchers` 读取券事实，`compare_shops` 需要两家 shopId；描述、schema 与数据源职责清晰，没有为满足旧 GT 修改生产 Tool Planner。剩余红灯中仅 Compound Intent、Location Clarification 和区域语义属于后续架构/环境问题；不再继续向 Working Memory 或 Tool 层堆字符串补丁。
+
+### AI 对话架构收口：TurnPlan、预变更引用与位置 Provider（2026-09-06）
+
+本轮在不改变 Task/Working Memory/RecommendationBatch 主模型的前提下完成三项主链收口。Pipeline 通过轻量 `TurnPlan` 将 criteria mutation 与 execution action 解耦：`START_DECISION` 产生 `APPLY_DELTA`，带有结构化 mutation 的 `BUSINESS_FOLLOW_UP` 也会先执行 merge/reduce，再继续原实体事实查询。Context Rewrite 阶段产生的 `ResolvedShopReference` 作为本轮快照传入 Agent Tool binding，避免候选池失效后重新解析；相对预算使用明确的 mutation anchor，而不是 focused shop 或第一个可见实体的隐式回退。mutation 即使 Tool 执行失败也先持久化。
+
+位置解析抽象为 `LocationResolutionProvider`。生产实现仍通过 AMap/MCP，`eval` profile 使用有限、精确键的 fixture（不读取 CaseCode、不修改状态），外部服务不可用时保留原有澄清/失败安全语义。评测的旧 `expectedMemory` 断言改为使用每轮采集的最终 Working Memory projection，避免二次持久化读取造成版本观察差异；旧字段仍兼容。
+
+Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前 `CuisineCanonicalizer` 记录为“烧烤”；复合 critique 的首家实际均价为 161，按既有 0.85 规则得到 137，Ground Truth 据当前事实校正。复合用例的候选池和 focused shop 在 mutation 后按生产语义失效，但第二家引用仍绑定 mutation 前 Batch。
+
+**评测结果**：Run 109（收口前）robustness 为 Complete 19/24、Route 21/24、Tool 22/24、Final 22/24；Run 115 定向复合/幽灵预算 subset 为 2/3，唯一失败是模型偶发遗漏“北京朝阳”的区域约束，未增加字符串特判。最终 Run 116（`dev,eval` fixture）robustness 24 条：Complete **21/24**、Route **22/24**、Tool **23/24**、Final Status **23/24**、Locality **22/24**、Context Rewrite **7/7**，P50/P95/P99=24,112/46,803/64,540ms，prompt/completion=3,358/818。剩余失败集中于位置拒绝恢复、城市切换后的 follow-up 路由、澄清到命名地点的退出语义；不属于 Task Scope、Batch 引用或 Working Memory 回归。
+
+同一代码运行 v1 Run 117（40 条）：Complete **30/40**、Route **39/40**、Tool **34/40**、Final Status **40/40**、Locality **40/40**、Context Rewrite **2/2**；holdout Run 118（16 条）：Complete **7/16**、Route **14/16**、Tool **14/16**、Final Status **11/16**、Locality **15/16**。Holdout 的失败主要是历史暂停/澄清语义和 Tool/状态终态契约差异，未观察到 Working Memory projection 回归。

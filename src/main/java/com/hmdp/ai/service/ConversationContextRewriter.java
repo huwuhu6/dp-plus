@@ -58,6 +58,7 @@ public class ConversationContextRewriter {
                 && !context.getRecommendationBatches().isEmpty()) {
             ContextRewriteResult result = ContextRewriteResult.unchanged(query, "REFERENCE_UNRESOLVED");
             result.setReferenceIntents(intents);
+            result.setResolvedReferences(resolved);
             return result;
         }
         if (!resolved.isEmpty()) {
@@ -67,6 +68,7 @@ public class ConversationContextRewriter {
             result.setApplied(!query.equals(rewritten)); result.setUsedModel(false); result.setReason("BATCH_REFERENCE_RESOLVED");
             result.setCandidateOrdinal(resolved.get(0).ordinal());
             result.setReferenceIntents(intents);
+            result.setResolvedReferences(resolved);
             return result;
         }
         if (intents.isEmpty() && !needsRewrite(query)) return ContextRewriteResult.unchanged(query, "SELF_CONTAINED");

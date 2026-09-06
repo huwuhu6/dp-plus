@@ -16,6 +16,8 @@ public class ReferenceIntent {
     private String surface;
     private Integer start;
     private Integer end;
+    /** Model-assigned association for a criteria critique in a compound turn. */
+    private boolean mutationAnchor;
 
     public ReferenceIntent() {
     }

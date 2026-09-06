@@ -28,6 +28,13 @@ public class ConversationCriteriaMerger {
     /** Reduces an explicit delta using the previous recommendation only for relative constraints. */
     public CriteriaMergeResult merge(DecisionConstraints previous, DecisionConstraints delta, String query,
                                      List<DecisionRecommendation> candidatePool, Long focusedShopId, List<Long> shownShopIds) {
+        return merge(previous, delta, query, candidatePool, focusedShopId, shownShopIds, null);
+    }
+
+    /** Relative constraints may provide a pre-mutation reference anchor captured by rewrite. */
+    public CriteriaMergeResult merge(DecisionConstraints previous, DecisionConstraints delta, String query,
+                                     List<DecisionRecommendation> candidatePool, Long focusedShopId,
+                                     List<Long> shownShopIds, Long criteriaAnchorShopId) {
         DecisionConstraints merged = copy(previous);
         CriteriaMergeResult result = new CriteriaMergeResult();
         result.setConstraints(merged);
@@ -72,18 +79,19 @@ public class ConversationCriteriaMerger {
         if (containsAny(text, "不要辣", "不吃辣", "清淡", "少油", "不油腻")) addPreference(result, merged, "清淡");
 
         if (containsAny(text, "不限菜系", "什么都行", "随便吃", "不限制菜系")) clear(result, "cuisine", () -> merged.setCuisine(""));
-        applyRelativeConstraints(result, merged, delta, text, candidatePool, focusedShopId, shownShopIds);
+        applyRelativeConstraints(result, merged, delta, text, candidatePool, focusedShopId, shownShopIds, criteriaAnchorShopId);
 
         merged.setPreferences(unique(merged.getPreferences()));
         return result;
     }
 
     private void applyRelativeConstraints(CriteriaMergeResult result, DecisionConstraints merged, DecisionConstraints delta,
-                                          String text, List<DecisionRecommendation> candidatePool, Long focusedShopId, List<Long> shownShopIds) {
+                                          String text, List<DecisionRecommendation> candidatePool, Long focusedShopId,
+                                          List<Long> shownShopIds, Long criteriaAnchorShopId) {
         boolean cheaper = containsAny(text, "太贵", "便宜点", "更便宜", "好贵", "平价", "实惠", "有点贵", "贵一点")
                 || (delta.getBudgetDirection() != null && delta.getBudgetDirection() < 0);
         if (cheaper) {
-            Long anchorPrice = relativePriceAnchor(candidatePool, focusedShopId, shownShopIds);
+            Long anchorPrice = relativePriceAnchor(candidatePool, focusedShopId, shownShopIds, criteriaAnchorShopId);
             if (anchorPrice == null) {
                 // opening critique (R1): no pool/shown/focused anchor yet — fall back to a cuisine-level
                 // default price band so "平价一点" still lands a hard budget instead of no-op.
@@ -163,8 +171,15 @@ public class ConversationCriteriaMerger {
 
     /** Anchor = the shop the user is actually complaining about: focused shop first, then the shown (displayed) set,
      *  then the pool. A user can only complain about shops they have seen (GLM review 2026-09-04). */
-    private Long relativePriceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId, List<Long> shownShopIds) {
+    private Long relativePriceAnchor(List<DecisionRecommendation> candidates, Long focusedShopId, List<Long> shownShopIds,
+                                     Long criteriaAnchorShopId) {
         if (candidates == null || candidates.isEmpty()) return null;
+        if (criteriaAnchorShopId != null) {
+            for (DecisionRecommendation candidate : candidates) {
+                if (criteriaAnchorShopId.equals(candidate.getShopId()) && candidate.getAvgPrice() != null
+                        && candidate.getAvgPrice() > 0L) return candidate.getAvgPrice();
+            }
+        }
         if (focusedShopId != null) {
             for (DecisionRecommendation candidate : candidates) {
                 if (focusedShopId.equals(candidate.getShopId()) && candidate.getAvgPrice() != null) {

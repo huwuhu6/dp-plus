@@ -23,7 +23,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 @Service
-public class AmapMcpLocationResolutionService {
+@org.springframework.context.annotation.Profile("!eval")
+public class AmapMcpLocationResolutionService implements LocationResolutionProvider {
     private static final Logger log = LoggerFactory.getLogger(AmapMcpLocationResolutionService.class);
 
     @Value("${ai.location.mcp.enabled:false}")

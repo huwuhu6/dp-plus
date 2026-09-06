@@ -16,6 +16,8 @@ import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.ConversationSlots;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
+import com.hmdp.ai.dto.CriteriaIntent;
+import com.hmdp.ai.dto.TurnPlan;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.entity.AiChatSession;
@@ -55,7 +57,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     @Resource private AgentConversationService conversationService;
     @Resource private ChatMemoryService chatMemoryService;
     @Resource private ConversationStateService conversationStateService;
-    @Resource private AmapMcpLocationResolutionService locationResolutionService;
+    @Resource private LocationResolutionProvider locationResolutionService;
     @Resource private ConversationContextRewriter contextRewriter;
     @Resource private ConstraintExtractor constraintExtractor;
     @Resource private ConversationCriteriaMerger criteriaMerger;
@@ -177,13 +179,11 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         DecisionResponse activeDecision = context.getActiveDecision();
         String message = context.getOriginalMessage();
         if (request.getSelectedOptionId() != null && isPausedDecision(activeDecision)) {
-            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT);
-            context.setRoutingReason("selected_option_for_paused_decision");
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT, "selected_option_for_paused_decision");
             return;
         }
         if (isLocationClarification(activeDecision) && isPotentialNamedLocation(message)) {
-            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.LOCATION_RESOLUTION);
-            context.setRoutingReason("named_location_for_clarification");
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.LOCATION_RESOLUTION, "named_location_for_clarification");
             assessment.setSource("RULE");
             ChatMessageResponse locationResponse = resolveNamedLocation(context.getChatId(), message,
                     context.getChatSession(), context.getActiveDecisionSessionId(), activeDecision);
@@ -194,15 +194,13 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         }
         if (isSuspendedDecision(activeDecision) && context.getContextRewrite() != null
                 && "REFERENCE_UNRESOLVED".equals(context.getContextRewrite().getReason())) {
-            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED);
-            context.setRoutingReason("unresolved_reference_in_suspended_decision");
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED, "unresolved_reference_in_suspended_decision");
             assessment.setSource("CONTEXT");
             return;
         }
         if (isSuspendedDecision(activeDecision) && request.getSelectedOptionId() == null
                 && isSuspendedDecisionMetaQuestion(message)) {
-            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED);
-            context.setRoutingReason("suspended_decision_meta_question");
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED, "suspended_decision_meta_question");
             assessment.setSource("RULE");
             return;
         }
@@ -211,8 +209,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if ("WAITING_RELAXATION".equals(activeDecision == null ? null : activeDecision.getStatus())
                 && request.getSelectedOptionId() == null
                 && isLocationRecoveryExpression(context.getOriginalMessage())) {
-            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT);
-            context.setRoutingReason("location_recovery_in_waiting_relaxation");
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT, "location_recovery_in_waiting_relaxation");
             assessment.setSource("RULE");
             return;
         }
@@ -223,8 +220,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 || isContinuationRefinement(context.getEffectiveMessage(), context.getChatSession()));
         if (replacesPausedDecision) {
             cancelPausedDecision(context);
-            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
-            context.setRoutingReason("new_recommendation_replaces_paused_decision");
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION, "new_recommendation_replaces_paused_decision");
             context.setUsedModel(false);
             assessment.setSource("RULE");
             return;
@@ -232,8 +228,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         // 非餐饮领域守卫（#29 修复）：无餐饮强信号且命中非餐饮领域词表 → 强制 GENERAL_CHAT，
         // 在正向规则与 LLM 路由之前拦截，避免"附近+看看"等规则盲区误入餐饮决策。
         if (isNonDiningDomain(context.getOriginalMessage())) {
-            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT);
-            context.setRoutingReason("non_dining_domain_guard");
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT, "non_dining_domain_guard");
             // 领域守卫是确定性 RULE 拦截，修正 assessRouting 预评估落 MODEL 的统计口径（case3 审计 2026-09-03）
             assessment.setSource("RULE");
             assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT);
@@ -241,10 +236,17 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             return;
         }
         if (!assessment.isConflictDetected()
+                && assessment.getCandidateAction() == com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP
+                && isCompoundMutationFollowUp(context)) {
+            context.setRoute("BUSINESS_FOLLOW_UP");
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP,
+                    "structured_mutation_with_follow_up");
+            return;
+        }
+        if (!assessment.isConflictDetected()
                 && (isNewRecommendationIntent(message)
                 || isSearchRefinement(context.getOriginalMessage(), context.getEffectiveMessage()))) {
-            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
-            context.setRoutingReason("new_recommendation_intent");
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION, "new_recommendation_intent");
             context.setUsedModel(aiProperties.isConfigured());
             return;
         }
@@ -265,8 +267,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             assessment.setSource("RULE");
         }
         context.setRoute(route);
-        context.setAction(toProcessingAction(route));
-        context.setRoutingReason("resolved_route:" + route);
+        selectAction(context, toProcessingAction(route), "resolved_route:" + route);
         context.setUsedModel(aiProperties.isConfigured());
         if (conversationEventService != null) {
             conversationEventService.recordBestEffort(ConversationEventType.ROUTE_DECISION, ConversationEventStatus.SUCCESS,
@@ -278,7 +279,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     @Override
     public void reduceCriteria(ChatProcessingContext context) {
-        if (context.getAction() != com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION) return;
+        if (context.getTurnPlan() == null || context.getTurnPlan().getCriteriaIntent() != CriteriaIntent.APPLY_DELTA) return;
         prepareDecision(context);
     }
 
@@ -318,10 +319,18 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             request.setQuery(context.getEffectiveMessage());
             return;
         }
-        com.hmdp.ai.dto.DecisionConstraints extracted = constraintExtractor.extract(context.getEffectiveMessage());
+        com.hmdp.ai.dto.DecisionConstraints extracted = context.getCriteriaDelta() != null
+                ? context.getCriteriaDelta() : constraintExtractor.extract(context.getEffectiveMessage());
+        context.setCriteriaDelta(extracted);
         com.hmdp.ai.dto.DecisionTaskState activeBefore = conversationStateService.activeTask(context.getWorkingMemory());
         com.hmdp.ai.service.ConversationStateService.TaskTransition transition = conversationStateService.transitionTask(
                 context.getWorkingMemory(), extracted, context.getOriginalMessage());
+        if ("EXPLICIT_HISTORY".equals(transition.reason())) {
+            // Historical task selection supplies the missing slots from the task snapshot.
+            // Model defaults such as clearedFields must not erase those slots on a return turn.
+            extracted.setClearedFields(new ArrayList<String>());
+            extracted.setRemovedPreferences(new ArrayList<String>());
+        }
         com.hmdp.ai.dto.DecisionConstraints previous = conversationStateService.activeCriteria(context.getWorkingMemory());
         if (previous == null) previous = new com.hmdp.ai.dto.DecisionConstraints();
         log.info("[AI][task] event=TRANSITION chatId={} original={} effective={} action={} reason={} activeTaskBefore={} activeTaskAfter={} taskCount={} previous={} extracted={}",
@@ -334,7 +343,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         com.hmdp.ai.dto.CriteriaMergeResult mergeResult = criteriaMerger.merge(
                 previous, extracted,
                 context.getOriginalMessage(), conversationStateService.latestCandidatePool(context.getWorkingMemory()),
-                context.getWorkingMemory().getFocusedShopId(), conversationStateService.shownShopIds(context.getWorkingMemory()));
+                context.getWorkingMemory().getFocusedShopId(), conversationStateService.shownShopIds(context.getWorkingMemory()),
+                mutationAnchorShopId(context));
         context.setCriteriaMergeResult(mergeResult);
         context.setMergedConstraints(mergeResult.getConstraints());
         request.setQuery(cleanRetrievalQuery(context.getEffectiveMessage(), mergeResult.getConstraints()));
@@ -344,6 +354,71 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         log.info("[AI][chat] event=CRITERIA_MERGED chatId={} inherited={} replaced={} appended={} cleared={} invalidated={} query={}",
                 context.getChatId(), mergeResult.getInherited(), mergeResult.getReplaced(), mergeResult.getAppended(),
                 mergeResult.getCleared(), mergeResult.getInvalidated(), compact(context.getEffectiveMessage()));
+    }
+
+    /** Selects the single execution action while preserving an independent mutation intent. */
+    private void selectAction(ChatProcessingContext context,
+                              com.hmdp.ai.service.pipeline.ChatProcessingAction action,
+                              String reason) {
+        context.setAction(action);
+        context.setRoutingReason(reason);
+        CriteriaIntent criteriaIntent = action == com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION
+                ? CriteriaIntent.APPLY_DELTA : CriteriaIntent.NONE;
+        if (action == com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP
+                && hasResolvedReference(context)) {
+            // Compound follow-ups are the one non-search route that can carry a criteria delta.
+            // Reuse the structured extractor; do not add another routing phrase dictionary.
+            try {
+                ensureCriteriaDelta(context);
+                if (hasMutation(context.getCriteriaDelta())) {
+                    criteriaIntent = CriteriaIntent.APPLY_DELTA;
+                }
+            } catch (RuntimeException ignored) {
+                // Follow-up routing remains valid when optional extraction is unavailable.
+            }
+        }
+        TurnPlan turnPlan = new TurnPlan(criteriaIntent, action);
+        context.setTurnPlan(turnPlan);
+        if (context.getRoutingAssessment() != null) context.getRoutingAssessment().setTurnPlan(turnPlan);
+    }
+
+    private boolean hasResolvedReference(ChatProcessingContext context) {
+        return context.getContextRewrite() != null
+                && context.getContextRewrite().getResolvedReferences() != null
+                && !context.getContextRewrite().getResolvedReferences().isEmpty();
+    }
+
+    private boolean isCompoundMutationFollowUp(ChatProcessingContext context) {
+        if (!hasResolvedReference(context)) return false;
+        ensureCriteriaDelta(context);
+        return hasMutation(context.getCriteriaDelta());
+    }
+
+    private void ensureCriteriaDelta(ChatProcessingContext context) {
+        if (context.getCriteriaDelta() != null || constraintExtractor == null) return;
+        context.setCriteriaDelta(constraintExtractor.extract(context.getOriginalMessage()));
+    }
+
+    private boolean hasMutation(com.hmdp.ai.dto.DecisionConstraints constraints) {
+        if (constraints == null) return false;
+        return hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())
+                || hasText(constraints.getCuisine()) || hasText(constraints.getKeyword())
+                || constraints.getBudgetPerPerson() != null && constraints.getBudgetPerPerson() > 0
+                || constraints.getRadiusKm() != null && constraints.getRadiusKm() > 0
+                || Boolean.TRUE.equals(constraints.getNearby())
+                || constraints.getBudgetDirection() != null && constraints.getBudgetDirection() != 0
+                || constraints.getRadiusDirection() != null && constraints.getRadiusDirection() != 0
+                || constraints.getPreferences() != null && !constraints.getPreferences().isEmpty()
+                || constraints.getClearedFields() != null && !constraints.getClearedFields().isEmpty()
+                || constraints.getRemovedPreferences() != null && !constraints.getRemovedPreferences().isEmpty();
+    }
+
+    private Long mutationAnchorShopId(ChatProcessingContext context) {
+        if (context.getContextRewrite() == null || context.getContextRewrite().getResolvedReferences() == null) return null;
+        for (com.hmdp.ai.dto.ResolvedShopReference reference : context.getContextRewrite().getResolvedReferences()) {
+            if (reference.intent() != null && reference.intent().isMutationAnchor()) return reference.shopId();
+        }
+        return null;
     }
 
     private ChatMessageResponse executeAction(ChatProcessingContext context) {
@@ -421,6 +496,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (agentContext != null && context.getContextRewrite() != null) {
             agentContext.setReferenceIntents(context.getContextRewrite().getReferenceIntents());
             agentContext.setReferenceIntentMessage(context.getOriginalMessage());
+            agentContext.setResolvedReferences(context.getContextRewrite().getResolvedReferences());
         }
         response.setConversation(context.getEventConsumer() == null
                 ? conversationService.converse(sessionId, followUp, agentContext)

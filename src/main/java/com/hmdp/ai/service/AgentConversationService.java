@@ -554,7 +554,8 @@ public class AgentConversationService {
 
     private boolean containsEvidenceSignal(String text) {
         return text.contains("\u8bc4\u4ef7") || text.contains("\u8bc4\u8bba") || text.contains("\u53e3\u7891")
-                || text.contains("\u6392\u961f") || text.contains("\u73af\u5883") || text.contains("\u670d\u52a1");
+                || text.contains("\u6392\u961f") || text.contains("\u73af\u5883") || text.contains("\u670d\u52a1")
+                || text.contains("\u63d2\u5ea7");
     }
 
     private List<String> shopNames(List<DecisionRecommendation> shops) {
@@ -571,6 +572,10 @@ public class AgentConversationService {
     }
 
     private List<ResolvedShopReference> resolvedReferences(String message, AgentSessionContext context) {
+        if (message != null && message.equals(context.getReferenceIntentMessage())
+                && context.getResolvedReferences() != null && !context.getResolvedReferences().isEmpty()) {
+            return new ArrayList<ResolvedShopReference>(context.getResolvedReferences());
+        }
         List<ReferenceIntent> intents;
         if (message != null && message.equals(context.getReferenceIntentMessage())
                 && context.getReferenceIntents() != null) {
@@ -580,7 +585,9 @@ public class AgentConversationService {
             context.setReferenceIntents(intents);
             context.setReferenceIntentMessage(message);
         }
-        return batchReferenceResolver.resolveAll(intents, context);
+        List<ResolvedShopReference> resolved = batchReferenceResolver.resolveAll(intents, context);
+        context.setResolvedReferences(resolved);
+        return resolved;
     }
 
     private ReferenceIntentExtractor extractor() {

@@ -20,6 +20,8 @@ public class AgentSessionContext {
     private List<RecommendationBatch> recommendationBatches = new ArrayList<RecommendationBatch>();
     /** Parsed once at the chat boundary and reused by rewrite and tool binding. */
     private List<ReferenceIntent> referenceIntents = new ArrayList<ReferenceIntent>();
+    /** Immutable bindings captured before criteria mutation in the current turn. */
+    private List<ResolvedShopReference> resolvedReferences = new ArrayList<ResolvedShopReference>();
     private String referenceIntentMessage;
     private DecisionRequest decisionRequest;
     private DecisionConstraints decisionConstraints;
