@@ -116,6 +116,37 @@ class ConstraintExtractorTest {
     }
 
     @Test
+    void restoresDeterministicNearbyAndRadiusWhenModelOmitsLocationFields() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"福州\\\",\\\"targetArea\\\":\\\"\\\",\\\"locationIntent\\\":\\\"EXPLICIT_TARGET\\\",\\\"keyword\\\":\\\"\\\",\\\"cuisine\\\":\\\"火锅\\\",\\\"budgetPerPerson\\\":-1,\\\"budgetDirection\\\":0,\\\"radiusKm\\\":-1,\\\"radiusDirection\\\":0,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[],\\\"missingInformation\\\":[],\\\"clearedFields\\\":[],\\\"removedPreferences\\\":[]}\"}}]}}]}" );
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("在福州附近3公里内找火锅");
+
+        assertEquals(true, constraints.getNearby());
+        assertEquals(3D, constraints.getRadiusKm());
+    }
+
+    @Test
+    void extractsStructuredPreferenceRemovalWhenUserAcceptsQueueing() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"\\\",\\\"targetArea\\\":\\\"\\\",\\\"locationIntent\\\":\\\"UNSPECIFIED\\\",\\\"keyword\\\":\\\"\\\",\\\"cuisine\\\":\\\"火锅\\\",\\\"budgetPerPerson\\\":-1,\\\"budgetDirection\\\":0,\\\"radiusKm\\\":-1,\\\"radiusDirection\\\":0,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[],\\\"missingInformation\\\":[],\\\"clearedFields\\\":[],\\\"removedPreferences\\\":[]}\"}}]}}]}" );
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("排队也行，改找火锅");
+
+        assertTrue(constraints.getRemovedPreferences().contains("不排队"));
+    }
+
+    @Test
     void doesNotMigrateKeywordWhenCuisineAlreadyExtracted() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);

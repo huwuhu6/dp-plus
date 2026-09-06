@@ -192,6 +192,13 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 return;
             }
         }
+        if (isSuspendedDecision(activeDecision) && context.getContextRewrite() != null
+                && "REFERENCE_UNRESOLVED".equals(context.getContextRewrite().getReason())) {
+            context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED);
+            context.setRoutingReason("unresolved_reference_in_suspended_decision");
+            assessment.setSource("CONTEXT");
+            return;
+        }
         if (isSuspendedDecision(activeDecision) && request.getSelectedOptionId() == null
                 && isSuspendedDecisionMetaQuestion(message)) {
             context.setAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED);
@@ -663,6 +670,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return text.contains("太贵") || text.contains("便宜点") || text.contains("更便宜")
                 || text.contains("好贵") || text.contains("平价") || text.contains("实惠") || text.contains("有点贵") || text.contains("贵一点")
                 || text.contains("换个条件") || text.contains("换个口味") || text.contains("换个商圈")
+                || text.contains("改找") || text.contains("再加上") || text.contains("加上") || text.contains("再找")
                 || text.contains("更近") || text.contains("附近一点") || text.contains("重新筛选")
                 || text.contains("重新推荐") || text.contains("当前设备附近搜索") || text.contains("我附近")
                 || text.contains("当前位置") || text.contains("当前定位");
@@ -718,7 +726,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             return assessment;
         }
         boolean completed = decision != null && "COMPLETED".equals(decision.getStatus());
-        if ((completed || reference) && (isShopInquiry(message) || reference)) {
+        if ((completed || reference) && (isShopInquiry(message) || reference)
+                && (reference || !isSearchRefinement(message, effective))) {
             assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP);
             assessment.setSource(afterRewrite ? "CONTEXT" : "RULE");
             assessment.setContextRequired(reference);
@@ -880,7 +889,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     }
 
     private boolean isPotentialNamedLocation(String message) {
-        if (!locationResolutionService.isAvailable()) return false;
         String normalized = message == null ? "" : message.replaceAll("\\s+", "").trim();
         if (normalized.length() < 2 || normalized.length() > 24 || normalized.contains("?") || normalized.contains("？")) return false;
         String[] nonLocationWords = {"这家", "那家", "第一家", "第二家", "评价", "优惠", "代金券", "团购", "营业", "几点",

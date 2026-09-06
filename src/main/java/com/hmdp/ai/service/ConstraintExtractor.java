@@ -33,11 +33,33 @@ public class ConstraintExtractor {
 
     public DecisionConstraints extract(String query) {
         try {
-            return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(normalize(extractByModel(query)), query), query), query);
+            return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
+                    applySemanticLocationFallback(normalize(extractByModel(query)), query), query), query), query);
         } catch (Exception e) {
             log.warn("[AI][model] action=CONSTRAINT_EXTRACTION event=FALLBACK reason={}", e.getClass().getSimpleName());
-            return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(normalize(extractByRule(query)), query), query), query);
+            return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
+                    applySemanticLocationFallback(normalize(extractByRule(query)), query), query), query), query);
         }
+    }
+
+    /**
+     * Nearby and explicit radius have deterministic semantics. Keep them stable
+     * when a model omits one of these hard location fields.
+     */
+    private DecisionConstraints applySemanticLocationFallback(DecisionConstraints constraints, String query) {
+        if (!Boolean.TRUE.equals(constraints.getNearby()) && containsAny(query, "附近", "周边", "就近")) {
+            constraints.setNearby(true);
+        }
+        if (constraints.getRadiusKm() == null || constraints.getRadiusKm() <= 0) {
+            Matcher radiusMatcher = RADIUS_PATTERN.matcher(query == null ? "" : query);
+            if (radiusMatcher.find()) {
+                double radiusValue = Double.parseDouble(radiusMatcher.group(1));
+                String unit = radiusMatcher.group(2);
+                constraints.setRadiusKm("米".equals(unit) || "m".equalsIgnoreCase(unit)
+                        ? radiusValue / 1000D : radiusValue);
+            }
+        }
+        return constraints;
     }
 
     /** Rule fallback for relative intent (critique) that runs on BOTH model and rule paths.
@@ -58,9 +80,15 @@ public class ConstraintExtractor {
     private DecisionConstraints applyMutations(DecisionConstraints constraints, String query) {
         if (containsAny(query, "不限预算", "预算不限", "不限制预算")) constraints.getClearedFields().add("budgetPerPerson");
         if (containsAny(query, "不限距离", "不限定距离", "不考虑距离")) { constraints.getClearedFields().add("radiusKm"); constraints.getClearedFields().add("nearby"); }
+        if (isLocationScopeRefusal(query)) { constraints.getClearedFields().add("radiusKm"); constraints.getClearedFields().add("nearby"); }
         if (containsAny(query, "不限定店名", "不指定店名")) constraints.getClearedFields().add("keyword");
         if (containsAny(query, "不用安静", "不用太安静", "不要安静", "不想安静")) constraints.getRemovedPreferences().add("安静");
+        if (containsAny(query, "排队也行", "可以排队", "不介意排队", "排队没关系")) constraints.getRemovedPreferences().add("不排队");
         return constraints;
+    }
+
+    private boolean isLocationScopeRefusal(String query) {
+        return containsAny(query, "不用管我的具体位置", "不提供位置", "按全城搜索", "全城搜索", "不看位置", "不需要定位");
     }
 
     private DecisionConstraints enforceCurrentDeviceIntent(DecisionConstraints constraints, String query) {

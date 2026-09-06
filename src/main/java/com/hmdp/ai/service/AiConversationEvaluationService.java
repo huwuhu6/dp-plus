@@ -312,6 +312,7 @@ public class AiConversationEvaluationService {
             List<List<DecisionRecommendation>> recommendationSnapshots = new ArrayList<>();
             List<EvaluationTurnSnapshot> turnSnapshots = new ArrayList<>();
             List<Map<String, Object>> assertionFailures = new ArrayList<>();
+            Set<Long> observedToolCallIds = new HashSet<>();
             String finalStatus = null;
             int actualErrorCount = 0;
             boolean afterError = false;
@@ -364,6 +365,11 @@ public class AiConversationEvaluationService {
                         ? Collections.emptyList() : new ArrayList<>(response.getDecision().getRecommendations()));
                 turnSnapshots.add(captureTurnSnapshot(turnNo, chatId, response,
                         recommendationSnapshots.get(recommendationSnapshots.size() - 1)));
+                // Agent turnNo is scoped to the decision session and may restart when a
+                // follow-up reuses the same session. Capture newly persisted calls at the
+                // evaluation turn boundary instead of relying on that local counter.
+                attachNewToolCalls(turnSnapshots.get(turnSnapshots.size() - 1),
+                        response.getDecisionSessionId(), observedToolCallIds);
                 Map<String, Object> output = new LinkedHashMap<>();
                 output.put("route", response.getRoute());
                 output.put("decisionStatus", response.getDecisionStatus());
@@ -489,12 +495,28 @@ public class AiConversationEvaluationService {
     private void attachToolCalls(List<EvaluationTurnSnapshot> snapshots, List<AiAgentToolCall> calls) {
         for (AiAgentToolCall call : calls) {
             if (call.getTurnNo() == null || call.getTurnNo() < 1 || call.getTurnNo() > snapshots.size()) continue;
-            snapshots.get(call.getTurnNo() - 1).toolCalls.add(compactToolCall(call));
+            Map<String, Object> compact = compactToolCall(call);
+            if (!containsToolCall(snapshots.get(call.getTurnNo() - 1), call)) {
+                snapshots.get(call.getTurnNo() - 1).toolCalls.add(compact);
+            }
         }
+    }
+
+    private void attachNewToolCalls(EvaluationTurnSnapshot snapshot, Long sessionId, Set<Long> observedCallIds) {
+        if (snapshot == null || sessionId == null) return;
+        for (AiAgentToolCall call : toolCalls(Collections.singleton(sessionId))) {
+            if (call.getId() == null || observedCallIds.add(call.getId())) snapshot.toolCalls.add(compactToolCall(call));
+        }
+    }
+
+    private boolean containsToolCall(EvaluationTurnSnapshot snapshot, AiAgentToolCall call) {
+        if (snapshot == null || call == null || call.getId() == null) return false;
+        return snapshot.toolCalls.stream().anyMatch(item -> String.valueOf(call.getId()).equals(String.valueOf(item.get("id"))));
     }
 
     private Map<String, Object> compactToolCall(AiAgentToolCall call) {
         Map<String, Object> value = new LinkedHashMap<>();
+        value.put("id", call.getId());
         value.put("name", call.getToolName());
         value.put("turnNo", call.getTurnNo());
         value.put("status", call.getStatus());
