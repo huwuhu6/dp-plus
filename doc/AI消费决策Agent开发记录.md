@@ -2199,3 +2199,9 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 本轮还修复了两个边界：省级范围本身是有效的非 GPS 搜索锚点；带坐标的“那我附近呢”在澄清态直接继续设备范围推荐，不再误进入命名地点解析。ConstraintExtractor 提示补充了承接句（如“那厦门呢”）和规范行政名称示例，未增加省市名单、CaseCode 特判或用户语言 contains/Regex 词表。
 
 新增 9 条行政范围 robustness 矩阵，覆盖省级正向、直辖市、普通城市、省/市互换、设备切换和非餐饮负向。定向 Run 126 暴露省级执行门槛和短承接句抽取问题；修复与提示收敛后 Run 131 九条全部通过（Complete/Route/Final/Working Memory 均 9/9）。旧 snapshot 无 `targetProvince` 时按空字符串兼容，schemaVersion 无需迁移。`mvn -q test` 在当前代码上全绿。
+
+### 区县行政范围 canonical state 与硬过滤投影（2026-09-06）
+
+在省/市行政范围修复后继续补齐区县层级，但保持 `targetArea` 的商圈/地标语义不变。`DecisionConstraints` 新增 `targetDistrict`；Extractor 的结构化契约明确区分行政区县与非行政 POI，Merger 实现 City→District、District→District 和 District→Current Device 的替换/清除语义。`ConversationStateService`、`ChatOrchestrationService`、`ConsumptionDecisionService` 与 `PolicyDecisionEngine` 将 district 作为独立硬过滤锚点投影到 `DecisionRequest.district`，命名区县不启用 GPS 坐标；targetArea-only 不投影为 district，继续留给后续区域解析。
+
+新增 6 条 robustness 矩阵：闽侯县、鼓楼区、设备→区县、区县切换，以及福州大学/重庆解放碑两个 targetArea 负向边界。Run **136**（6 条）全部通过：Complete/Route/Tool/Final/Working Memory 均 **6/6**；快照确认区县写入 `activeCriteria.targetDistrict`，设备→区县保持同一 Task 且清除 nearby/radius，区县切换推荐实体不复用，地标/商圈保持 `targetDistrict=""`。本轮未运行完整 v1、holdout 或 robustness 全量评测，未修改成都零结果、复合意图、Tool Planner 或 Task/Batch 架构。

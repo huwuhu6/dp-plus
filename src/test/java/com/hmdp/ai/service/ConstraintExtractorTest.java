@@ -190,5 +190,21 @@ class ConstraintExtractorTest {
         assertEquals("沙县", constraints.getKeyword());
     }
 
+    @Test
+    void extractsDistrictAsAdministrativeScopeAndKeepsLandmarkAsArea() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetProvince\\\":\\\"福建省\\\",\\\"targetCity\\\":\\\"福州市\\\",\\\"targetDistrict\\\":\\\"闽侯县\\\",\\\"targetArea\\\":\\\"\\\",\\\"locationIntent\\\":\\\"EXPLICIT_TARGET\\\",\\\"keyword\\\":\\\"\\\",\\\"cuisine\\\":\\\"\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[],\\\"missingInformation\\\":[],\\\"clearedFields\\\":[],\\\"removedPreferences\\\":[] }\"}}]}}]}" );
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("闽侯县有什么吃的");
+
+        assertEquals("闽侯县", constraints.getTargetDistrict());
+        assertEquals("", constraints.getTargetArea());
+    }
+
 
 }

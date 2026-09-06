@@ -14,6 +14,8 @@ public class DecisionConstraints {
     /** User's explicit search destination. It is never a substitute for device location. */
     private String targetProvince = "";
     private String targetCity = "";
+    /** Explicit district/county administrative scope; non-administrative POIs stay in targetArea. */
+    private String targetDistrict = "";
     private String targetArea = "";
     /** Explicit destination, current device, or unspecified location intent. */
     private String locationIntent = "UNSPECIFIED";

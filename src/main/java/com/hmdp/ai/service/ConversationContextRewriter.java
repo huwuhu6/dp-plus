@@ -153,7 +153,7 @@ public class ConversationContextRewriter {
                 && (hasText(context.getDecisionConstraints().getCuisine())
                 || hasText(context.getDecisionConstraints().getTargetProvince())
                 || hasText(context.getDecisionConstraints().getTargetCity())
-                || hasText(context.getDecisionConstraints().getTargetArea())
+                || hasText(context.getDecisionConstraints().getTargetDistrict()) || hasText(context.getDecisionConstraints().getTargetArea())
                 || Boolean.TRUE.equals(context.getDecisionConstraints().getNearby()));
     }
 

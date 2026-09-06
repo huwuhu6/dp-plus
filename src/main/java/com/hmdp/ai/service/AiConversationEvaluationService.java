@@ -1168,6 +1168,8 @@ public class AiConversationEvaluationService {
         if (expectedCuisine != null && !expectedCuisine.equals(String.valueOf(((Map<?, ?>) criteriaObject).get("cuisine")))) return false;
         String expectedTargetArea = stringValue(expected.get("targetArea"));
         if (expectedTargetArea != null && !expectedTargetArea.equals(String.valueOf(((Map<?, ?>) criteriaObject).get("targetArea")))) return false;
+        String expectedTargetDistrict = stringValue(expected.get("targetDistrict"));
+        if (expectedTargetDistrict != null && !expectedTargetDistrict.equals(String.valueOf(((Map<?, ?>) criteriaObject).get("targetDistrict")))) return false;
         if (expected.containsKey("budgetPerPerson")
                 && !java.util.Objects.equals(integerValue(expected.get("budgetPerPerson")), integerValue(((Map<?, ?>) criteriaObject).get("budgetPerPerson")))) return false;
         if (expected.containsKey("hardConstraintsEmpty")) {
@@ -1207,6 +1209,8 @@ public class AiConversationEvaluationService {
         if (expectedCuisine != null && (criteria == null || !expectedCuisine.equals(criteria.getCuisine()))) return false;
         String expectedTargetArea = stringValue(expected.get("targetArea"));
         if (expectedTargetArea != null && (criteria == null || !expectedTargetArea.equals(criteria.getTargetArea()))) return false;
+        String expectedTargetDistrict = stringValue(expected.get("targetDistrict"));
+        if (expectedTargetDistrict != null && (criteria == null || !expectedTargetDistrict.equals(criteria.getTargetDistrict()))) return false;
         if (expected.containsKey("budgetPerPerson")) {
             Integer expectedBudget = integerValue(expected.get("budgetPerPerson"));
             if (expectedBudget != null && (criteria == null || !expectedBudget.equals(criteria.getBudgetPerPerson()))) return false;

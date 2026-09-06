@@ -344,7 +344,7 @@ public class ConsumptionDecisionService {
         if (request.getLatitude() != null && request.getLongitude() != null) return false;
         // A user-selected city is a valid non-GPS search anchor.  Coordinates are
         // required only for nearby/radius calculation, not for a city-wide search.
-        if (hasText(request.getProvince()) || hasText(request.getCity())) return false;
+        if (hasText(request.getProvince()) || hasText(request.getCity()) || hasText(request.getDistrict())) return false;
         return !"DECLINED".equals(request.getLocationStatus());
     }
 
@@ -570,7 +570,7 @@ public class ConsumptionDecisionService {
         if (explicitDestination) {
             request.setProvince(constraints.getTargetProvince());
             request.setCity(constraints.getTargetCity());
-            request.setDistrict(constraints.getTargetArea());
+            request.setDistrict(constraints.getTargetDistrict());
             request.setUseLocationScope(false);
         } else {
             request.setProvince(followUp.getProvince());
@@ -585,13 +585,14 @@ public class ConsumptionDecisionService {
         if (constraints == null) return;
         constraints.setTargetProvince("");
         constraints.setTargetCity("");
+        constraints.setTargetDistrict("");
         constraints.setTargetArea("");
         constraints.setLocationIntent("CURRENT_DEVICE");
         constraints.setNearby(true);
     }
 
     private boolean hasExplicitDestination(DecisionConstraints constraints) {
-        return constraints != null && (hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea())
+        return constraints != null && (hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetDistrict()) || hasText(constraints.getTargetArea())
                 || "EXPLICIT_TARGET".equalsIgnoreCase(constraints.getLocationIntent()));
     }
 
@@ -876,6 +877,7 @@ public class ConsumptionDecisionService {
         query = removeToken(query, request.getCity());
         query = removeToken(query, request.getDistrict());
         query = removeToken(query, constraints == null ? null : constraints.getTargetCity());
+        query = removeToken(query, constraints == null ? null : constraints.getTargetDistrict());
         query = removeToken(query, constraints == null ? null : constraints.getTargetProvince());
         query = removeToken(query, constraints == null ? null : constraints.getTargetArea());
         query = query.replaceAll("\\s+", " ").trim();

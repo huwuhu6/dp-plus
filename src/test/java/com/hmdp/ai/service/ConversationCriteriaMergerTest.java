@@ -468,4 +468,39 @@ class ConversationCriteriaMergerTest {
         assertEquals(94, result.getConstraints().getBudgetPerPerson());
     }
 
+    @Test
+    void districtReplacementKeepsCityAndClearsPreviousArea() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setTargetProvince("福建省");
+        previous.setTargetCity("福州市");
+        previous.setTargetDistrict("鼓楼区");
+        previous.setTargetArea("东街口");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setTargetDistrict("闽侯县");
+        delta.setLocationIntent("EXPLICIT_TARGET");
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "改到闽侯县");
+
+        assertEquals("福建省", result.getConstraints().getTargetProvince());
+        assertEquals("福州市", result.getConstraints().getTargetCity());
+        assertEquals("闽侯县", result.getConstraints().getTargetDistrict());
+        assertEquals("", result.getConstraints().getTargetArea());
+    }
+
+    @Test
+    void currentDeviceClearsAdministrativeDistrict() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setTargetProvince("福建省");
+        previous.setTargetCity("福州市");
+        previous.setTargetDistrict("闽侯县");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setLocationIntent("CURRENT_DEVICE");
+
+        CriteriaMergeResult result = merger.merge(previous, delta, "我附近");
+
+        assertEquals("", result.getConstraints().getTargetProvince());
+        assertEquals("", result.getConstraints().getTargetCity());
+        assertEquals("", result.getConstraints().getTargetDistrict());
+    }
+
 }

@@ -23,7 +23,7 @@ public class PolicyDecisionEngine {
 
     public PolicyDecision decideRecommendation(DecisionRequest request, DecisionConstraints constraints,
                                                ConversationWorkingMemory memory) {
-        if (constraints != null && (hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetArea()))) {
+        if (constraints != null && (hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetDistrict()) || hasText(constraints.getTargetArea()))) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION,
                     "已获得用户显式指定的目标地点，禁止使用设备定位覆盖");
         }
@@ -31,7 +31,7 @@ public class PolicyDecisionEngine {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION,
                     "已获得会话中持久化的显式目标地点");
         }
-        if (constraints != null && (hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()))) {
+        if (constraints != null && (hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetDistrict()))) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION, "已获得用户明确指定的目标行政范围");
         }
         if (memory != null && memory.getSearchLocation() != null && hasText(memory.getSearchLocation().getCity())) {

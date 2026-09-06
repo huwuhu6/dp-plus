@@ -225,16 +225,17 @@ public class ConversationStateService {
     private boolean isIndependentDemand(DecisionConstraints active, DemandSignature resolved) {
         DemandSignature current = DemandSignature.of(active);
         return current.hasDestinationAndCuisine() && resolved.hasDestinationAndCuisine()
-                && (!current.province.equals(resolved.province) || !current.city.equals(resolved.city))
+                && (!current.province.equals(resolved.province) || !current.city.equals(resolved.city) || !current.district.equals(resolved.district))
                 && !current.cuisine.equals(resolved.cuisine);
     }
 
     public record TaskTransition(String action, String reason, String activeTaskIdBefore, String activeTaskIdAfter) { }
 
-    private record DemandSignature(String province, String city, String area, String cuisine) {
+    private record DemandSignature(String province, String city, String district, String area, String cuisine) {
         private static DemandSignature of(DecisionConstraints criteria) {
             return new DemandSignature(normalize(criteria == null ? null : criteria.getTargetProvince()),
                     normalizeCity(criteria == null ? null : criteria.getTargetCity()),
+                    normalize(criteria == null ? null : criteria.getTargetDistrict()),
                     normalize(criteria == null ? null : criteria.getTargetArea()),
                     normalize(criteria == null ? null : criteria.getCuisine()));
         }
@@ -242,15 +243,16 @@ public class ConversationStateService {
             DemandSignature base = of(previous);
             return new DemandSignature(hasText(delta == null ? null : delta.getTargetProvince()) ? normalize(delta.getTargetProvince()) : (hasText(delta == null ? null : delta.getTargetCity()) ? "" : base.province),
                     hasText(delta == null ? null : delta.getTargetCity()) ? normalizeCity(delta.getTargetCity()) : (hasText(delta == null ? null : delta.getTargetProvince()) ? "" : base.city),
+                    hasText(delta == null ? null : delta.getTargetDistrict()) ? normalize(delta.getTargetDistrict()) : (hasText(delta == null ? null : delta.getTargetCity()) || hasText(delta == null ? null : delta.getTargetProvince()) ? "" : base.district),
                     hasText(delta == null ? null : delta.getTargetArea()) ? normalize(delta.getTargetArea()) : base.area,
                     hasText(delta == null ? null : delta.getCuisine()) ? normalize(delta.getCuisine()) : base.cuisine);
         }
         private boolean hasDestinationAndCuisine() { return (!province.isEmpty() || !city.isEmpty()) && !cuisine.isEmpty(); }
         private boolean matches(DemandSignature other) {
             return hasDestinationAndCuisine() && other.hasDestinationAndCuisine()
-                    && province.equals(other.province) && city.equals(other.city) && area.equals(other.area) && cuisine.equals(other.cuisine);
+                    && province.equals(other.province) && city.equals(other.city) && district.equals(other.district) && area.equals(other.area) && cuisine.equals(other.cuisine);
         }
-        private String title() { return province + city + (area.isEmpty() ? "" : area) + cuisine; }
+        private String title() { return province + city + district + (area.isEmpty() ? "" : area) + cuisine; }
         private static String normalizeCity(String value) {
             String normalized = normalize(value);
             return normalized.endsWith("市") ? normalized.substring(0, normalized.length() - 1) : normalized;
@@ -387,6 +389,7 @@ public class ConversationStateService {
         if (state == null || executionConstraints == null
                 || hasText(executionConstraints.getTargetProvince())
                 || hasText(executionConstraints.getTargetCity())
+                || hasText(executionConstraints.getTargetDistrict())
                 || hasText(executionConstraints.getTargetArea())
                 || "EXPLICIT_TARGET".equalsIgnoreCase(executionConstraints.getLocationIntent())) return;
         ConversationWorkingMemory memory = workingMemory(state);
@@ -396,11 +399,12 @@ public class ConversationStateService {
             criteria = new DecisionConstraints();
             task.setCriteria(criteria);
         }
-        boolean leavingNamedDestination = hasText(criteria.getTargetProvince()) || hasText(criteria.getTargetCity()) || hasText(criteria.getTargetArea())
+        boolean leavingNamedDestination = hasText(criteria.getTargetProvince()) || hasText(criteria.getTargetCity()) || hasText(criteria.getTargetDistrict()) || hasText(criteria.getTargetArea())
                 || (task.getSearchLocation() != null && "RESOLVED_BY_NAME".equals(task.getSearchLocation().getStatus()));
         if (leavingNamedDestination) {
             criteria.setTargetProvince("");
             criteria.setTargetCity("");
+            criteria.setTargetDistrict("");
             criteria.setTargetArea("");
             clearLocation(task.getSearchLocation(), "MISSING");
             invalidateCandidatePool(memory);
@@ -613,12 +617,12 @@ public class ConversationStateService {
      * so a later turn cannot accidentally reuse coordinates from a different city.
      */
     public void applyNamedSearchLocation(AiChatSession state, DecisionConstraints criteria) {
-        if (criteria == null || (!hasText(criteria.getTargetProvince()) && !hasText(criteria.getTargetCity()))) return;
+        if (criteria == null || (!hasText(criteria.getTargetProvince()) && !hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetDistrict()))) return;
         ConversationWorkingMemory memory = workingMemory(state);
         ConversationLocationSlot target = ensureActiveTask(memory).getSearchLocation();
         boolean changed = !sameText(criteria.getTargetProvince(), target.getProvince())
                 || !sameText(criteria.getTargetCity(), target.getCity())
-                || !sameText(criteria.getTargetArea(), target.getDistrict());
+                || !sameText(criteria.getTargetDistrict(), target.getDistrict());
         if (!changed && "RESOLVED_BY_NAME".equals(target.getStatus())
                 && target.getLatitude() == null && target.getLongitude() == null) {
             return;
@@ -626,7 +630,7 @@ public class ConversationStateService {
         target.setStatus("RESOLVED_BY_NAME");
         target.setProvince(criteria.getTargetProvince());
         target.setCity(criteria.getTargetCity());
-        target.setDistrict(criteria.getTargetArea());
+        target.setDistrict(criteria.getTargetDistrict());
         target.setLatitude(null);
         target.setLongitude(null);
         target.setSource("USER_EXPLICIT_DESTINATION");
@@ -663,7 +667,7 @@ public class ConversationStateService {
     }
 
     private boolean isSearchDomainField(String field) {
-        return "targetProvince".equals(field) || "targetCity".equals(field) || "targetArea".equals(field) || "cuisine".equals(field) || "budgetPerPerson".equals(field) || "radiusKm".equals(field)
+        return "targetProvince".equals(field) || "targetCity".equals(field) || "targetDistrict".equals(field) || "targetArea".equals(field) || "cuisine".equals(field) || "budgetPerPerson".equals(field) || "radiusKm".equals(field)
                 || "nearby".equals(field) || "arrivalTime".equals(field) || "occasion".equals(field)
                 || "quiet".equals(field) || "avoidQueue".equals(field) || "hardConstraints".equals(field)
                 || "softPreferences".equals(field);
@@ -673,8 +677,8 @@ public class ConversationStateService {
     private void synchronizeNamedSearchLocation(AiChatSession state, ConversationWorkingMemory memory,
                                                 CriteriaMergeResult reduction) {
         DecisionConstraints criteria = reduction.getConstraints();
-        if (!hasText(criteria.getTargetProvince()) && !hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetArea())) {
-            if (containsClearedField(reduction.getCleared(), "targetProvince") || containsClearedField(reduction.getCleared(), "targetCity") || containsClearedField(reduction.getCleared(), "targetArea")) {
+        if (!hasText(criteria.getTargetProvince()) && !hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetDistrict()) && !hasText(criteria.getTargetArea())) {
+            if (containsClearedField(reduction.getCleared(), "targetProvince") || containsClearedField(reduction.getCleared(), "targetCity") || containsClearedField(reduction.getCleared(), "targetDistrict") || containsClearedField(reduction.getCleared(), "targetArea")) {
                 DecisionTaskState task = activeTask(memory);
                 if (task != null) clearLocation(task.getSearchLocation(), "MISSING");
                 log.info("[AI][state] event=NAMED_SEARCH_LOCATION_CLEARED chatId={} action=USE_DEVICE_LOCATION_IF_AUTHORIZED", state.getChatId());
@@ -683,17 +687,18 @@ public class ConversationStateService {
         }
         if (!containsField(reduction.getReplaced(), "targetProvince")
                 && !containsField(reduction.getReplaced(), "targetCity")
+                && !containsField(reduction.getReplaced(), "targetDistrict")
                 && !containsField(reduction.getReplaced(), "targetArea")) return;
 
         ConversationLocationSlot target = ensureActiveTask(memory).getSearchLocation();
         clearLocation(target, "RESOLVED_BY_NAME");
         target.setProvince(criteria.getTargetProvince());
         target.setCity(criteria.getTargetCity());
-        target.setDistrict(criteria.getTargetArea());
+        target.setDistrict(criteria.getTargetDistrict());
         target.setSource("USER_EXPLICIT");
         target.setCapturedAt(LocalDateTime.now());
         log.info("[AI][state] event=NAMED_SEARCH_LOCATION_REDUCED chatId={} targetProvince={} targetCity={} targetArea={} action=CLEAR_TARGET_COORDINATES",
-                state.getChatId(), criteria.getTargetProvince(), criteria.getTargetCity(), criteria.getTargetArea());
+                state.getChatId(), criteria.getTargetProvince(), criteria.getTargetCity(), criteria.getTargetDistrict());
     }
 
     private boolean containsField(List<String> changes, String field) {
