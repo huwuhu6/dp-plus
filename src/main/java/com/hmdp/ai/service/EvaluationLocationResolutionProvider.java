@@ -35,6 +35,8 @@ public class EvaluationLocationResolutionProvider implements LocationResolutionP
                 "福州大学", List.of(provider.candidate("福州大学", "福建省", "福州市", "闽侯县", 26.0606, 119.1836),
                         provider.candidate("福州大学（旗山校区）", "福建省", "福州市", "闽侯县", 26.0500, 119.1700)),
                 "福州鼓楼", List.of(provider.candidate("福州市鼓楼区", "福建省", "福州市", "鼓楼区", 26.0823, 119.3062)),
+                "福州鼓楼区", List.of(provider.candidate("福州市鼓楼区", "福建省", "福州市", "鼓楼区", 26.0823, 119.3062)),
+                "我在福州鼓楼，", List.of(provider.candidate("福州市鼓楼区", "福建省", "福州市", "鼓楼区", 26.0823, 119.3062)),
                 "福州", List.of(provider.candidate("福州市", "福建省", "福州市", null, 26.0745, 119.2965))
         );
     }
