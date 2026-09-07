@@ -21,6 +21,8 @@ import com.hmdp.ai.dto.TurnPlan;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.entity.AiChatSession;
+import com.hmdp.ai.geo.AdministrativeResolution;
+import com.hmdp.ai.geo.AdministrativeRegionResolver;
 import com.hmdp.ai.runtime.ConversationEventStatus;
 import com.hmdp.ai.runtime.ConversationEventType;
 import com.hmdp.ai.runtime.RoutingDecisionAssessment;
@@ -64,6 +66,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     @Resource private PolicyDecisionEngine policyDecisionEngine;
     @Resource private ConversationEventService conversationEventService;
     @Resource private ObjectMapper objectMapper;
+    @Resource private AdministrativeRegionResolver administrativeRegionResolver;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
         return chat(request, null);
@@ -235,6 +238,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             log.info("[AI][chat] event=DOMAIN_GUARD_BLOCKED chatId={} message={}", context.getChatId(), compact(context.getOriginalMessage()));
             return;
         }
+        if (isAdministrativeLocationTurn(context)) {
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION,
+                    "administrative_location_scope");
+            assessment.setSource("RULE");
+            return;
+        }
         if (!assessment.isConflictDetected()
                 && assessment.getCandidateAction() == com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP
                 && isCompoundMutationFollowUp(context)) {
@@ -394,6 +403,15 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 && !context.getContextRewrite().getResolvedReferences().isEmpty();
     }
 
+    /** Administrative names are closed-world scope changes, not merchant follow-up questions. */
+    private boolean isAdministrativeLocationTurn(ChatProcessingContext context) {
+        if (administrativeRegionResolver == null || context.getOriginalMessage() == null) return false;
+        com.hmdp.ai.dto.DecisionConstraints active = context.getWorkingMemory() == null
+                ? null : conversationStateService.activeCriteria(context.getWorkingMemory());
+        AdministrativeResolution resolution = administrativeRegionResolver.resolve(context.getOriginalMessage(), active);
+        return resolution != null && resolution.status() != AdministrativeResolution.Status.NOT_FOUND;
+    }
+
     private boolean isCompoundMutationFollowUp(ChatProcessingContext context) {
         if (!hasResolvedReference(context)) return false;
         ensureCriteriaDelta(context);
@@ -402,9 +420,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private void ensureCriteriaDelta(ChatProcessingContext context) {
         if (context.getCriteriaDelta() != null || constraintExtractor == null) return;
-        context.setCriteriaDelta(constraintExtractor.extract(context.getOriginalMessage()));
+        com.hmdp.ai.dto.DecisionConstraints activeCriteria = context.getWorkingMemory() == null
+                ? null : conversationStateService.activeCriteria(context.getWorkingMemory());
+        context.setCriteriaDelta(constraintExtractor.extract(context.getOriginalMessage(), activeCriteria));
         if (context.getCriteriaDelta() == null) {
-            context.setCriteriaDelta(constraintExtractor.extract(context.getOriginalMessage(), null));
+            // Compatibility fallback for test doubles and optional integrations that only implement the legacy API.
+            context.setCriteriaDelta(constraintExtractor.extract(context.getOriginalMessage()));
         }
     }
 

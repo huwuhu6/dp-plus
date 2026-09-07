@@ -1,5 +1,15 @@
 # AI 消费决策 Agent 开发记录
 
+### Location Contract 收口：行政区、POI 与设备位置分离（2026-09-07）
+
+本轮将 Location Understanding 收敛为三个互不替代的 authority：命名省/市/直辖市/区县属于本地行政 Registry 的 closed-world entity resolution；POI/地标继续交给既有 AMap MCP `maps_geo` 做 geocoding；“我附近”“离我近”“当前位置”等相对用户的表达才进入 `CURRENT_DEVICE` 和 Browser GPS。行政范围更具体不意味着需要设备定位。
+
+实现新增 `AdministrativeRegionRepository`、Classpath Registry 元数据和可选 `AdministrativeRegionProvider`。当前 Registry 标记为 partial，裸区县没有 parent 时保留 AMBIGUOUS，不根据 GPS 或单条 partial 数据猜测全国唯一；省/市本地命中不调用 MCP、LLM 或 GPS。高德行政 WebService 仅在本地 miss 时 fallback，并按 `parentAdcode + keyword` 做 TTL 缓存；失败安全降级为 NOT_FOUND/clarification。
+
+`ConstraintExtractor` 继续负责开放消费语义，行政字段最终由 Resolver 覆盖；`ensureCriteriaDelta` 与 START_DECISION 共用 request-scoped active criteria。基于 Resolver 三态结果增加行政位置路由入口，避免已完成决策中的 district refinement 被旧 BUSINESS_FOLLOW_UP guard 截走。adcode 仅保留在 Resolver candidate，不扩大 Working Memory/DecisionConstraints。
+
+相关 Resolver/Repository/Provider、ConstraintExtractor、ChatOrchestrationService 与 AMap MCP 测试共 **59 tests，0 failures，0 errors，1 skipped**；6 条定向 Location E2E 通过，覆盖福建省、福州、福州鼓楼区、裸鼓楼澄清、CURRENT_DEVICE 无 GPS 澄清、福州大学作为 targetArea。未运行完整 robustness、conversation-v1、holdout 或全量 `mvn test`：`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
 ## 2026-09-05：Conversation Evaluation 增加按轮状态断言
 
 Conversation Evaluation 在保留既有最终路由、最终 Working Memory、工具聚合和推荐去重断言的基础上，新增 JSONL 可选字段 `expectedTurnStates`、`expectedToolsByTurn` 与 `expectedRelations`。评测每轮聊天完成后仅以只读方式采集 Working Memory 投影、版本号、候选池、焦点商户、来源任务、响应推荐和按轮 Tool Call；不改变业务状态、路由或持久化模型。

@@ -1,4 +1,8 @@
-[
+{
+  "version": "2026-09",
+  "completeProvinceCity": false,
+  "completeDistrict": false,
+  "regions": [
   {"adcode":"350000","level":"PROVINCE","name":"福建省","province":"福建省","city":"","district":"","parentAdcode":""},
   {"adcode":"350100","level":"CITY","name":"福州市","province":"福建省","city":"福州市","district":"","parentAdcode":"350000"},
   {"adcode":"350102","level":"DISTRICT","name":"鼓楼区","province":"福建省","city":"福州市","district":"鼓楼区","parentAdcode":"350100"},
@@ -17,4 +21,5 @@
   {"adcode":"510000","level":"PROVINCE","name":"四川省","province":"四川省","city":"","district":"","parentAdcode":""},
   {"adcode":"510100","level":"CITY","name":"成都市","province":"四川省","city":"成都市","district":"","parentAdcode":"510000"},
   {"adcode":"500000","level":"CITY","name":"重庆市","province":"重庆市","city":"重庆市","district":"","parentAdcode":""}
-]
+  ]
+}
