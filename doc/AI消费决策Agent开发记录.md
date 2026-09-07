@@ -2337,3 +2337,8 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 商户事实问题增加 request-scoped `ShopFactQueryType`。主观口味、环境、服务、排队、约会适配和评价问题统一归入 EVIDENCE，并在 planner/fallback 两侧约束到 `search_shop_evidence`；静态详情和优惠券仍分别使用原有工具。证据工具先查主题证据，无主题命中时返回有限通用评价并显式标记 `topicMatched=false`，回答不得把通用评价伪装成主题结论。
 
 验证结果：相关 Unit Tests 与完整 `mvn -q test` 全部通过。真实应用使用 8082 端口验证了带位置上下文的推荐、纯指示词 batch 引用、描述性引用歧义和 evidence tool 路由；当前环境的 MCP location provider 不可用时，简称 POI 会安全进入澄清而不静默请求 GPS。完整评测 Run141（robustness 48 条：Complete 20、Route 43、Tool 47、Final 36、Locality 48）、Run142（conversation-v1 40 条：Complete 29、Route 38、Tool 33、Final 40、Locality 40）和 Run143（holdout 16 条：Complete 7、Route 13、Tool 14、Final 12、Locality 16）均已执行；剩余失败主要属于既有行政解析、澄清、Route/Tool 语义差异，未修改 Dataset Ground Truth。人工 smoke 记录了本地候选推荐、batch reference、描述性引用歧义和简称 POI 的安全澄清行为，未新增具体地名、shopId、CaseCode 或句子特判。
+### Short POI 地理上下文消歧（2026-09-07）
+
+短 POI 全国召回不能直接渲染为搜索位置。无行政或设备上下文时，仅用一次高德 Text Search 判断歧义，并进入城市/当前位置澄清；有城市时使用 `region + city_limit=true`，仅有设备坐标时使用高德 Around Search（50km）做候选消歧，设备位置仍不写成最终命名 POI。确认候选后才将 canonical POI 坐标作为餐饮搜索中心。
+
+真实 HTTP smoke 验证了无位置安全澄清、回复“福州”后 `keywords=农大 region=福州市`、福州 GPS 命中 `mode=AROUND`，以及确认校区后进入餐饮检索。显式“北京农大”在本地行政 registry/当前抽取未提供 city identity 时仍需后续 Location Authority 补强，本轮没有新增城市或 POI alias hardcode。定向测试 `AmapPoiSearchProviderTest`、`AdministrativeRegionResolverTest`、`AmapMcpLocationResolutionServiceTest` 通过；未运行 full regression。

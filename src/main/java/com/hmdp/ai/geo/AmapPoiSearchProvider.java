@@ -36,7 +36,8 @@ public class AmapPoiSearchProvider {
 
     @Value("${ai.location.amap.enabled:false}") private boolean enabled;
     @Value("${ai.location.amap.api-key:}") private String apiKey;
-    @Value("${ai.location.amap.poi-endpoint:https://restapi.amap.com/v5/place/text}") private String endpoint;
+    @Value("${ai.location.amap.poi-endpoint:https://restapi.amap.com/v5/place/text}") private String endpoint = "https://restapi.amap.com/v5/place/text";
+    @Value("${ai.location.amap.poi-around-endpoint:https://restapi.amap.com/v5/place/around}") private String aroundEndpoint = "https://restapi.amap.com/v5/place/around";
     @Value("${ai.location.amap.poi-timeout-ms:1500}") private long timeoutMs = 1500L;
 
     public AmapPoiSearchProvider() {
@@ -58,12 +59,18 @@ public class AmapPoiSearchProvider {
         LocationResolutionContext context = request.getContext();
         String region = region(context);
         try {
-            StringBuilder uri = new StringBuilder(endpoint)
+            boolean around = !hasText(region) && context != null
+                    && context.getDeviceLatitude() != null && context.getDeviceLongitude() != null;
+            StringBuilder uri = new StringBuilder(around ? aroundEndpoint : endpoint)
                     .append("?key=").append(encode(apiKey))
                     .append("&keywords=").append(encode(keywords))
                     .append("&page_size=20&show_fields=business");
             if (hasText(region)) {
                 uri.append("&region=").append(encode(region)).append("&city_limit=true");
+            }
+            if (around) {
+                uri.append("&location=").append(encode(context.getDeviceLongitude() + "," + context.getDeviceLatitude()))
+                        .append("&radius=50000&sortrule=distance");
             }
             HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(uri.toString()))
                     .timeout(Duration.ofMillis(timeoutMs)).GET().build();
@@ -71,8 +78,8 @@ public class AmapPoiSearchProvider {
             if (response.statusCode() / 100 != 2) return List.of();
             List<ResolvedLocationCandidate> candidates = parseResponse(response.body(), keywords);
             rankByDeviceDistance(candidates, context);
-            log.info("[AI][location] event=AMAP_POI_SUCCESS keywords={} region={} candidates={}",
-                    compact(keywords), region, candidates.size());
+            log.info("[AI][location] event=AMAP_POI_SUCCESS keywords={} region={} mode={} candidates={}",
+                    compact(keywords), region, around ? "AROUND" : "TEXT", candidates.size());
             return candidates;
         } catch (Exception e) {
             log.warn("[AI][location] event=AMAP_POI_FAILURE keywords={} reason={}",

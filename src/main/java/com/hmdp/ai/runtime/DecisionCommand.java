@@ -7,6 +7,8 @@ public enum DecisionCommand {
     EXECUTE,
     REQUIRE_LOCATION,
     PROVIDE_LOCATION,
+    /** UI alias used when a short POI needs current-location disambiguation. */
+    USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION,
     DECLINE_LOCATION,
     AUTO_RELAXATION,
     EXPAND_RADIUS,

@@ -28,6 +28,7 @@ import com.hmdp.ai.dto.LocationResolutionRequest;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.geo.AdministrativeResolution;
+import com.hmdp.ai.geo.AdministrativeRegion;
 import com.hmdp.ai.geo.AdministrativeRegionResolver;
 import com.hmdp.ai.runtime.ConversationEventStatus;
 import com.hmdp.ai.runtime.ConversationEventType;
@@ -1237,15 +1238,63 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         }
         String normalizedLocationQuery = normalizeLocationQuery(locationQuery);
         LocationResolutionContext resolutionContext = locationResolutionContext(state);
+        enrichAdministrativeContext(normalizedLocationQuery, resolutionContext, state);
+        String poiQuery = normalizedLocationQuery;
+        com.hmdp.ai.dto.DecisionConstraints activeCriteria = conversationStateService.activeCriteria(
+                conversationStateService.workingMemory(state));
+        if (hasText(resolutionContext.getActiveCity()) && activeCriteria != null
+                && hasText(activeCriteria.getTargetArea())
+                && resolutionContext.getActiveCity().replace("市", "")
+                .equals(normalizedLocationQuery.replace("市", ""))) {
+            poiQuery = activeCriteria.getTargetArea();
+        }
+        if (hasText(resolutionContext.getActiveCity())) {
+            String city = resolutionContext.getActiveCity();
+            String cityAlias = city.endsWith("市") ? city.substring(0, city.length() - 1) : city;
+            if (poiQuery.startsWith(city)) poiQuery = poiQuery.substring(city.length()).trim();
+            else if (!cityAlias.isEmpty() && poiQuery.startsWith(cityAlias)) poiQuery = poiQuery.substring(cityAlias.length()).trim();
+            if (poiQuery.isEmpty() && activeCriteria != null && hasText(activeCriteria.getTargetArea())) {
+                poiQuery = activeCriteria.getTargetArea();
+            }
+        }
         List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(
-                new LocationResolutionRequest(normalizedLocationQuery, resolutionContext));
+                new LocationResolutionRequest(poiQuery, resolutionContext));
         if (candidates.isEmpty()) {
             log.info("[AI][chat] event=LOCATION_RESOLUTION_EMPTY chatId={} sessionId={} query={}",
-                    chatId, activeSessionId, compact(normalizedLocationQuery));
+                    chatId, activeSessionId, compact(poiQuery));
             return null;
         }
-        conversationStateService.rememberLocationCandidates(state, candidates);
         DecisionResponse decision = activeDecision;
+        // A nationwide short-name recall is useful for detecting ambiguity, but
+        // must never be rendered as if all candidates shared one search scope.
+        if (!hasGeographicContext(resolutionContext) && candidates.size() > 1) {
+            conversationStateService.rememberLocationCandidates(state, List.of());
+            String question = hasMultipleCandidateCities(candidates)
+                    ? "“" + poiQuery + "”在不同城市都有。你可以告诉我城市，或者允许我使用当前位置帮你判断。"
+                    : "我暂时无法从全国结果确定“" + poiQuery + "”具体指哪个地点。你可以告诉我城市，或者允许我使用当前位置帮你判断。";
+            decision.setQuestion(question);
+            decision.setAnswer(null);
+            decision.getOptions().clear();
+            decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption(
+                    "USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION", "使用当前位置判断地点"));
+            // Keep the canonical lifecycle option available to the decision
+            // session; the alias above is normalized to PROVIDE_LOCATION.
+            decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("PROVIDE_LOCATION", "提交当前位置坐标后继续"));
+            decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("END_DECISION", "结束本次推荐"));
+            ChatMessageResponse response = new ChatMessageResponse();
+            response.setChatId(chatId);
+            response.setRoute("LOCATION_RESOLUTION");
+            response.setUsedModel(false);
+            response.setDecision(decision);
+            response.setDecisionSessionId(activeSessionId);
+            response.setDecisionStatus(decision.getStatus());
+            response.setAnswer(decision.getQuestion());
+            log.info("[AI][chat] event=LOCATION_RESOLUTION_AMBIGUOUS_NATIONWIDE chatId={} sessionId={} query={} cities={}",
+                    chatId, activeSessionId, compact(poiQuery), candidateCities(candidates).size());
+            recordTurn(chatId, message, response);
+            return response;
+        }
+        conversationStateService.rememberLocationCandidates(state, candidates);
         decision.setQuestion(buildLocationConfirmationQuestion(candidates));
         decision.setAnswer(null);
         decision.getOptions().clear();
@@ -1265,7 +1314,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         response.setDecisionStatus(decision.getStatus());
         response.setAnswer(decision.getQuestion());
         log.info("[AI][chat] event=LOCATION_RESOLUTION_CANDIDATES chatId={} sessionId={} query={} candidates={}",
-                chatId, activeSessionId, compact(normalizedLocationQuery), candidates.size());
+                chatId, activeSessionId, compact(poiQuery), candidates.size());
         recordTurn(chatId, message, response);
         return response;
     }
@@ -1378,6 +1427,51 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return value != null && !value.trim().isEmpty();
     }
 
+    /** A city supplied while resolving a paused short POI becomes search context,
+     * never a named POI itself. */
+    private void enrichAdministrativeContext(String query, LocationResolutionContext context, AiChatSession state) {
+        if (!hasText(query) || context == null || hasText(context.getActiveCity()) || administrativeRegionResolver == null) return;
+        AdministrativeResolution resolution = administrativeRegionResolver.resolve(query, null);
+        if (resolution.status() != AdministrativeResolution.Status.RESOLVED) {
+            // Short POI text may prefix an explicit city (for example, city +
+            // campus nickname). Probe only bounded leading spans through the
+            // administrative resolver; no POI alias table is introduced here.
+            for (int end = Math.min(query.length(), 8); end >= 2; end--) {
+                AdministrativeResolution prefix = administrativeRegionResolver.resolve(query.substring(0, end), null);
+                if (prefix.status() == AdministrativeResolution.Status.RESOLVED && prefix.candidates().size() == 1) {
+                    resolution = prefix;
+                    break;
+                }
+            }
+        }
+        if (resolution.status() == AdministrativeResolution.Status.RESOLVED && resolution.candidates().size() == 1) {
+            AdministrativeRegion candidate = resolution.candidates().get(0);
+            if (candidate.getLevel() == com.hmdp.ai.geo.AdministrativeLevel.CITY) {
+                context.setActiveProvince(candidate.getProvince());
+                context.setActiveCity(candidate.getName());
+                context.setActiveCityAdcode(candidate.getAdcode());
+            }
+        }
+    }
+
+    private boolean hasGeographicContext(LocationResolutionContext context) {
+        return context != null && (hasText(context.getActiveCity()) || hasText(context.getActiveProvince())
+                || context.getDeviceLatitude() != null && context.getDeviceLongitude() != null);
+    }
+
+    private boolean hasMultipleCandidateCities(List<ResolvedLocationCandidate> candidates) {
+        return candidateCities(candidates).size() > 1;
+    }
+
+    private java.util.Set<String> candidateCities(List<ResolvedLocationCandidate> candidates) {
+        java.util.Set<String> cities = new java.util.LinkedHashSet<>();
+        if (candidates == null) return cities;
+        for (ResolvedLocationCandidate candidate : candidates) {
+            if (candidate != null && hasText(candidate.getCity())) cities.add(candidate.getCity().trim());
+        }
+        return cities;
+    }
+
     private LocationResolutionContext locationResolutionContext(AiChatSession state) {
         LocationResolutionContext context = new LocationResolutionContext();
         com.hmdp.ai.dto.ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
@@ -1425,6 +1519,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                                                     AiChatSession state, Long activeSessionId,
                                                     ChatMessageResponse response) {
         String optionId = request.getSelectedOptionId();
+        if ("USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION".equals(optionId)) {
+            optionId = "PROVIDE_LOCATION";
+        }
         DecisionResponse suspendedDecision = activeSessionId == null ? null : decisionService.getDecision(activeSessionId);
         String confirmedLocationName = null;
         boolean confirmedNamedLocation = optionId != null

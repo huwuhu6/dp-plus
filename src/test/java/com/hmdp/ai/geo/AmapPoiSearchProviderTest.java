@@ -71,4 +71,30 @@ class AmapPoiSearchProviderTest {
         assertEquals(true, request.uri().toString().contains("region=%E7%A6%8F%E5%B7%9E%E5%B8%82"));
         assertEquals(true, request.uri().toString().contains("keywords=%E7%90%86%E5%B7%A5%E5%A4%A7%E5%AD%A6"));
     }
+
+    @Test
+    void usesAroundSearchWhenOnlyDeviceLocationIsAvailable() throws Exception {
+        HttpClient client = mock(HttpClient.class);
+        HttpResponse response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn("{\"status\":\"1\",\"pois\":["
+                + "{\"id\":\"poi-1\",\"name\":\"福建农林大学旗山校区\","
+                + "\"location\":\"119.20,26.05\",\"cityname\":\"福州市\"}]}");
+        doReturn(response).when(client).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        AmapPoiSearchProvider provider = new AmapPoiSearchProvider(client, new ObjectMapper());
+        ReflectionTestUtils.setField(provider, "enabled", true);
+        ReflectionTestUtils.setField(provider, "apiKey", "test-key");
+
+        LocationResolutionContext context = new LocationResolutionContext();
+        context.setDeviceLatitude(26.05D);
+        context.setDeviceLongitude(119.20D);
+        List<ResolvedLocationCandidate> result = provider.resolve(new LocationResolutionRequest("农大", context));
+
+        assertEquals(1, result.size());
+        HttpRequest request = org.mockito.Mockito.mockingDetails(client).getInvocations().stream()
+                .findFirst().orElseThrow().getArgument(0);
+        assertEquals(true, request.uri().toString().contains("/v5/place/around"));
+        assertEquals(true, request.uri().toString().contains("location=119.2%2C26.05"));
+        assertEquals(true, request.uri().toString().contains("radius=50000"));
+    }
 }
