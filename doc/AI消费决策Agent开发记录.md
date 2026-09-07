@@ -6,6 +6,10 @@
 
 `USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION` 继续保持 UI 语义，后端只读取 deviceLocation，不被已命名的 searchLocation 抢占；缺少本轮坐标且 Working Memory 没有有效设备位置时返回可恢复的 CLARIFYING，而不是抛出异常或清理原始 POI。定向 Resolver、POI、Location Resolution 与 Orchestration 测试通过；完整评测按本轮指令未执行：`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
 
+前端收口：`agent-console.html` 的定位按钮逻辑同时识别 `PROVIDE_LOCATION` 和 `USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION`，点击后复用 `navigator.geolocation`，并保留原始 `selectedOptionId` 携带 `location` 提交，避免后端只能返回无 GPS 的安全降级提示。
+
+短 POI 查询词与定位选项进一步收敛：地理解析请求始终以 canonical `targetArea` 作为 POI keyword，原始用户句只参与显式行政前缀识别，因此“帮我看看师大附近”不会把礼貌用语发给高德。无地理上下文的 nationwide recall 只展示 `USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION` 与 `END_DECISION`；用户提交 GPS 后先执行 AROUND POI 消歧，确认 canonical POI 后才恢复餐饮搜索。定向测试与 HTTP smoke 通过，完整回归仍按指令延期。
+
 ### DECISION_CONTEXT_QUERY 与可解释状态（2026-09-07）
 
 本轮在不改变 Task、Working Memory、RecommendationBatch 主模型和 Pipeline 节点的前提下，增加单一顶层路由 `DECISION_CONTEXT_QUERY`，内部仅支持 `WHY_RECOMMENDED`、`CONSTRAINT_PROVENANCE`、`CURRENT_CRITERIA` 三类只读查询。选择单路由是为了把“为什么这样推荐”“条件来源是什么”“当前生效条件”统一视为决策上下文查询，同时与商户事实追问 `BUSINESS_FOLLOW_UP`、条件变更 `START_DECISION` 保持边界；现有 `CriteriaIntent.NONE` 使其自然绕过 Criteria Reduction，不新增解释或审计节点。

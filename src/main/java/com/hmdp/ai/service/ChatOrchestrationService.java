@@ -1282,15 +1282,13 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         String normalizedLocationQuery = normalizeLocationQuery(locationQuery);
         LocationResolutionContext resolutionContext = locationResolutionContext(state);
         enrichAdministrativeContext(normalizedLocationQuery, resolutionContext, state);
-        String poiQuery = normalizedLocationQuery;
         com.hmdp.ai.dto.DecisionConstraints activeCriteria = conversationStateService.activeCriteria(
                 conversationStateService.workingMemory(state));
-        if (hasText(resolutionContext.getActiveCity()) && activeCriteria != null
-                && hasText(activeCriteria.getTargetArea())
-                && resolutionContext.getActiveCity().replace("市", "")
-                .equals(normalizedLocationQuery.replace("市", ""))) {
-            poiQuery = activeCriteria.getTargetArea();
-        }
+        // The structured targetArea is the POI authority. The raw turn is only
+        // used above to discover an explicit administrative prefix such as
+        // “北京农大”; polite wording must never become a POI keyword.
+        String poiQuery = activeCriteria != null && hasText(activeCriteria.getTargetArea())
+                ? activeCriteria.getTargetArea() : normalizedLocationQuery;
         if (hasText(resolutionContext.getActiveCity())) {
             String city = resolutionContext.getActiveCity();
             String cityAlias = city.endsWith("市") ? city.substring(0, city.length() - 1) : city;
@@ -1320,9 +1318,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             decision.getOptions().clear();
             decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption(
                     "USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION", "使用当前位置判断地点"));
-            // Keep the canonical lifecycle option available to the decision
-            // session; the alias above is normalized to PROVIDE_LOCATION.
-            decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("PROVIDE_LOCATION", "提交当前位置坐标后继续"));
             decision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("END_DECISION", "结束本次推荐"));
             ChatMessageResponse response = new ChatMessageResponse();
             response.setChatId(chatId);
@@ -1613,6 +1608,17 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             response.setAnswer("我还没有拿到你的当前位置。你可以允许浏览器定位后重试，或者直接告诉我城市。");
             recordTurn(chatId, message, response);
             return response;
+        }
+        if (useDeviceLocationForPoiDisambiguation && suspendedDecision != null) {
+            com.hmdp.ai.dto.DecisionConstraints criteria = conversationStateService.activeCriteria(
+                    conversationStateService.workingMemory(state));
+            if (criteria != null && hasText(criteria.getTargetArea())) {
+                // Device location disambiguates the short POI first. Do not
+                // resume restaurant search until a canonical POI is selected.
+                ChatMessageResponse poiResponse = buildLocationResolutionResponse(
+                        chatId, message, state, activeSessionId, suspendedDecision, criteria.getTargetArea());
+                if (poiResponse != null) return poiResponse;
+            }
         }
         DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
         followUp.setSelectedOptionId(optionId);

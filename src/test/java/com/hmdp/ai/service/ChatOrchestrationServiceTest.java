@@ -1328,6 +1328,46 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    void shortPoiUsesStructuredTargetAreaAndOnlyOffersDeviceDisambiguation() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        AmapMcpLocationResolutionService locationService = mock(AmapMcpLocationResolutionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "locationResolutionService", locationService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+
+        AiChatSession state = new AiChatSession();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        DecisionConstraints criteria = new DecisionConstraints();
+        criteria.setTargetArea("师大");
+        when(locationService.isAvailable()).thenReturn(true);
+        when(stateService.workingMemory(state)).thenReturn(memory);
+        when(stateService.activeCriteria(memory)).thenReturn(criteria);
+        when(stateService.usableLocation(state)).thenReturn(null);
+        when(stateService.searchLocation(memory)).thenReturn(null);
+        ResolvedLocationCandidate first = new ResolvedLocationCandidate();
+        first.setLabel("福建师范大学旗山校区");
+        ResolvedLocationCandidate second = new ResolvedLocationCandidate();
+        second.setLabel("华南师范大学");
+        when(locationService.resolve(any(com.hmdp.ai.dto.LocationResolutionRequest.class)))
+                .thenReturn(List.of(first, second));
+
+        DecisionResponse decision = new DecisionResponse();
+        decision.setStatus("CLARIFYING");
+        ChatMessageResponse response = ReflectionTestUtils.invokeMethod(service,
+                "buildLocationResolutionResponse", "chat", "帮我看看师大附近有啥好吃的", state,
+                1L, decision, "帮我看看师大附近有啥好吃的");
+
+        ArgumentCaptor<com.hmdp.ai.dto.LocationResolutionRequest> request =
+                ArgumentCaptor.forClass(com.hmdp.ai.dto.LocationResolutionRequest.class);
+        verify(locationService).resolve(request.capture());
+        assertEquals("师大", request.getValue().getRawText());
+        assertEquals(List.of("USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION", "END_DECISION"),
+                response.getDecision().getOptions().stream().map(option -> option.getId()).toList());
+    }
+
+    @Test
     void completedStateDemandSwitchStartsNewDecision() {
         // #34 端到端：已有推荐（COMPLETED）后「看看有没有别的吃的」→ START_DECISION 重决策，
         // 而非落入 LLM 被误判 BUSINESS_FOLLOW_UP 追问候选池。
