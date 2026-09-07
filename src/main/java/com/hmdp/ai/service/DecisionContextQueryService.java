@@ -31,7 +31,35 @@ public class DecisionContextQueryService {
             case WHY_RECOMMENDED -> explainRecommendation(state, query);
             case CONSTRAINT_PROVENANCE -> explainConstraint(state, query);
             case CURRENT_CRITERIA -> explainCurrentCriteria(state);
+            case EXECUTED_SEARCH_SCOPE -> explainExecutedSearchScope(state);
         };
+    }
+
+    private QueryResult explainExecutedSearchScope(AiChatSession state) {
+        DecisionContextFacts facts = new DecisionContextFacts();
+        ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
+        Long sessionId = memory == null ? null : (memory.getActiveDecisionSessionId() != null
+                ? memory.getActiveDecisionSessionId() : memory.getLastDecisionSessionId());
+        if (sessionId == null) return new QueryResult("目前没有可核对的已执行搜索范围。", facts);
+        DecisionResponse decision = decisionService.getDecision(sessionId);
+        DecisionConstraints constraints = decision == null ? null : decision.getConstraints();
+        facts.setDecisionSessionId(sessionId);
+        facts.setExecutedCriteria(constraints);
+        if (constraints == null) return new QueryResult("刚才的决策记录没有保存可核对的搜索范围。", facts);
+        List<String> scope = new ArrayList<String>();
+        if (hasText(constraints.getTargetProvince())) scope.add(constraints.getTargetProvince());
+        if (hasText(constraints.getTargetCity())) scope.add(constraints.getTargetCity());
+        if (hasText(constraints.getTargetDistrict())) scope.add(constraints.getTargetDistrict());
+        if (hasText(constraints.getTargetArea())) scope.add(constraints.getTargetArea());
+        if (scope.isEmpty()) return new QueryResult("刚才的决策记录没有保存明确的行政或区域搜索范围。", facts);
+        String rendered = String.join("", scope);
+        boolean incompleteDistrict = hasText(constraints.getTargetDistrict())
+                && !hasText(constraints.getTargetCity()) && !hasText(constraints.getTargetProvince());
+        if (incompleteDistrict) {
+            return new QueryResult("刚才实际是按“" + rendered
+                    + "”这个区县条件查询的，但当时没有补全它所属的城市和省份，所以无法可靠确认具体搜索范围。", facts);
+        }
+        return new QueryResult("刚才实际是按“" + rendered + "”这个范围查询的。", facts);
     }
 
     private QueryResult explainRecommendation(AiChatSession state, DecisionContextQuery query) {

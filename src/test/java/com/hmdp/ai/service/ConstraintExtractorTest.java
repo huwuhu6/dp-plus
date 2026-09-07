@@ -5,6 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.ConstraintSource;
+import com.hmdp.ai.geo.AdministrativeRegion;
+import com.hmdp.ai.geo.AdministrativeRegionResolver;
+import com.hmdp.ai.geo.AdministrativeLevel;
+import com.hmdp.ai.geo.ClasspathAdministrativeRegionRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.util.LinkedHashMap;
@@ -14,7 +18,9 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ConstraintExtractorTest {
@@ -36,6 +42,47 @@ class ConstraintExtractorTest {
         assertEquals(ConstraintSource.DERIVED, derived.getSourceHints().get("preference:安静"));
         assertEquals(ConstraintSource.USER_EXPLICIT, explicitDating.getSourceHints().get("preference:约会"));
         assertEquals(ConstraintSource.DERIVED, derivedDating.getSourceHints().get("preference:约会"));
+    }
+
+    @Test
+    void doesNotPromoteUnverifiedModelDistrictIntoCanonicalAdminDelta() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetProvince\\\":\\\"\\\",\\\"targetCity\\\":\\\"\\\",\\\"targetDistrict\\\":\\\"连江县\\\",\\\"targetArea\\\":\\\"\\\",\\\"locationIntent\\\":\\\"EXPLICIT_TARGET\\\",\\\"keyword\\\":\\\"\\\",\\\"cuisine\\\":\\\"\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[],\\\"missingInformation\\\":[] }\"}}]}}]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("连江那边有没有好吃的");
+
+        assertEquals("", constraints.getTargetDistrict());
+        assertTrue(constraints.getClearedFields().contains("targetDistrict"));
+        assertTrue(constraints.getMissingInformation().contains("administrativeRegion"));
+    }
+
+    @Test
+    void validatesSuffixlessModelHintThroughAdministrativeAuthority() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        AdministrativeRegion region = new AdministrativeRegion();
+        region.setAdcode("350122"); region.setName("连江县"); region.setLevel(AdministrativeLevel.DISTRICT);
+        region.setDistrict("连江县"); region.setCity("福州市"); region.setProvince("福建省");
+        com.hmdp.ai.geo.AdministrativeRegionProvider provider = mock(com.hmdp.ai.geo.AdministrativeRegionProvider.class);
+        when(provider.resolve(anyString(), any())).thenReturn(List.of(region));
+        ReflectionTestUtils.setField(extractor, "administrativeRegionResolver", new AdministrativeRegionResolver(
+                new ClasspathAdministrativeRegionRepository(), provider));
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetProvince\\\":\\\"\\\",\\\"targetCity\\\":\\\"\\\",\\\"targetDistrict\\\":\\\"连江县\\\",\\\"targetArea\\\":\\\"\\\",\\\"locationIntent\\\":\\\"EXPLICIT_TARGET\\\",\\\"keyword\\\":\\\"\\\",\\\"cuisine\\\":\\\"\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[],\\\"missingInformation\\\":[] }\"}}]}}]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("连江那边有没有好吃的");
+
+        assertEquals("福州市", constraints.getTargetCity());
+        assertEquals("连江县", constraints.getTargetDistrict());
+        verify(provider).resolve("连江县", null);
     }
 
     @Test
@@ -68,7 +115,7 @@ class ConstraintExtractorTest {
         DecisionConstraints constraints = extractor.extract("人均100的港式茶餐厅");
 
         assertEquals("港式", constraints.getCuisine());
-        assertEquals("重庆", constraints.getTargetCity());
+        assertEquals("", constraints.getTargetCity());
         assertEquals("解放碑", constraints.getTargetArea());
         assertEquals("火锅", constraints.getKeyword());
         assertEquals(Integer.valueOf(100), constraints.getBudgetPerPerson());
@@ -131,6 +178,7 @@ class ConstraintExtractorTest {
         assertEquals("CURRENT_DEVICE", constraints.getLocationIntent());
         assertEquals("", constraints.getTargetCity());
         assertEquals("", constraints.getTargetArea());
+        assertTrue(!constraints.getMissingInformation().contains("administrativeRegion"));
     }
 
     @Test
@@ -240,7 +288,8 @@ class ConstraintExtractorTest {
 
         DecisionConstraints constraints = extractor.extract("闽侯县有什么吃的");
 
-        assertEquals("闽侯县", constraints.getTargetDistrict());
+        assertEquals("", constraints.getTargetDistrict());
+        assertTrue(constraints.getMissingInformation().contains("administrativeRegion"));
         assertEquals("", constraints.getTargetArea());
     }
 

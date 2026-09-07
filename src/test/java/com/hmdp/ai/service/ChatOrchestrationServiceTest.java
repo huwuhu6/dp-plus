@@ -17,6 +17,7 @@ import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRequest;
+import com.hmdp.ai.dto.DecisionContextQuery;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
 import org.junit.jupiter.api.Test;
@@ -137,6 +138,22 @@ class ChatOrchestrationServiceTest {
                 nearbyAssessment.getCandidateAction());
         assertEquals("nearby", ReflectionTestUtils.invokeMethod(service, "constraintKey", nearbyRequest.getMessage()));
         assertEquals("radiusKm", ReflectionTestUtils.invokeMethod(service, "constraintKey", "我之前说距离多少？"));
+
+        ChatMessageRequest scopeRequest = new ChatMessageRequest();
+        scopeRequest.setMessage("你刚刚是查哪里的连江");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext scopeContext =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(scopeRequest, null);
+        scopeContext.setOriginalMessage(scopeRequest.getMessage());
+        scopeContext.setEffectiveMessage(scopeRequest.getMessage());
+        com.hmdp.ai.runtime.RoutingDecisionAssessment scopeAssessment = ReflectionTestUtils.invokeMethod(
+                service, "assessRouting", scopeContext, false);
+        assertEquals(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY,
+                scopeAssessment.getCandidateAction());
+        assertEquals(DecisionContextQuery.QueryType.EXECUTED_SEARCH_SCOPE,
+                ((DecisionContextQuery) ReflectionTestUtils.invokeMethod(service, "buildDecisionContextQuery", scopeContext)).getType());
+
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isSuspendedDecisionMetaQuestion", "刚刚查的是哪里"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isSuspendedDecisionMetaQuestion", "刚刚为什么没找到"));
 
         ChatMessageRequest referenceRequest = new ChatMessageRequest();
         referenceRequest.setMessage("为什么推荐刚才那个？");

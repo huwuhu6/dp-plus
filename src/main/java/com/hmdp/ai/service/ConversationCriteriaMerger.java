@@ -91,6 +91,12 @@ public class ConversationCriteriaMerger {
         if (containsAny(text, "不限菜系", "什么都行", "随便吃", "不限制菜系")) clear(result, "cuisine", () -> merged.setCuisine(""));
         applyRelativeConstraints(result, merged, delta, text, candidatePool, focusedShopId, shownShopIds, criteriaAnchorShopId);
 
+        if (delta != null && delta.getMissingInformation() != null) {
+            for (String item : delta.getMissingInformation()) {
+                if (item != null && !merged.getMissingInformation().contains(item)) merged.getMissingInformation().add(item);
+            }
+        }
+
         merged.setPreferences(unique(merged.getPreferences()));
         updatePreferenceSources(result, previous, delta, merged);
         return result;

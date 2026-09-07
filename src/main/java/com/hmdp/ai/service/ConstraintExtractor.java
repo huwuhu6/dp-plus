@@ -50,6 +50,16 @@ public class ConstraintExtractor {
             log.warn("[AI][model] action=CONSTRAINT_EXTRACTION event=FALLBACK reason={}", e.getClass().getSimpleName());
             constraints = normalize(extractByRule(query));
         }
+        // Model administrative fields are candidate hints only.  They may be used to
+        // ask the deterministic authority for validation, but never become canonical
+        // state merely because the model filled a slot.
+        if (regionResolution != null && regionResolution.status() != AdministrativeResolution.Status.RESOLVED
+                && hasAdministrativeHint(constraints)) {
+            String groundedHint = administrativeHint(query, constraints);
+            AdministrativeResolution hinted = groundedHint.isEmpty()
+                    ? AdministrativeResolution.notFound() : resolver().resolve(groundedHint, locationContext);
+            if (hinted.status() != AdministrativeResolution.Status.NOT_FOUND) regionResolution = hinted;
+        }
         mergeAdministrativeResolution(constraints, regionResolution);
         constraints = enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
                 applySemanticLocationFallback(constraints, query), query), query), query);
@@ -83,16 +93,13 @@ public class ConstraintExtractor {
     private void mergeAdministrativeResolution(DecisionConstraints constraints, AdministrativeResolution resolution) {
         if (resolution == null) return;
         if (resolution.status() == AdministrativeResolution.Status.AMBIGUOUS) {
-            String area = constraints.getTargetArea();
-            boolean modelConfusedAdmin = resolution.candidates().stream().anyMatch(candidate ->
-                    candidate.getName().equals(area) || stripAdminSuffix(candidate.getName()).equals(area));
-            if (modelConfusedAdmin) constraints.setTargetArea("");
-            if (!constraints.getMissingInformation().contains("administrativeRegion")) {
-                constraints.getMissingInformation().add("administrativeRegion");
-            }
+            clearUnverifiedAdministrativeHint(constraints);
             return;
         }
-        if (resolution.status() != AdministrativeResolution.Status.RESOLVED || resolution.candidates().isEmpty()) return;
+        if (resolution.status() != AdministrativeResolution.Status.RESOLVED || resolution.candidates().isEmpty()) {
+            if (hasAdministrativeHint(constraints)) clearUnverifiedAdministrativeHint(constraints);
+            return;
+        }
         AdministrativeRegion region = resolution.candidates().get(0);
         if (region.getLevel() == com.hmdp.ai.geo.AdministrativeLevel.PROVINCE) {
             constraints.setTargetProvince(region.getProvince());
@@ -110,6 +117,41 @@ public class ConstraintExtractor {
         constraints.setTargetArea("");
         constraints.setLocationIntent("EXPLICIT_TARGET");
     }
+
+    private void clearUnverifiedAdministrativeHint(DecisionConstraints constraints) {
+        if (hasText(constraints.getTargetProvince())) constraints.getClearedFields().add("targetProvince");
+        if (hasText(constraints.getTargetCity())) constraints.getClearedFields().add("targetCity");
+        if (hasText(constraints.getTargetDistrict())) constraints.getClearedFields().add("targetDistrict");
+        constraints.setTargetProvince("");
+        constraints.setTargetCity("");
+        constraints.setTargetDistrict("");
+        constraints.setLocationIntent("UNSPECIFIED");
+        if (!constraints.getMissingInformation().contains("administrativeRegion")) {
+            constraints.getMissingInformation().add("administrativeRegion");
+        }
+    }
+
+    private boolean hasAdministrativeHint(DecisionConstraints constraints) {
+        return constraints != null && (hasText(constraints.getTargetProvince())
+                || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetDistrict()));
+    }
+
+    private String administrativeHint(String query, DecisionConstraints constraints) {
+        String normalized = query == null ? "" : query.replaceAll("[\\s\\p{Punct}，。！？：；、“”‘’（）【】]+", "");
+        List<String> grounded = new ArrayList<>();
+        if (containsAdminName(normalized, constraints.getTargetProvince())) grounded.add(nonBlank(constraints.getTargetProvince()));
+        if (containsAdminName(normalized, constraints.getTargetCity())) grounded.add(nonBlank(constraints.getTargetCity()));
+        if (containsAdminName(normalized, constraints.getTargetDistrict())) grounded.add(nonBlank(constraints.getTargetDistrict()));
+        return String.join("", grounded);
+    }
+
+    private boolean containsAdminName(String query, String value) {
+        String normalized = value == null ? "" : value.replaceAll("[\\s\\p{Punct}，。！？：；、“”‘’（）【】]+", "");
+        if (normalized.isEmpty()) return false;
+        return query.contains(normalized) || query.contains(stripAdminSuffix(normalized));
+    }
+
+    private String nonBlank(String value) { return hasText(value) ? value : ""; }
 
     private String stripAdminSuffix(String value) {
         if (value == null) return "";
@@ -180,6 +222,7 @@ public class ConstraintExtractor {
         constraints.setTargetCity("");
         constraints.setTargetDistrict("");
         constraints.setTargetArea("");
+        constraints.getMissingInformation().remove("administrativeRegion");
         return constraints;
     }
 

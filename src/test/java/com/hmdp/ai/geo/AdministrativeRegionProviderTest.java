@@ -52,4 +52,17 @@ class AdministrativeRegionProviderTest {
         assertDoesNotThrow(() -> failed.resolve("新安区", null));
         assertEquals(AdministrativeResolution.Status.NOT_FOUND, failed.resolve("新安区", null).status());
     }
+
+    @Test
+    void doesNotResolveRemoteDistrictWithoutParentHierarchy() {
+        AdministrativeRegion region = new AdministrativeRegion();
+        region.setAdcode("999998");
+        region.setLevel(AdministrativeLevel.DISTRICT);
+        region.setName("新城区");
+        region.setDistrict("新城区");
+        AdministrativeRegionResolver resolver = new AdministrativeRegionResolver(
+                new ClasspathAdministrativeRegionRepository(), (keyword, parent) -> List.of(region));
+
+        assertEquals(AdministrativeResolution.Status.NOT_FOUND, resolver.resolve("新城区", null).status());
+    }
 }

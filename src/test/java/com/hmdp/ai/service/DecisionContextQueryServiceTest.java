@@ -114,6 +114,30 @@ class DecisionContextQueryServiceTest {
         assertEquals(100L, result.facts().getDecisionSessionId());
     }
 
+    @Test
+    void explainsIncompleteExecutedAdministrativeScopeFromPersistedDecision() {
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        memory.setActiveDecisionSessionId(3100L);
+        when(stateService.workingMemory(org.mockito.ArgumentMatchers.any())).thenReturn(memory);
+        DecisionResponse decision = new DecisionResponse();
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetDistrict("连江县");
+        decision.setConstraints(constraints);
+        when(decisionService.getDecision(3100L)).thenReturn(decision);
+
+        DecisionContextQuery query = new DecisionContextQuery();
+        query.setType(DecisionContextQuery.QueryType.EXECUTED_SEARCH_SCOPE);
+        DecisionContextQueryService.QueryResult result = service(stateService, decisionService)
+                .execute(new AiChatSession(), query);
+
+        assertTrue(result.answer().contains("连江县"));
+        assertTrue(result.answer().contains("没有补全"));
+        assertEquals(3100L, result.facts().getDecisionSessionId());
+        assertEquals("连江县", result.facts().getExecutedCriteria().getTargetDistrict());
+    }
+
     private DecisionContextQueryService service(ConversationStateService stateService,
                                                 ConsumptionDecisionService decisionService) {
         DecisionContextQueryService service = new DecisionContextQueryService();

@@ -463,9 +463,17 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     /** Narrow deterministic guard for read-only context questions; open phrasing remains model-routed. */
     private boolean isDecisionContextQuery(String message) {
         String text = message == null ? "" : message.replaceAll("\\s+", "");
-        return isWhyRecommendedQuery(text) || isCurrentCriteriaQuery(text)
+        return isWhyRecommendedQuery(text) || isCurrentCriteriaQuery(text) || isExecutedSearchScopeQuery(text)
                 || ((text.contains("说过") || text.contains("前面") || text.contains("之前"))
                 && constraintKey(text) != null);
+    }
+
+    private boolean isExecutedSearchScopeQuery(String message) {
+        String text = message == null ? "" : message.replaceAll("\\s+", "");
+        return (text.contains("查哪里") || text.contains("查的是哪里") || text.contains("按哪里查")
+                || text.contains("按哪个地区") || text.contains("搜的是哪里") || text.contains("搜的是哪个城市")
+                || text.contains("搜索范围"))
+                && (text.contains("刚刚") || text.contains("刚才") || text.contains("之前") || text.contains("前面"));
     }
 
     private boolean isReferenceMessage(String message) {
@@ -544,6 +552,15 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     }
 
     private ChatMessageResponse executeDecision(ChatProcessingContext context) {
+        if (context.getPolicyDecision() != null
+                && PolicyDecisionEngine.CLARIFY_ADMINISTRATIVE_REGION.equals(context.getPolicyDecision().getAction())) {
+            DecisionResponse clarification = new DecisionResponse();
+            clarification.setStatus("CLARIFYING");
+            clarification.setConstraints(context.getMergedConstraints());
+            clarification.setQuestion("你说的地点范围还缺少所属城市或省份，请告诉我完整地点，例如“城市+区县”。");
+            return buildDecisionResponse(context.getChatId(), context.getOriginalMessage(), context.getChatSession(),
+                    context.isUsedModel(), context.getContextRewrite(), clarification, context.getPolicyDecision());
+        }
         DecisionResponse decision;
         if (context.getWorkingMemory() == null) {
             decision = decisionService.decide(context.getDecisionRequest());
@@ -585,7 +602,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private DecisionContextQuery buildDecisionContextQuery(ChatProcessingContext context) {
         String message = context.getOriginalMessage() == null ? "" : context.getOriginalMessage().replaceAll("\\s+", "");
         DecisionContextQuery query = new DecisionContextQuery();
-        if (isWhyRecommendedQuery(message)) query.setType(DecisionContextQuery.QueryType.WHY_RECOMMENDED);
+        if (isExecutedSearchScopeQuery(message)) query.setType(DecisionContextQuery.QueryType.EXECUTED_SEARCH_SCOPE);
+        else if (isWhyRecommendedQuery(message)) query.setType(DecisionContextQuery.QueryType.WHY_RECOMMENDED);
         else if (isCurrentCriteriaQuery(message)) query.setType(DecisionContextQuery.QueryType.CURRENT_CRITERIA);
         else query.setType(DecisionContextQuery.QueryType.CONSTRAINT_PROVENANCE);
         if (query.getType() == DecisionContextQuery.QueryType.WHY_RECOMMENDED
@@ -1046,7 +1064,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private boolean isSuspendedDecisionMetaQuestion(String message) {
         String normalized = message == null ? "" : message.replaceAll("\\s+", "");
-        String[] metaTerms = {"放宽", "什么条件", "什么意思", "怎么回事", "为什么", "刚刚", "不是说", "不是已经", "什么东西"};
+        String[] metaTerms = {"放宽", "什么条件", "什么意思", "怎么回事", "为什么", "不是说", "不是已经", "什么东西"};
         for (String term : metaTerms) if (normalized.contains(term)) return true;
         return false;
     }

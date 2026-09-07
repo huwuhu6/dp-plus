@@ -70,13 +70,25 @@ public class AdministrativeRegionResolver {
                 .filter(region -> region.getLevel() != AdministrativeLevel.DISTRICT)
                 .filter(region -> matchesHierarchyQuery(query, region))
                 .toList();
+        if (!hierarchy.isEmpty()) {
+            int mostSpecific = hierarchy.stream().mapToInt(region -> region.getLevel().ordinal()).max().orElse(0);
+            hierarchy = hierarchy.stream().filter(region -> region.getLevel().ordinal() == mostSpecific).toList();
+        }
         return classify(hierarchy, context);
     }
 
     private AdministrativeResolution classify(List<AdministrativeRegion> candidates, DecisionConstraints context) {
         List<AdministrativeRegion> filtered = candidates.stream().filter(region -> matchesParentContext(region, context))
                 .sorted(Comparator.comparing(AdministrativeRegion::getName, Comparator.nullsLast(String::compareTo))).toList();
-        if (filtered.size() == 1) return resolved(filtered);
+        if (filtered.size() == 1) {
+            AdministrativeRegion only = filtered.get(0);
+            // A remote district name without a trusted city hierarchy is only a level
+            // hint, not an executable identity.  Never turn a single provider row into
+            // a nationwide-unique district by accident.
+            if (only.getLevel() == AdministrativeLevel.DISTRICT
+                    && !hasText(only.getCity())) return AdministrativeResolution.notFound();
+            return resolved(filtered);
+        }
         if (filtered.size() > 1) return new AdministrativeResolution(AdministrativeResolution.Status.AMBIGUOUS, filtered);
         return AdministrativeResolution.notFound();
     }

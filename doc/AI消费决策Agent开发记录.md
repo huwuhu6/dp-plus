@@ -2257,3 +2257,13 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 在省/市行政范围修复后继续补齐区县层级，但保持 `targetArea` 的商圈/地标语义不变。`DecisionConstraints` 新增 `targetDistrict`；Extractor 的结构化契约明确区分行政区县与非行政 POI，Merger 实现 City→District、District→District 和 District→Current Device 的替换/清除语义。`ConversationStateService`、`ChatOrchestrationService`、`ConsumptionDecisionService` 与 `PolicyDecisionEngine` 将 district 作为独立硬过滤锚点投影到 `DecisionRequest.district`，命名区县不启用 GPS 坐标；targetArea-only 不投影为 district，继续留给后续区域解析。
 
 新增 6 条 robustness 矩阵：闽侯县、鼓楼区、设备→区县、区县切换，以及福州大学/重庆解放碑两个 targetArea 负向边界。Run **136**（6 条）全部通过：Complete/Route/Tool/Final/Working Memory 均 **6/6**；快照确认区县写入 `activeCriteria.targetDistrict`，设备→区县保持同一 Task 且清除 nearby/radius，区县切换推荐实体不复用，地标/商圈保持 `targetDistrict=""`。本轮未运行完整 v1、holdout 或 robustness 全量评测，未修改成都零结果、复合意图、Tool Planner 或 Task/Batch 架构。
+
+### 行政区模型提示越权与执行范围查询修复（2026-09-07）
+
+真实对话 `web-1788755927453-l8p7ol3o` 显示：原流程在本地行政 registry 未命中时，仍会把 ConstraintExtractor 的模型 `targetDistrict` 直接带入 canonical state，形成没有可信 city/province parent 的可执行区县；同一对话中的“你刚刚是查哪里的连江”又被暂停态 meta guard 的裸“刚刚”拦截，无法读取实际执行范围。真实事实还确认本地 `tbl_shop` 没有对应区县商户，但数据缺失不能替代行政身份解析。
+
+本轮将模型行政字段限定为 untrusted candidate hint：只有候选名称实际出现在用户文本中，且经 `AdministrativeRegionResolver`/可用 provider 验证后，才允许写入 canonical admin delta；孤立 DISTRICT remote candidate 没有可信 city hierarchy 时降为 `NOT_FOUND`，未验证 hint 被清空并标记 `administrativeRegion` 缺失，`targetArea` 不被机械清除。Policy 新增阻塞性的行政范围 clarification，避免命名地点解析失败后静默回退 GPS；CURRENT_DEVICE 仍保持设备定位契约。Resolver 同时在层级候选中选择最具体的已验证层级。
+
+新增只读 `DECISION_CONTEXT_QUERY.EXECUTED_SEARCH_SCOPE`，从 active/last DecisionSession 的持久化 `DecisionResponse.constraints` 读取历史执行范围；区县缺失 city/province 时明确回答范围不完整，不从当前 Working Memory 或聊天文本重猜。暂停态 guard 删除裸“刚刚”条件，但“为什么没结果”等解释问题仍保持 `EXPLAIN_SUSPENDED_DECISION`。
+
+相关行政解析、模型 hint authority、当前设备、Policy、上下文查询和暂停态路由单测通过。定向 E2E 验证：未补全行政层级进入 clarification 且不请求 GPS；完整“城市+区县”正常执行；WAITING_RELAXATION 的“为什么没找到”仍解释暂停原因。历史执行范围的持久化查询由单测覆盖，直接复用既有聊天因权限隔离未进行写入式 E2E。新增具体地名 hardcode=0，case/shop 特判=0，新增语言 contains/Regex 仅为通用范围查询词，不含具体地名。按要求未运行 robustness/v1/holdout 全量，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。

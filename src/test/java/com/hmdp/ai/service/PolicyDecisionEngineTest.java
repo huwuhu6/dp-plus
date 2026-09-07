@@ -16,6 +16,16 @@ class PolicyDecisionEngineTest {
     void asksForLocationWhenRecommendationHasNoGeographicAnchor() {
         assertEquals(PolicyDecisionEngine.CLARIFY_LOCATION,
                 engine.decideRecommendation(new DecisionRequest(), new DecisionConstraints(),
+                new ConversationWorkingMemory()).getAction());
+    }
+
+    @Test
+    void asksForAdministrativeParentInsteadOfUsingDeviceLocation() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.getMissingInformation().add("administrativeRegion");
+
+        assertEquals(PolicyDecisionEngine.CLARIFY_ADMINISTRATIVE_REGION,
+                engine.decideRecommendation(new DecisionRequest(), constraints,
                         new ConversationWorkingMemory()).getAction());
     }
 

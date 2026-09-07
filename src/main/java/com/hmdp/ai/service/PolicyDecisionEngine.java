@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 public class PolicyDecisionEngine {
     public static final String RESOLVE_EXPLICIT_LOCATION = "RESOLVE_EXPLICIT_LOCATION";
     public static final String CLARIFY_LOCATION = "CLARIFY_LOCATION";
+    public static final String CLARIFY_ADMINISTRATIVE_REGION = "CLARIFY_ADMINISTRATIVE_REGION";
     public static final String EXECUTE_RECOMMENDATION = "EXECUTE_RECOMMENDATION";
     public static final String SHOP_FACT = "SHOP_FACT";
     public static final String SHOP_VOUCHER = "SHOP_VOUCHER";
@@ -23,6 +24,13 @@ public class PolicyDecisionEngine {
 
     public PolicyDecision decideRecommendation(DecisionRequest request, DecisionConstraints constraints,
                                                ConversationWorkingMemory memory) {
+        if (constraints != null && constraints.getMissingInformation() != null
+                && constraints.getMissingInformation().contains("administrativeRegion")) {
+            PolicyDecision decision = PolicyDecision.of(CLARIFY_ADMINISTRATIVE_REGION,
+                    "命名行政范围缺少可验证的上级城市或省份");
+            decision.setBlocking(true);
+            return decision;
+        }
         if (constraints != null && (hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetDistrict()) || hasText(constraints.getTargetArea()))) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION,
                     "已获得用户显式指定的目标地点，禁止使用设备定位覆盖");

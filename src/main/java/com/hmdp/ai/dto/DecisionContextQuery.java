@@ -8,7 +8,8 @@ public class DecisionContextQuery {
     public enum QueryType {
         WHY_RECOMMENDED,
         CONSTRAINT_PROVENANCE,
-        CURRENT_CRITERIA
+        CURRENT_CRITERIA,
+        EXECUTED_SEARCH_SCOPE
     }
 
     private QueryType type;

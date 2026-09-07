@@ -20,5 +20,7 @@ public class DecisionContextFacts {
     private String constraintValue;
     private ConstraintSource source;
     private DecisionConstraints currentCriteria;
+    /** Constraints persisted with the historical DecisionResponse being inspected. */
+    private DecisionConstraints executedCriteria;
     private Map<String, ConstraintSource> constraintSources;
 }
