@@ -523,4 +523,24 @@ class ConversationCriteriaMergerTest {
         assertEquals("", result.getConstraints().getTargetDistrict());
     }
 
+    @Test
+    void appliesNegativeCuisineAndRemovesItWhenCuisineIsExplicitlySelected() {
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setCuisine("日料");
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setClearedFields(java.util.Collections.singletonList("cuisine"));
+        delta.setExcludedCuisines(java.util.Collections.singletonList("东北菜"));
+
+        CriteriaMergeResult excluded = merger.merge(previous, delta, "我附近，除了东北菜都可以");
+
+        assertEquals("", excluded.getConstraints().getCuisine());
+        assertEquals(java.util.Collections.singletonList("东北菜"), excluded.getConstraints().getExcludedCuisines());
+
+        DecisionConstraints allow = new DecisionConstraints();
+        allow.setCuisine("东北菜");
+        CriteriaMergeResult selected = merger.merge(excluded.getConstraints(), allow, "那就东北菜吧");
+        assertEquals(java.util.Collections.emptyList(), selected.getConstraints().getExcludedCuisines());
+        assertEquals("东北菜", selected.getConstraints().getCuisine());
+    }
+
 }

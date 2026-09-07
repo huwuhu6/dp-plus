@@ -841,6 +841,11 @@ public class ConsumptionDecisionService {
     private boolean matchesHardConstraints(Shop shop, AiShopProfile profile, DecisionRequest request, DecisionConstraints constraints) {
         if (constraints.getBudgetPerPerson() > 0 && (shop.getAvgPrice() == null || shop.getAvgPrice() > constraints.getBudgetPerPerson())) return false;
         if (!constraints.getCuisine().isEmpty() && (profile == null || !matchesCuisine(profile.getCuisine(), constraints.getCuisine()))) return false;
+        if (constraints.getExcludedCuisines() != null && !constraints.getExcludedCuisines().isEmpty()) {
+            for (String excluded : constraints.getExcludedCuisines()) {
+                if (hasText(excluded) && (profile == null || matchesCuisine(profile.getCuisine(), excluded))) return false;
+            }
+        }
         if (hasText(constraints.getKeyword())) {
             String keyword = constraints.getKeyword().trim();
             boolean nameMatched = shop.getName() != null && shop.getName().contains(keyword);

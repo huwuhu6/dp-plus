@@ -26,6 +26,8 @@ public class DecisionConstraints {
     private String keyword = "";
     /** Cuisine slot — canonicalized to the closed set in CuisineCanonicalizer (Meituan/Dianping-level categories + "其他" fallback). Participates in hard filter. */
     private String cuisine = "";
+    /** Durable negative cuisine constraint (for example, "除了东北菜都可以"). */
+    private List<String> excludedCuisines = new ArrayList<>();
     private Integer budgetPerPerson = -1;
     /** Relative budget intent (critique): -1 = cheaper (太贵/好贵/平价/便宜点/实惠), 0 = none, 1 = more expensive. One-shot; reset to 0 after merge applies it. */
     private Integer budgetDirection = 0;

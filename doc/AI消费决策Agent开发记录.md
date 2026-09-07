@@ -2273,3 +2273,13 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 新增只读 `DECISION_CONTEXT_QUERY.EXECUTED_SEARCH_SCOPE`，从 active/last DecisionSession 的持久化 `DecisionResponse.constraints` 读取历史执行范围；区县缺失 city/province 时明确回答范围不完整，不从当前 Working Memory 或聊天文本重猜。暂停态 guard 删除裸“刚刚”条件，但“为什么没结果”等解释问题仍保持 `EXPLAIN_SUSPENDED_DECISION`。
 
 相关行政解析、模型 hint authority、当前设备、Policy、上下文查询和暂停态路由单测通过。定向 E2E 验证：未补全行政层级进入 clarification 且不请求 GPS；完整“城市+区县”正常执行；WAITING_RELAXATION 的“为什么没找到”仍解释暂停原因。历史执行范围的持久化查询由单测覆盖，直接复用既有聊天因权限隔离未进行写入式 E2E。新增具体地名 hardcode=0，case/shop 特判=0，新增语言 contains/Regex 仅为通用范围查询词，不含具体地名。按要求未运行 robustness/v1/holdout 全量，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
+### 单轮语义理解与状态更新边界（2026-09-07）
+
+真实多轮对话 `web-1788763248035-dikm0c2y` 暴露的共同问题不是单个 Case 缺少规则，而是同一轮输入被 Context Rewrite、Routing、ConstraintExtractor、Reference 和 Context Query 多次独立解释：商户描述中的“日料”被误当成 cuisine mutation，POI mention 被当成可执行地理锚点，Rewrite 又吞掉了“当前位置 + 排除菜系”的复合语义。Canonical Working Memory 已经收敛，但 Canonical Turn Semantics 尚未收敛。
+
+本轮增加 request-scoped `TurnCommandSet` / `TurnCommand` 和 `TurnUnderstandingService`，先表达 mutation、reference、shop fact、context query 与 CURRENT_DEVICE 语义，再复用现有 Extractor、Merger、Policy 和 Reducer 作为事实与持久化 authority。`Original Message` 始终作为语义输入；Context Rewrite 仅辅助引用/省略解析，下游检索不再把 rewritten message 当作整轮业务真相。这样“这个日料咋样”保持 reference-only，不会写入 cuisine；明确“换成日料”仍可 APPLY_DELTA。
+
+`DecisionConstraints` 增加 durable `excludedCuisines`，Merger 对“除了某菜系”执行清除正向 cuisine + 添加排除值，并在重新选择该菜系时解除排除。消费硬过滤同步拒绝被排除的菜系。POI targetArea 只有在已解析坐标或可信行政范围存在时才能执行；未解析的“师大”进入 LOCATION_RESOLUTION，禁止静默复用 Browser GPS。`DECISION_CONTEXT_QUERY` 由 TurnCommandSet 识别 CURRENT_CRITERIA、provenance 和 WHY_RECOMMENDED 的结构化入口。
+
+本轮没有扩展 `ConstraintSource` 为 sourceTurn/sourceEvent；来源类型继续由现有 canonical provenance 维护，时间/原话回查仍是后续增量范围。没有新增具体地名、shopId、CaseCode 或具体用户句子特判；新增判断仅为通用语义词类和负向菜系结构。相关 Unit Tests 与 3 条定向 HTTP E2E 通过：过滤条件查询返回 `CURRENT_CRITERIA`，未解析 POI 进入澄清，明确 cuisine mutation 仍写入 canonical state。按任务要求未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。

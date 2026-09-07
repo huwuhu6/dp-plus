@@ -142,6 +142,7 @@ public class DecisionContextQueryService {
         if (hasText(criteria.getCuisine())) values.add("菜系=" + criteria.getCuisine());
         if (criteria.getBudgetPerPerson() != null && criteria.getBudgetPerPerson() > 0) values.add("人均预算=" + criteria.getBudgetPerPerson() + "元");
         if (criteria.getRadiusKm() != null && criteria.getRadiusKm() > 0) values.add("距离=" + criteria.getRadiusKm() + "公里");
+        if (criteria.getExcludedCuisines() != null && !criteria.getExcludedCuisines().isEmpty()) values.add("排除菜系=" + String.join("、", criteria.getExcludedCuisines()));
         if (criteria.getPreferences() != null) for (String preference : criteria.getPreferences()) values.add("偏好=" + preference);
         return new QueryResult(values.isEmpty() ? "当前还没有生效的餐饮决策条件。" : "当前生效条件是：" + String.join("；", values) + "。", facts);
     }

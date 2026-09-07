@@ -11,6 +11,7 @@ import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionContextQuery;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.dto.TurnPlan;
+import com.hmdp.ai.dto.TurnCommandSet;
 import com.hmdp.ai.entity.AiChatSession;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +43,7 @@ public class ChatProcessingContext {
     private ContextRewriteResult contextRewrite;
     private ChatProcessingAction action = ChatProcessingAction.NONE;
     private TurnPlan turnPlan = new TurnPlan();
+    private TurnCommandSet turnCommandSet = new TurnCommandSet();
     private DecisionConstraints criteriaDelta;
     private String route;
     private String routingReason;

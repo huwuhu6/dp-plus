@@ -31,7 +31,18 @@ public class PolicyDecisionEngine {
             decision.setBlocking(true);
             return decision;
         }
-        if (constraints != null && (hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetDistrict()) || hasText(constraints.getTargetArea()))) {
+        boolean hasAdministrativeTarget = constraints != null && (hasText(constraints.getTargetProvince())
+                || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetDistrict()));
+        boolean hasUnresolvedPoi = constraints != null && hasText(constraints.getTargetArea())
+                && !hasCoordinates(request)
+                && !hasCoordinates(memory == null ? null : memory.getSearchLocation());
+        if (hasUnresolvedPoi) {
+            PolicyDecision decision = PolicyDecision.of(RESOLVE_EXPLICIT_LOCATION,
+                    "目标地点是未解析的 POI，不能用设备定位静默替代");
+            decision.setBlocking(true);
+            return decision;
+        }
+        if (constraints != null && (hasAdministrativeTarget || hasText(constraints.getTargetArea()))) {
             return PolicyDecision.of(EXECUTE_RECOMMENDATION,
                     "已获得用户显式指定的目标地点，禁止使用设备定位覆盖");
         }

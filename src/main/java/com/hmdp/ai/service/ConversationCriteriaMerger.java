@@ -73,6 +73,21 @@ public class ConversationCriteriaMerger {
         }
         if (hasText(delta.getKeyword())) replace(result, "keyword", merged.getKeyword(), delta.getKeyword(), () -> merged.setKeyword(delta.getKeyword()));
         if (hasText(delta.getCuisine())) replace(result, "cuisine", merged.getCuisine(), delta.getCuisine(), () -> merged.setCuisine(delta.getCuisine()));
+        if (delta.getExcludedCuisines() != null) {
+            for (String excluded : delta.getExcludedCuisines()) {
+                if (!hasText(excluded)) continue;
+                if (merged.getExcludedCuisines() == null) merged.setExcludedCuisines(new ArrayList<String>());
+                if (!merged.getExcludedCuisines().contains(excluded)) {
+                    merged.getExcludedCuisines().add(excluded);
+                    result.getAppended().add("excludedCuisines:" + excluded);
+                }
+                if (hasText(merged.getCuisine())) clear(result, "cuisine", () -> merged.setCuisine(""));
+            }
+        }
+        if (hasText(delta.getCuisine()) && merged.getExcludedCuisines() != null
+                && merged.getExcludedCuisines().remove(delta.getCuisine())) {
+            result.getCleared().add("excludedCuisines:" + delta.getCuisine());
+        }
         if (delta.getBudgetPerPerson() != null && delta.getBudgetPerPerson() > 0) {
             replace(result, "budgetPerPerson", String.valueOf(merged.getBudgetPerPerson()), String.valueOf(delta.getBudgetPerPerson()),
                     () -> merged.setBudgetPerPerson(delta.getBudgetPerPerson()));
@@ -89,6 +104,10 @@ public class ConversationCriteriaMerger {
         if (containsAny(text, "不要辣", "不吃辣", "清淡", "少油", "不油腻")) addPreference(result, merged, "清淡");
 
         if (containsAny(text, "不限菜系", "什么都行", "随便吃", "不限制菜系")) clear(result, "cuisine", () -> merged.setCuisine(""));
+        if (containsAny(text, "不限菜系", "什么都行", "随便吃", "不限制菜系")
+                && merged.getExcludedCuisines() != null && !merged.getExcludedCuisines().isEmpty()) {
+            clear(result, "excludedCuisines", () -> merged.setExcludedCuisines(new ArrayList<String>()));
+        }
         applyRelativeConstraints(result, merged, delta, text, candidatePool, focusedShopId, shownShopIds, criteriaAnchorShopId);
 
         if (delta != null && delta.getMissingInformation() != null) {
@@ -276,6 +295,7 @@ public class ConversationCriteriaMerger {
         if (source == null) return target;
         target.setTargetProvince(source.getTargetProvince()); target.setTargetCity(source.getTargetCity()); target.setTargetDistrict(source.getTargetDistrict()); target.setTargetArea(source.getTargetArea()); target.setKeyword(source.getKeyword()); target.setLocationIntent(source.getLocationIntent());
         target.setCuisine(source.getCuisine()); target.setBudgetPerPerson(source.getBudgetPerPerson());
+        target.setExcludedCuisines(new ArrayList<String>(source.getExcludedCuisines() == null ? new ArrayList<String>() : source.getExcludedCuisines()));
         target.setRadiusKm(source.getRadiusKm()); target.setNearby(source.getNearby());
         target.setArrivalTime(source.getArrivalTime());
         target.setPreferences(new ArrayList<String>(source.getPreferences() == null ? new ArrayList<String>() : source.getPreferences()));

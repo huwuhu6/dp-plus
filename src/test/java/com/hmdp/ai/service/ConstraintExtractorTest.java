@@ -230,6 +230,22 @@ class ConstraintExtractorTest {
     }
 
     @Test
+    void extractsNegativeCuisineWithoutUsingItAsPositiveCuisine() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        when(client.chatCompletion(any(), any(), any(), any())).thenThrow(new IllegalStateException("model unavailable"));
+
+        DecisionConstraints constraints = extractor.extract("我附近呢？除了东北菜应该都OK");
+
+        assertEquals("", constraints.getCuisine());
+        assertEquals(List.of("东北菜"), constraints.getExcludedCuisines());
+        assertTrue(constraints.getClearedFields().contains("cuisine"));
+    }
+
+    @Test
     void restoresDeterministicNearbyAndRadiusWhenModelOmitsLocationFields() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);

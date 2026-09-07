@@ -20,6 +20,7 @@ import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.CriteriaIntent;
 import com.hmdp.ai.dto.TurnPlan;
+import com.hmdp.ai.dto.TurnCommandSet;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.entity.AiChatSession;
@@ -70,6 +71,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     @Resource private ObjectMapper objectMapper;
     @Resource private AdministrativeRegionResolver administrativeRegionResolver;
     @Resource private DecisionContextQueryService decisionContextQueryService;
+    @Resource private TurnUnderstandingService turnUnderstandingService;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
         return chat(request, null);
@@ -184,16 +186,21 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         ChatMessageRequest request = context.getRequest();
         DecisionResponse activeDecision = context.getActiveDecision();
         String message = context.getOriginalMessage();
+        TurnCommandSet turnCommands = turnUnderstandingService == null
+                ? new TurnCommandSet()
+                : turnUnderstandingService.understand(message, context.getEffectiveMessage(),
+                context.getChatHistory(), context.getContextRewrite());
+        context.setTurnCommandSet(turnCommands);
         if (request.getSelectedOptionId() != null && isPausedDecision(activeDecision)) {
             selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT, "selected_option_for_paused_decision");
             return;
         }
-        if (isDecisionContextQuery(message)) {
+        if (isDecisionContextQuery(message) || turnCommands.isContextQueryRequested()) {
             selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY,
                     "decision_context_query");
             assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY);
             assessment.setSource("RULE");
-            boolean reference = isReferenceMessage(message);
+            boolean reference = isReferenceMessage(message) || hasResolvedReference(context);
             assessment.setContextRequired(reference);
             assessment.setContextResolved(!reference || (context.getContextRewrite() != null
                     && context.getContextRewrite().getResolvedReferences() != null
@@ -347,7 +354,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         com.hmdp.ai.dto.DecisionConstraints activeCriteriaBeforeExtraction = conversationStateService.activeCriteria(context.getWorkingMemory());
         com.hmdp.ai.dto.DecisionConstraints extracted = context.getCriteriaDelta();
         if (extracted == null) {
-            extracted = constraintExtractor.extract(context.getEffectiveMessage(), activeCriteriaBeforeExtraction);
+            // The original turn is the semantic source. Rewritten text may only enrich
+            // references and must never erase a second command such as an exclusion.
+            extracted = constraintExtractor.extract(context.getOriginalMessage(), activeCriteriaBeforeExtraction);
             // Keeps older test doubles and optional integrations compatible while the production
             // extractor uses the context-aware overload for administrative disambiguation.
             if (extracted == null) extracted = constraintExtractor.extract(context.getEffectiveMessage());
@@ -378,7 +387,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 mutationAnchorShopId(context));
         context.setCriteriaMergeResult(mergeResult);
         context.setMergedConstraints(mergeResult.getConstraints());
-        request.setQuery(cleanRetrievalQuery(context.getEffectiveMessage(), mergeResult.getConstraints()));
+        request.setQuery(cleanRetrievalQuery(context.getOriginalMessage(), mergeResult.getConstraints()));
         conversationStateService.reduceCriteria(context.getChatSession(), context.getWorkingMemory(), mergeResult);
         conversationStateService.applyNamedSearchLocation(context.getChatSession(), mergeResult.getConstraints());
         applyLocationSlot(request, context.getChatSession(), mergeResult.getConstraints());
@@ -401,7 +410,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             // Reuse the structured extractor; do not add another routing phrase dictionary.
             try {
                 ensureCriteriaDelta(context);
-                if (hasMutation(context.getCriteriaDelta())) {
+                if (turnUnderstandingService == null
+                        ? hasMutation(context.getCriteriaDelta())
+                        : turnUnderstandingService.shouldApplyReferenceMutation(context.getTurnCommandSet())) {
                     criteriaIntent = CriteriaIntent.APPLY_DELTA;
                 }
             } catch (RuntimeException ignored) {
@@ -456,6 +467,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 || constraints.getBudgetDirection() != null && constraints.getBudgetDirection() != 0
                 || constraints.getRadiusDirection() != null && constraints.getRadiusDirection() != 0
                 || constraints.getPreferences() != null && !constraints.getPreferences().isEmpty()
+                || constraints.getExcludedCuisines() != null && !constraints.getExcludedCuisines().isEmpty()
                 || constraints.getClearedFields() != null && !constraints.getClearedFields().isEmpty()
                 || constraints.getRemovedPreferences() != null && !constraints.getRemovedPreferences().isEmpty();
     }
@@ -553,6 +565,21 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private ChatMessageResponse executeDecision(ChatProcessingContext context) {
         if (context.getPolicyDecision() != null
+                && PolicyDecisionEngine.RESOLVE_EXPLICIT_LOCATION.equals(context.getPolicyDecision().getAction())) {
+            DecisionResponse pending = decisionService.decide(context.getDecisionRequest(), context.getMergedConstraints(),
+                    context.getChatId(), conversationEventService == null || conversationEventService.currentTrace() == null
+                            ? null : conversationEventService.currentTrace().getTraceId());
+            conversationStateService.activateDecision(context.getChatSession(), pending.getSessionId());
+            conversationStateService.snapshotDecision(context.getChatSession(), pending);
+            String place = context.getMergedConstraints() == null ? context.getOriginalMessage()
+                    : context.getMergedConstraints().getTargetArea();
+            ChatMessageResponse locationResponse = buildLocationResolutionResponse(context.getChatId(),
+                    context.getOriginalMessage(), context.getChatSession(), pending.getSessionId(), pending, place);
+            if (locationResponse != null) return locationResponse;
+            return buildDecisionResponse(context.getChatId(), context.getOriginalMessage(), context.getChatSession(),
+                    context.isUsedModel(), context.getContextRewrite(), pending, context.getPolicyDecision());
+        }
+        if (context.getPolicyDecision() != null
                 && PolicyDecisionEngine.CLARIFY_ADMINISTRATIVE_REGION.equals(context.getPolicyDecision().getAction())) {
             DecisionResponse clarification = new DecisionResponse();
             clarification.setStatus("CLARIFYING");
@@ -600,6 +627,16 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     }
 
     private DecisionContextQuery buildDecisionContextQuery(ChatProcessingContext context) {
+        if (context.getTurnCommandSet() != null && context.getTurnCommandSet().getContextQuery() != null) {
+            DecisionContextQuery structured = context.getTurnCommandSet().getContextQuery();
+            if (structured.getType() == DecisionContextQuery.QueryType.WHY_RECOMMENDED
+                    && context.getContextRewrite() != null
+                    && context.getContextRewrite().getResolvedReferences() != null
+                    && !context.getContextRewrite().getResolvedReferences().isEmpty()) {
+                structured.setResolvedReference(context.getContextRewrite().getResolvedReferences().get(0));
+            }
+            return structured;
+        }
         String message = context.getOriginalMessage() == null ? "" : context.getOriginalMessage().replaceAll("\\s+", "");
         DecisionContextQuery query = new DecisionContextQuery();
         if (isExecutedSearchScopeQuery(message)) query.setType(DecisionContextQuery.QueryType.EXECUTED_SEARCH_SCOPE);
@@ -1319,6 +1356,11 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return value != null && !value.trim().isEmpty();
     }
 
+    private boolean hasCoordinates(ConversationLocationSlot location) {
+        return location != null && "AVAILABLE".equalsIgnoreCase(location.getStatus())
+                && location.getLatitude() != null && location.getLongitude() != null;
+    }
+
     private void recordTurn(String chatId, String userMessage, ChatMessageResponse response) {
         try {
             if (conversationEventService != null) {
@@ -1409,6 +1451,11 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private void applyLocationSlot(DecisionRequest request, AiChatSession state,
                                    com.hmdp.ai.dto.DecisionConstraints criteria) {
         com.hmdp.ai.dto.ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
+        boolean hasAdministrativeTarget = criteria != null && (hasText(criteria.getTargetProvince())
+                || hasText(criteria.getTargetCity()) || hasText(criteria.getTargetDistrict()));
+        ConversationLocationSlot taskSearchLocation = conversationStateService.searchLocation(memory);
+        boolean unresolvedPoi = criteria != null && hasText(criteria.getTargetArea()) && !hasAdministrativeTarget
+                && !hasCoordinates(taskSearchLocation);
         boolean mayUseDeviceLocation = criteria == null
                 || (!"EXPLICIT_TARGET".equalsIgnoreCase(criteria.getLocationIntent())
                 && !hasText(criteria.getTargetProvince()) && !hasText(criteria.getTargetCity()) && !hasText(criteria.getTargetDistrict()) && !hasText(criteria.getTargetArea()));
@@ -1422,6 +1469,15 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             request.setUseLocationScope(false);
             log.info("[AI][chat] event=NAMED_SEARCH_SCOPE_APPLIED chatId={} province={} city={} district={} source=ACTIVE_CRITERIA",
                     state.getChatId(), request.getProvince(), request.getCity(), request.getDistrict());
+            return;
+        }
+        if (unresolvedPoi) {
+            request.setLocationStatus("MISSING");
+            request.setLatitude(null);
+            request.setLongitude(null);
+            request.setUseLocationScope(false);
+            log.info("[AI][chat] event=LOCATION_POI_UNRESOLVED chatId={} targetArea={} source=TURN_SEMANTICS",
+                    state.getChatId(), criteria.getTargetArea());
             return;
         }
         ConversationLocationSlot location = conversationStateService.usableSearchLocation(state);

@@ -76,6 +76,20 @@ class PolicyDecisionEngineTest {
     }
 
     @Test
+    void doesNotUseDeviceGpsForUnresolvedPoiTarget() {
+        DecisionRequest request = new DecisionRequest();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        ConversationLocationSlot device = memory.getLocation();
+        device.setStatus("AVAILABLE"); device.setLatitude(26.08D); device.setLongitude(119.19D);
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setTargetArea("师大");
+        constraints.setLocationIntent("EXPLICIT_TARGET");
+
+        assertEquals(PolicyDecisionEngine.RESOLVE_EXPLICIT_LOCATION,
+                engine.decideRecommendation(request, constraints, memory).getAction());
+    }
+
+    @Test
     void classifiesFollowUpActionsWithoutModel() {
         assertEquals(PolicyDecisionEngine.SHOP_VOUCHER, engine.decideFollowUp("这家有优惠券吗").getAction());
         assertEquals(PolicyDecisionEngine.SHOP_EVIDENCE, engine.decideFollowUp("评价怎么样").getAction());

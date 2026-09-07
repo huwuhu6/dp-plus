@@ -29,6 +29,7 @@ public class ConstraintExtractor {
     private static final Logger log = LoggerFactory.getLogger(ConstraintExtractor.class);
     private static final Pattern BUDGET_PATTERN = Pattern.compile("(?:人均|预算)\\s*(\\d+)");
     private static final Pattern RADIUS_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*(公里|km|米|m)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern EXCLUDED_CUISINE_PATTERN = Pattern.compile("除了\\s*([\\p{IsHan}]{2,12}(?:菜|料理))(?:之外|以外|都|也|应该|可以|，|,|$)");
 
     @Resource
     private OpenAiCompatibleClient aiClient;
@@ -61,6 +62,7 @@ public class ConstraintExtractor {
         mergeAdministrativeResolution(constraints, regionResolution);
         constraints = enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
                 applySemanticLocationFallback(constraints, query), query), query), query);
+        applyExcludedCuisine(constraints, query);
         assignPreferenceSourceHints(constraints, query);
         return constraints;
     }
@@ -185,6 +187,18 @@ public class ConstraintExtractor {
         return constraints;
     }
 
+    /** Structured negative cuisine semantics; the canonicalizer remains the single cuisine authority. */
+    private void applyExcludedCuisine(DecisionConstraints constraints, String query) {
+        Matcher matcher = EXCLUDED_CUISINE_PATTERN.matcher(query == null ? "" : query.replaceAll("\\s+", ""));
+        if (!matcher.find()) return;
+        String cuisine = CuisineCanonicalizer.canonicalize(matcher.group(1));
+        if (cuisine.isBlank()) return;
+        if (constraints.getExcludedCuisines() == null) constraints.setExcludedCuisines(new ArrayList<>());
+        if (!constraints.getExcludedCuisines().contains(cuisine)) constraints.getExcludedCuisines().add(cuisine);
+        constraints.setCuisine("");
+        if (!constraints.getClearedFields().contains("cuisine")) constraints.getClearedFields().add("cuisine");
+    }
+
     private boolean isLocationScopeRefusal(String query) {
         return containsAny(query, "不用管我的具体位置", "不提供位置", "按全城搜索", "全城搜索", "不看位置", "不需要定位");
     }
@@ -278,6 +292,7 @@ public class ConstraintExtractor {
         if (constraints.getTargetArea() == null) constraints.setTargetArea("");
         constraints.setLocationIntent(normalizeLocationIntent(constraints.getLocationIntent(), constraints));
         if (constraints.getKeyword() == null) constraints.setKeyword("");
+        if (constraints.getExcludedCuisines() == null) constraints.setExcludedCuisines(new ArrayList<>());
         migrateCuisineKeywordToCuisine(constraints);
         constraints.setCuisine(canonicalizeCuisine(constraints.getCuisine()));
         if (constraints.getBudgetPerPerson() == null) constraints.setBudgetPerPerson(-1);
@@ -350,6 +365,7 @@ public class ConstraintExtractor {
         properties.put("locationIntent", property("string", "EXPLICIT_TARGET for a named destination, CURRENT_DEVICE for the user's current location, or UNSPECIFIED."));
         properties.put("keyword", property("string", "Specific entity the user explicitly names: a restaurant name or signature dish (e.g. 闽师东北菜, 锅包肉). Do NOT put a cuisine here — cuisines go to the cuisine field. Do not include targetCity or targetArea."));
         properties.put("cuisine", property("string", "Cuisine category (e.g. 川菜, 火锅, 日料, 快餐简餐, 面食, 小吃). Empty string if unknown."));
+        properties.put("excludedCuisines", arrayProperty("Cuisine categories the user explicitly excludes, for example 东北菜 in ‘除了东北菜都可以’. Empty array if none."));
         properties.put("budgetPerPerson", property("integer", "Maximum per-person budget. -1 if unknown."));
         properties.put("budgetDirection", property("integer", "Relative budget intent WITHOUT an absolute number: -1 = cheaper (太贵/好贵/平价一点/便宜点/实惠), 0 = no relative intent, 1 = more expensive. Only set on a relative price critique; leave 0 otherwise."));
         properties.put("radiusKm", property("number", "Search radius in kilometers. -1 if unknown."));
