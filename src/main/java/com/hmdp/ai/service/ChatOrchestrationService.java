@@ -319,8 +319,14 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             request.setQuery(context.getEffectiveMessage());
             return;
         }
-        com.hmdp.ai.dto.DecisionConstraints extracted = context.getCriteriaDelta() != null
-                ? context.getCriteriaDelta() : constraintExtractor.extract(context.getEffectiveMessage());
+        com.hmdp.ai.dto.DecisionConstraints activeCriteriaBeforeExtraction = conversationStateService.activeCriteria(context.getWorkingMemory());
+        com.hmdp.ai.dto.DecisionConstraints extracted = context.getCriteriaDelta();
+        if (extracted == null) {
+            extracted = constraintExtractor.extract(context.getEffectiveMessage(), activeCriteriaBeforeExtraction);
+            // Keeps older test doubles and optional integrations compatible while the production
+            // extractor uses the context-aware overload for administrative disambiguation.
+            if (extracted == null) extracted = constraintExtractor.extract(context.getEffectiveMessage());
+        }
         context.setCriteriaDelta(extracted);
         com.hmdp.ai.dto.DecisionTaskState activeBefore = conversationStateService.activeTask(context.getWorkingMemory());
         com.hmdp.ai.service.ConversationStateService.TaskTransition transition = conversationStateService.transitionTask(
@@ -397,6 +403,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private void ensureCriteriaDelta(ChatProcessingContext context) {
         if (context.getCriteriaDelta() != null || constraintExtractor == null) return;
         context.setCriteriaDelta(constraintExtractor.extract(context.getOriginalMessage()));
+        if (context.getCriteriaDelta() == null) {
+            context.setCriteriaDelta(constraintExtractor.extract(context.getOriginalMessage(), null));
+        }
     }
 
     private boolean hasMutation(com.hmdp.ai.dto.DecisionConstraints constraints) {

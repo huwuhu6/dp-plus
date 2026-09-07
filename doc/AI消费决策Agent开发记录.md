@@ -2185,6 +2185,14 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 
 本轮没有新增自然语言 `contains`/`startsWith` 词表或 Regex；仅有一处系统备注去重的结构性 `contains` 和一处 `CONFIRM_RESOLVED_LOCATION_` 选项 ID 前缀判断，均不参与用户语言理解。其余改动是路由结构化 prompt、统一半径 normalization，以及显式地点确认与设备定位恢复的边界保护。`mvn -q test` 全绿。
 
+### 行政区解析与模型空 tool call 解耦（2026-09-07）
+
+真实聊天 `web-1788740642112-dhfwjshz` 暴露：用户说“帮我看看鼓楼有什么东西吃”时，ConstraintExtractor 收到模型成功响应但 `tool_calls=[]`，随后整体回退到普通规则抽取，行政区语义丢失；用户拒绝定位后因此退化为跨城市全局检索。问题不在 `tbl_shop` 的鼓楼数据覆盖，而在行政语义没有独立 authority。
+
+新增版本化 `geo/administrative-regions.json` registry、`AdministrativeRegionResolver` 和三态 `AdministrativeResolution`。Resolver 仅负责 province/city/district 的 canonical 层级、adcode、父级和歧义；ConstraintExtractor 仍负责菜系、预算、偏好、keyword 等语义，并在模型失败或漏行政字段时合并 Resolver 结果。无父级的裸“鼓楼”保留 `AMBIGUOUS`，不静默选择福州；有 `福州市`上下文时“鼓楼呢？”解析为福州市鼓楼区；“福州大学”返回行政 `NOT_FOUND`，继续交给 POI LocationResolutionProvider。当前只在 `DecisionConstraints` 保留字符串 canonical scope，adcode 暂不持久化，Resolver candidate 保留 adcode 供未来消歧。
+
+本轮新增行政 resolver 与空 tool call 单测，相关测试集通过；3 条定向真实聊天验证了省级解析、裸 district 歧义不落盘、地标不提升为 district。按要求未运行 robustness/v1/holdout 全量评测，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
 ### Location State / Projection provenance 审计与修复（2026-09-06）
 
 对 `EXPLICIT_TARGET` 与 `CURRENT_DEVICE` 切换做定向审计后确认了一个真实的来源混淆：`DecisionRequest.city/province/district` 是执行投影，既可能来自用户命名地点，也可能来自设备 GPS 的反向地理编码；原 `applyProvidedLocation()` 却用这些字段是否非空来反推“用户是否显式指定目的地”。Run 122 的 `EXPLICIT_DESTINATION_NO_DATA_DEVICE_LOCATION_RECOVERY` 证明该问题会把“我附近”留在 `重庆/EXPLICIT_TARGET`，而不是切到福州设备范围。

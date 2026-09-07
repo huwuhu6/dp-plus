@@ -1,0 +1,20 @@
+[
+  {"adcode":"350000","level":"PROVINCE","name":"福建省","province":"福建省","city":"","district":"","parentAdcode":""},
+  {"adcode":"350100","level":"CITY","name":"福州市","province":"福建省","city":"福州市","district":"","parentAdcode":"350000"},
+  {"adcode":"350102","level":"DISTRICT","name":"鼓楼区","province":"福建省","city":"福州市","district":"鼓楼区","parentAdcode":"350100"},
+  {"adcode":"350121","level":"DISTRICT","name":"闽侯县","province":"福建省","city":"福州市","district":"闽侯县","parentAdcode":"350100"},
+  {"adcode":"350104","level":"DISTRICT","name":"仓山区","province":"福建省","city":"福州市","district":"仓山区","parentAdcode":"350100"},
+  {"adcode":"350103","level":"DISTRICT","name":"台江区","province":"福建省","city":"福州市","district":"台江区","parentAdcode":"350100"},
+  {"adcode":"350111","level":"DISTRICT","name":"晋安区","province":"福建省","city":"福州市","district":"晋安区","parentAdcode":"350100"},
+  {"adcode":"320000","level":"PROVINCE","name":"江苏省","province":"江苏省","city":"","district":"","parentAdcode":""},
+  {"adcode":"320100","level":"CITY","name":"南京市","province":"江苏省","city":"南京市","district":"","parentAdcode":"320000"},
+  {"adcode":"320106","level":"DISTRICT","name":"鼓楼区","province":"江苏省","city":"南京市","district":"鼓楼区","parentAdcode":"320100"},
+  {"adcode":"320300","level":"CITY","name":"徐州市","province":"江苏省","city":"徐州市","district":"","parentAdcode":"320000"},
+  {"adcode":"320302","level":"DISTRICT","name":"鼓楼区","province":"江苏省","city":"徐州市","district":"鼓楼区","parentAdcode":"320300"},
+  {"adcode":"330000","level":"PROVINCE","name":"浙江省","province":"浙江省","city":"","district":"","parentAdcode":""},
+  {"adcode":"330100","level":"CITY","name":"杭州市","province":"浙江省","city":"杭州市","district":"","parentAdcode":"330000"},
+  {"adcode":"330106","level":"DISTRICT","name":"西湖区","province":"浙江省","city":"杭州市","district":"西湖区","parentAdcode":"330100"},
+  {"adcode":"510000","level":"PROVINCE","name":"四川省","province":"四川省","city":"","district":"","parentAdcode":""},
+  {"adcode":"510100","level":"CITY","name":"成都市","province":"四川省","city":"成都市","district":"","parentAdcode":"510000"},
+  {"adcode":"500000","level":"CITY","name":"重庆市","province":"重庆市","city":"重庆市","district":"","parentAdcode":""}
+]

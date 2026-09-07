@@ -206,5 +206,39 @@ class ConstraintExtractorTest {
         assertEquals("", constraints.getTargetArea());
     }
 
+    @Test
+    void preservesAdministrativeRegionWhenModelReturnsEmptyToolCalls() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(
+                objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[]}}]}"));
+
+        DecisionConstraints constraints = extractor.extract("福建省有什么吃的");
+
+        assertEquals("福建省", constraints.getTargetProvince());
+        assertEquals("EXPLICIT_TARGET", constraints.getLocationIntent());
+    }
+
+    @Test
+    void resolvesDistrictShortNameUsingParentContextWhenModelFails() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(
+                objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[]}}]}"));
+        DecisionConstraints context = new DecisionConstraints();
+        context.setTargetCity("福州市");
+
+        DecisionConstraints constraints = extractor.extract("鼓楼呢？", context);
+
+        assertEquals("鼓楼区", constraints.getTargetDistrict());
+        assertEquals("福州市", constraints.getTargetCity());
+    }
+
 
 }

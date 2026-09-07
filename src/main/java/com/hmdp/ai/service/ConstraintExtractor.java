@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.dto.DecisionConstraints;
+import com.hmdp.ai.geo.AdministrativeRegion;
+import com.hmdp.ai.geo.AdministrativeRegionResolver;
+import com.hmdp.ai.geo.AdministrativeResolution;
 import com.hmdp.ai.util.CuisineCanonicalizer;
 import com.hmdp.ai.util.PreferenceCanonicalizer;
 import org.springframework.stereotype.Service;
@@ -30,16 +33,68 @@ public class ConstraintExtractor {
     private OpenAiCompatibleClient aiClient;
     @Resource
     private ObjectMapper objectMapper;
+    @Resource
+    private AdministrativeRegionResolver administrativeRegionResolver;
 
     public DecisionConstraints extract(String query) {
+        return extract(query, null);
+    }
+
+    public DecisionConstraints extract(String query, DecisionConstraints locationContext) {
+        AdministrativeResolution regionResolution = resolver().resolve(query, locationContext);
+        DecisionConstraints constraints;
         try {
-            return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
-                    applySemanticLocationFallback(normalize(extractByModel(query)), query), query), query), query);
+            constraints = normalize(extractByModel(query));
         } catch (Exception e) {
             log.warn("[AI][model] action=CONSTRAINT_EXTRACTION event=FALLBACK reason={}", e.getClass().getSimpleName());
-            return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
-                    applySemanticLocationFallback(normalize(extractByRule(query)), query), query), query), query);
+            constraints = normalize(extractByRule(query));
         }
+        mergeAdministrativeResolution(constraints, regionResolution);
+        return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
+                applySemanticLocationFallback(constraints, query), query), query), query);
+    }
+
+    private void mergeAdministrativeResolution(DecisionConstraints constraints, AdministrativeResolution resolution) {
+        if (resolution == null) return;
+        if (resolution.status() == AdministrativeResolution.Status.AMBIGUOUS) {
+            String area = constraints.getTargetArea();
+            boolean modelConfusedAdmin = resolution.candidates().stream().anyMatch(candidate ->
+                    candidate.getName().equals(area) || stripAdminSuffix(candidate.getName()).equals(area));
+            if (modelConfusedAdmin) constraints.setTargetArea("");
+            if (!constraints.getMissingInformation().contains("administrativeRegion")) {
+                constraints.getMissingInformation().add("administrativeRegion");
+            }
+            return;
+        }
+        if (resolution.status() != AdministrativeResolution.Status.RESOLVED || resolution.candidates().isEmpty()) return;
+        AdministrativeRegion region = resolution.candidates().get(0);
+        if (region.getLevel() == com.hmdp.ai.geo.AdministrativeLevel.PROVINCE) {
+            constraints.setTargetProvince(region.getProvince());
+            constraints.setTargetCity("");
+            constraints.setTargetDistrict("");
+        } else if (region.getLevel() == com.hmdp.ai.geo.AdministrativeLevel.CITY) {
+            constraints.setTargetProvince(region.getProvince());
+            constraints.setTargetCity(region.getCity());
+            constraints.setTargetDistrict("");
+        } else {
+            constraints.setTargetProvince(region.getProvince());
+            constraints.setTargetCity(region.getCity());
+            constraints.setTargetDistrict(region.getDistrict());
+        }
+        constraints.setTargetArea("");
+        constraints.setLocationIntent("EXPLICIT_TARGET");
+    }
+
+    private String stripAdminSuffix(String value) {
+        if (value == null) return "";
+        for (String suffix : new String[]{"省", "市", "区", "县"}) {
+            if (value.endsWith(suffix) && value.length() > suffix.length()) return value.substring(0, value.length() - suffix.length());
+        }
+        return value;
+    }
+
+    private AdministrativeRegionResolver resolver() {
+        return administrativeRegionResolver == null ? new AdministrativeRegionResolver(objectMapper == null ? new ObjectMapper() : objectMapper) : administrativeRegionResolver;
     }
 
     /**
