@@ -673,7 +673,7 @@ public class ConversationStateService {
     }
 
     private boolean isSearchDomainField(String field) {
-        return "targetProvince".equals(field) || "targetCity".equals(field) || "targetDistrict".equals(field) || "targetArea".equals(field) || "cuisine".equals(field) || "budgetPerPerson".equals(field) || "radiusKm".equals(field)
+        return "targetProvince".equals(field) || "targetCity".equals(field) || "targetDistrict".equals(field) || "targetArea".equals(field) || "cuisine".equals(field) || "excludedCuisines".equals(field) || "budgetPerPerson".equals(field) || "radiusKm".equals(field)
                 || "nearby".equals(field) || "arrivalTime".equals(field) || "occasion".equals(field)
                 || "quiet".equals(field) || "avoidQueue".equals(field) || "hardConstraints".equals(field)
                 || "softPreferences".equals(field);

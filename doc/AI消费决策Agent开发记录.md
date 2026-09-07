@@ -2283,3 +2283,11 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 `DecisionConstraints` 增加 durable `excludedCuisines`，Merger 对“除了某菜系”执行清除正向 cuisine + 添加排除值，并在重新选择该菜系时解除排除。消费硬过滤同步拒绝被排除的菜系。POI targetArea 只有在已解析坐标或可信行政范围存在时才能执行；未解析的“师大”进入 LOCATION_RESOLUTION，禁止静默复用 Browser GPS。`DECISION_CONTEXT_QUERY` 由 TurnCommandSet 识别 CURRENT_CRITERIA、provenance 和 WHY_RECOMMENDED 的结构化入口。
 
 本轮没有扩展 `ConstraintSource` 为 sourceTurn/sourceEvent；来源类型继续由现有 canonical provenance 维护，时间/原话回查仍是后续增量范围。没有新增具体地名、shopId、CaseCode 或具体用户句子特判；新增判断仅为通用语义词类和负向菜系结构。相关 Unit Tests 与 3 条定向 HTTP E2E 通过：过滤条件查询返回 `CURRENT_CRITERIA`，未解析 POI 进入澄清，明确 cuisine mutation 仍写入 canonical state。按任务要求未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
+### 引用态 Mutation 边界与负向菜系收口（2026-09-07）
+
+第一阶段 Turn Semantics 中，原 `hasMutationSignal()` 把“预算、人均、有没有、有什么、推荐”等词直接视为 Mutation，导致“这家人均多少”“第二家预算多少”等事实问题可能污染 canonical criteria。本轮将引用态 Mutation 改为 fail-closed：优先使用 `ReferenceIntent.mutationAnchor`，否则必须出现明确 SET/CLEAR/EXCLUDE 或相对变更操作；普通 Reference Fact Question 保持 `CriteriaIntent=NONE`。
+
+`excludedCuisines` 被纳入 `ConversationStateService` 的 search-domain invalidation。新增或移除排除菜系都会清空当前 candidate projection 和 focused shop，但只追加空 Batch，不删除历史 RecommendationBatch。负向菜系 fallback 改为提取“除了 <candidate>” span，再复用 `CuisineCanonicalizer` 并校验 known canonical set，覆盖日料、火锅、烧烤、韩国料理等别名，同时拒绝未知文本。
+
+“所有/全部” follow-up 只检查最近一条 assistant 消息，避免旧 ChatMemory 中的澄清问题触发过期 CURRENT_CRITERIA。定向测试覆盖六类引用事实问题、结构化 mutation anchor、负向菜系别名、未知候选、candidate invalidation 与历史 Batch 保留；未运行 robustness、v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。

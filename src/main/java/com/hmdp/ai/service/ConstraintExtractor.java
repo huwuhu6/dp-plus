@@ -29,7 +29,8 @@ public class ConstraintExtractor {
     private static final Logger log = LoggerFactory.getLogger(ConstraintExtractor.class);
     private static final Pattern BUDGET_PATTERN = Pattern.compile("(?:人均|预算)\\s*(\\d+)");
     private static final Pattern RADIUS_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*(公里|km|米|m)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern EXCLUDED_CUISINE_PATTERN = Pattern.compile("除了\\s*([\\p{IsHan}]{2,12}(?:菜|料理))(?:之外|以外|都|也|应该|可以|，|,|$)");
+    private static final Pattern EXCLUDED_CUISINE_PATTERN = Pattern.compile(
+            "除了\\s*([\\p{IsHan}]{1,12}?)(?=之外|以外|都|也|应该|可以|OK|ok|，|,|$)");
 
     @Resource
     private OpenAiCompatibleClient aiClient;
@@ -192,7 +193,7 @@ public class ConstraintExtractor {
         Matcher matcher = EXCLUDED_CUISINE_PATTERN.matcher(query == null ? "" : query.replaceAll("\\s+", ""));
         if (!matcher.find()) return;
         String cuisine = CuisineCanonicalizer.canonicalize(matcher.group(1));
-        if (cuisine.isBlank()) return;
+        if (cuisine.isBlank() || !CuisineCanonicalizer.knownCanonicalValues().contains(cuisine)) return;
         if (constraints.getExcludedCuisines() == null) constraints.setExcludedCuisines(new ArrayList<>());
         if (!constraints.getExcludedCuisines().contains(cuisine)) constraints.getExcludedCuisines().add(cuisine);
         constraints.setCuisine("");

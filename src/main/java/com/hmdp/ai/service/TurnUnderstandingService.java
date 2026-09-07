@@ -8,7 +8,6 @@ import com.hmdp.ai.dto.ResolvedShopReference;
 import com.hmdp.ai.util.CuisineCanonicalizer;
 import org.springframework.stereotype.Service;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -37,7 +36,7 @@ public class TurnUnderstandingService {
             result.getCommands().add(new TurnCommand(TurnCommand.Type.ASK_DECISION_CONTEXT,
                     query.getType().name(), query.getConstraintKey()));
         }
-        boolean mutation = hasMutationSignal(text);
+        boolean mutation = hasMutationSignal(text, rewrite, hasReference);
         result.setMutationRequested(mutation);
         result.setReferenceOnly(hasReference && !mutation);
         if (hasReference) result.getCommands().add(new TurnCommand(TurnCommand.Type.REFERENCE, null, null));
@@ -65,9 +64,9 @@ public class TurnUnderstandingService {
         if (containsAny(text, "说过", "之前", "前面", "来源")
                 && (scopeWords || text.contains("偏好") || constraintKey(text) != null)) return true;
         if (text.equals("所有") || text.equals("全部")) {
-            for (Map<String, Object> item : history == null ? Collections.<Map<String, Object>>emptyList() : history) {
-                if (item == null || !"assistant".equalsIgnoreCase(String.valueOf(item.get("role")))) continue;
-                String content = normalize(String.valueOf(item.get("content")));
+            Map<String, Object> latestAssistant = latestAssistantMessage(history);
+            if (latestAssistant != null) {
+                String content = normalize(String.valueOf(latestAssistant.get("content")));
                 if (containsAny(content, "哪一项", "预算、距离", "告诉我你想核对")) return true;
             }
         }
@@ -102,10 +101,34 @@ public class TurnUnderstandingService {
         return null;
     }
 
-    private boolean hasMutationSignal(String text) {
-        return containsAny(text, "改成", "换成", "换个", "换一批", "重新", "预算", "人均", "太贵", "便宜",
-                "实惠", "不吃", "不要", "不用", "不限", "排除", "除了", "附近", "周边", "当前位置", "当前定位",
-                "我附近", "我这附近", "找", "推荐", "想吃", "想找", "有什么", "有没有");
+    private boolean hasMutationSignal(String text, ContextRewriteResult rewrite, boolean hasReference) {
+        if (hasReference && hasMutationAnchor(rewrite)) return true;
+        // A fact question is fail-closed: budget/price/restaurant mentions are not
+        // mutations unless an explicit state-changing operator is present.
+        return hasExplicitMutationSignal(text);
+    }
+
+    private boolean hasMutationAnchor(ContextRewriteResult rewrite) {
+        if (rewrite == null || rewrite.getResolvedReferences() == null) return false;
+        for (ResolvedShopReference reference : rewrite.getResolvedReferences()) {
+            if (reference != null && reference.intent() != null && reference.intent().isMutationAnchor()) return true;
+        }
+        return false;
+    }
+
+    private boolean hasExplicitMutationSignal(String text) {
+        return containsAny(text, "改成", "换成", "调整为", "设置为", "改为", "不吃", "不要", "不用", "去掉",
+                "清除", "取消", "不限", "排除", "除了", "太贵", "好贵", "便宜点", "更便宜", "实惠一点",
+                "太远", "近一点", "更近", "换一批");
+    }
+
+    private Map<String, Object> latestAssistantMessage(List<Map<String, Object>> history) {
+        if (history == null) return null;
+        for (int i = history.size() - 1; i >= 0; i--) {
+            Map<String, Object> item = history.get(i);
+            if (item != null && "assistant".equalsIgnoreCase(String.valueOf(item.get("role")))) return item;
+        }
+        return null;
     }
 
     private boolean containsAny(String value, String... terms) {

@@ -10,6 +10,8 @@ import com.hmdp.ai.geo.AdministrativeRegionResolver;
 import com.hmdp.ai.geo.AdministrativeLevel;
 import com.hmdp.ai.geo.ClasspathAdministrativeRegionRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -243,6 +245,37 @@ class ConstraintExtractorTest {
         assertEquals("", constraints.getCuisine());
         assertEquals(List.of("东北菜"), constraints.getExcludedCuisines());
         assertTrue(constraints.getClearedFields().contains("cuisine"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "除了日料都可以,日料",
+            "除了火锅都行,火锅",
+            "除了烧烤以外都行,烧烤",
+            "除了韩国料理都OK,韩餐"
+    })
+    void canonicalizesKnownNegativeCuisineAliases(String query, String expected) {
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        when(client.chatCompletion(any(), any(), any(), any())).thenThrow(new IllegalStateException("model unavailable"));
+
+        DecisionConstraints constraints = extractor.extract(query);
+
+        assertEquals(List.of(expected), constraints.getExcludedCuisines());
+        assertEquals("", constraints.getCuisine());
+    }
+
+    @Test
+    void ignoresUnknownNegativeCuisineCandidate() {
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        when(client.chatCompletion(any(), any(), any(), any())).thenThrow(new IllegalStateException("model unavailable"));
+
+        DecisionConstraints constraints = extractor.extract("除了环境安静都可以");
+
+        assertTrue(constraints.getExcludedCuisines().isEmpty());
     }
 
     @Test
