@@ -90,6 +90,13 @@ class ReferenceIntentExtractorTest {
         assertEquals(Arrays.asList(1, 2), intents.stream().map(ReferenceIntent::getOrdinal).toList());
     }
 
+    @Test
+    void extractsFocusedReferenceFromThisOne() {
+        List<ReferenceIntent> intents = extractor.extract("为什么推荐这个？");
+        assertEquals(1, intents.size());
+        assertEquals(ReferenceIntent.Scope.FOCUSED, intents.get(0).getScope());
+    }
+
     private ReferenceIntentExtractor withModel(String arguments) throws Exception {
         OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
         when(client.chatCompletion(anyList(), anyList(), isNull(), any(String.class)))

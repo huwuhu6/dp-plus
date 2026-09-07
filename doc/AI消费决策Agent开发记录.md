@@ -1,5 +1,15 @@
 # AI 消费决策 Agent 开发记录
 
+### DECISION_CONTEXT_QUERY 与可解释状态（2026-09-07）
+
+本轮在不改变 Task、Working Memory、RecommendationBatch 主模型和 Pipeline 节点的前提下，增加单一顶层路由 `DECISION_CONTEXT_QUERY`，内部仅支持 `WHY_RECOMMENDED`、`CONSTRAINT_PROVENANCE`、`CURRENT_CRITERIA` 三类只读查询。选择单路由是为了把“为什么这样推荐”“条件来源是什么”“当前生效条件”统一视为决策上下文查询，同时与商户事实追问 `BUSINESS_FOLLOW_UP`、条件变更 `START_DECISION` 保持边界；现有 `CriteriaIntent.NONE` 使其自然绕过 Criteria Reduction，不新增解释或审计节点。
+
+`WHY_RECOMMENDED` 的 grounding 链路固定为 `ReferenceIntent → ResolvedShopReference → RecommendationBatch.decisionSessionId → ConsumptionDecisionService.getDecision(sessionId) → AiDecisionSession.resultJson → 当时的 Recommendation`。因此历史理由来自当时持久化的 `DecisionResponse.matchedReasons/evidence`，不重新搜索、不按当前 criteria 重解释，也不把 evidence 复制进版本化 Working Memory；RecommendationBatch 继续只保存历史实体索引。查询没有推荐结果或指代不明确时返回 grounded clarification，不退化为自由猜测。
+
+偏好来源复用 `constraintSources`，统一使用 `preference:<canonicalPreference>`，由抽取/语义解释阶段通过 request-scoped `sourceHints` 产生 `USER_EXPLICIT` 或 `DERIVED`，Merger 通过 `sourceUpdates` 传递，StateService 只负责持久化；移除偏好同步删除来源。旧快照缺少来源时只报告“当前记录存在但无法确认来源”，不反推用户明确说过。查询本身不 reduce、不切换 Task、不失效候选池、不追加 Batch、不更新 focus/criteria/source/version；仅允许记录消息和 trace。
+
+定向验证：相关单元测试 **103 tests，0 failures，0 errors，1 skipped**（含新增 `DecisionContextQueryServiceTest`、路由、来源、Merger、State、Reference 和 Extractor 覆盖）；E2E 验证了历史第一家引用、focused “这个”、当前 criteria、USER_EXPLICIT/DERIVED provenance，以及查询后继续 mutation。完整 robustness、conversation-v1、holdout 与全量 Maven 回归按本轮指令未执行：`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
 ### 餐饮路由领域边界校正（2026-09-07）
 
 本轮基于实际对话复盘，修正暂停/无结果餐饮决策被旅游目的误继承的问题。原确定性谓词把通用词“地方”计入 `asksForPlace`，与“有没有/推荐”等词组合后会命中 `START_DECISION`；同时 `replacesPausedDecision` 位于非餐饮领域守卫之前，命中后直接返回，使旅游语义无法进入 OOS 判定。行政区 Resolver 命中也不能单独证明用户要找餐饮。

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.dto.DecisionConstraints;
+import com.hmdp.ai.dto.ConstraintSource;
 import com.hmdp.ai.geo.AdministrativeRegion;
 import com.hmdp.ai.geo.AdministrativeRegionResolver;
 import com.hmdp.ai.geo.AdministrativeResolution;
@@ -50,8 +51,28 @@ public class ConstraintExtractor {
             constraints = normalize(extractByRule(query));
         }
         mergeAdministrativeResolution(constraints, regionResolution);
-        return enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
+        constraints = enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
                 applySemanticLocationFallback(constraints, query), query), query), query);
+        assignPreferenceSourceHints(constraints, query);
+        return constraints;
+    }
+
+    /** Source is decided while interpreting the user turn, never guessed by the state reducer. */
+    private void assignPreferenceSourceHints(DecisionConstraints constraints, String query) {
+        if (constraints == null || constraints.getPreferences() == null) return;
+        String text = query == null ? "" : query.replaceAll("\\s+", "");
+        if (text.contains("聊天") && !text.contains("安静")) {
+            constraints.getPreferences().removeIf(item -> item != null && item.contains("聊天"));
+            if (!constraints.getPreferences().contains("安静")) constraints.getPreferences().add("安静");
+        }
+        for (String preference : constraints.getPreferences()) {
+            if (preference == null || preference.isBlank()) continue;
+            ConstraintSource source = ConstraintSource.USER_EXPLICIT;
+            if ("安静".equals(preference) && text.contains("聊天") && !text.contains("安静")) {
+                source = ConstraintSource.DERIVED;
+            }
+            constraints.getSourceHints().put("preference:" + preference, source);
+        }
     }
 
     private void mergeAdministrativeResolution(DecisionConstraints constraints, AdministrativeResolution resolution) {

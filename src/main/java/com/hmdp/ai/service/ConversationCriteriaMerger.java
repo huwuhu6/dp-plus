@@ -3,6 +3,7 @@ package com.hmdp.ai.service;
 import com.hmdp.ai.dto.CriteriaMergeResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionConstraints;
+import com.hmdp.ai.dto.ConstraintSource;
 import com.hmdp.ai.mapper.AiShopProfileMapper;
 import jakarta.annotation.Resource;
 import org.slf4j.Logger;
@@ -91,7 +92,32 @@ public class ConversationCriteriaMerger {
         applyRelativeConstraints(result, merged, delta, text, candidatePool, focusedShopId, shownShopIds, criteriaAnchorShopId);
 
         merged.setPreferences(unique(merged.getPreferences()));
+        updatePreferenceSources(result, previous, delta, merged);
         return result;
+    }
+
+    private void updatePreferenceSources(CriteriaMergeResult result, DecisionConstraints previous,
+                                         DecisionConstraints delta, DecisionConstraints merged) {
+        List<String> previousPreferences = previous == null || previous.getPreferences() == null
+                ? new ArrayList<String>() : previous.getPreferences();
+        List<String> deltaPreferences = delta == null || delta.getPreferences() == null
+                ? new ArrayList<String>() : delta.getPreferences();
+        for (String preference : deltaPreferences) {
+            if (preference == null || !merged.getPreferences().contains(preference)) continue;
+            ConstraintSource source = delta.getSourceHints() == null ? null : delta.getSourceHints().get("preference:" + preference);
+            result.getSourceUpdates().put("preference:" + preference,
+                    source == null ? ConstraintSource.USER_EXPLICIT : source);
+        }
+        if (delta != null && delta.getRemovedPreferences() != null) {
+            for (String preference : delta.getRemovedPreferences()) {
+                if (preference != null) result.getSourceUpdates().put("preference:" + preference, null);
+            }
+        }
+        for (String preference : previousPreferences) {
+            if (preference != null && !merged.getPreferences().contains(preference)) {
+                result.getSourceUpdates().put("preference:" + preference, null);
+            }
+        }
     }
 
     private void applyRelativeConstraints(CriteriaMergeResult result, DecisionConstraints merged, DecisionConstraints delta,

@@ -34,6 +34,18 @@ class ConversationStateServiceTest {
         assertEquals(5D, explicit.getRadiusKm());
     }
 
+    @Test void appliesPreferenceSourceUpdatesToTaskProvenance() {
+        ConversationStateService service = new ConversationStateService();
+        DecisionTaskState task = new DecisionTaskState();
+        CriteriaMergeResult reduction = new CriteriaMergeResult();
+        reduction.getSourceUpdates().put("preference:安静", ConstraintSource.USER_EXPLICIT);
+        service.markConstraintSourcesForTest(task, reduction);
+        assertEquals(ConstraintSource.USER_EXPLICIT, task.getConstraintSources().get("preference:安静"));
+        reduction.getSourceUpdates().put("preference:安静", null);
+        service.markConstraintSourcesForTest(task, reduction);
+        assertFalse(task.getConstraintSources().containsKey("preference:安静"));
+    }
+
     @Test void currentDeviceProjectionClearsNamedTaskScope() throws Exception {
         ConversationStateService service = new ConversationStateService();
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper()

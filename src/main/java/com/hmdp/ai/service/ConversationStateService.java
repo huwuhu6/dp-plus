@@ -530,6 +530,12 @@ public class ConversationStateService {
             }
         }
         for (String cleared : reduction.getCleared()) task.getConstraintSources().remove(cleared);
+        if (reduction.getSourceUpdates() != null) {
+            for (Map.Entry<String, ConstraintSource> update : reduction.getSourceUpdates().entrySet()) {
+                if (update.getValue() == null) task.getConstraintSources().remove(update.getKey());
+                else task.getConstraintSources().put(update.getKey(), update.getValue());
+            }
+        }
     }
 
     private void normalizeNearbyDefault(DecisionTaskState task, CriteriaMergeResult reduction) {
@@ -647,7 +653,7 @@ public class ConversationStateService {
     }
     private String writeLegacySlots(ConversationWorkingMemory memory) { ConversationSlots slots = new ConversationSlots(); slots.setLocation(memory.getLocation()); slots.setPendingLocationCandidates(memory.getPendingLocationCandidates()); try { return objectMapper.writeValueAsString(slots); } catch (Exception e) { throw new IllegalStateException("Conversation location slots cannot be saved", e); } }
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
-    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getTasks() == null) memory.setTasks(new ArrayList<DecisionTaskState>()); for (DecisionTaskState task : memory.getTasks()) { if (task.getCriteria() == null) task.setCriteria(new DecisionConstraints()); if (task.getSearchLocation() == null) task.setSearchLocation(new ConversationLocationSlot()); if (task.getRecommendationBatches() == null) task.setRecommendationBatches(new ArrayList<RecommendationBatch>()); } if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
+    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getTasks() == null) memory.setTasks(new ArrayList<DecisionTaskState>()); for (DecisionTaskState task : memory.getTasks()) { if (task.getCriteria() == null) task.setCriteria(new DecisionConstraints()); if (task.getConstraintSources() == null) task.setConstraintSources(new LinkedHashMap<String, ConstraintSource>()); if (task.getSearchLocation() == null) task.setSearchLocation(new ConversationLocationSlot()); if (task.getRecommendationBatches() == null) task.setRecommendationBatches(new ArrayList<RecommendationBatch>()); } if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
     private boolean changesCandidateUniverse(CriteriaMergeResult reduction) {
         // A candidate pool is only valid for the exact retrieval domain that produced it.
         // Be deliberately conservative: preserving a stale reference is worse than asking

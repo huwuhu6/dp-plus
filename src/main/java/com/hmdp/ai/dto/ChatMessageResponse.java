@@ -14,6 +14,8 @@ public class ChatMessageResponse {
     private Boolean usedModel;
     private String degradedReason;
     private ContextRewriteResult contextRewrite;
+    private DecisionContextQuery decisionContextQuery;
+    private DecisionContextFacts decisionContextFacts;
     private String policyAction;
     private String policyReason;
     /** Business output may be valid even when a post-execution durable trace record failed. */

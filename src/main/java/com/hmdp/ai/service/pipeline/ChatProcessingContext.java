@@ -8,6 +8,7 @@ import com.hmdp.ai.dto.CriteriaMergeResult;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.DecisionContextQuery;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.dto.TurnPlan;
 import com.hmdp.ai.entity.AiChatSession;
@@ -50,6 +51,7 @@ public class ChatProcessingContext {
     private DecisionConstraints mergedConstraints;
     private CriteriaMergeResult criteriaMergeResult;
     private PolicyDecision policyDecision;
+    private DecisionContextQuery decisionContextQuery;
     private RoutingDecisionAssessment routingAssessment;
     private ChatMessageResponse response;
 

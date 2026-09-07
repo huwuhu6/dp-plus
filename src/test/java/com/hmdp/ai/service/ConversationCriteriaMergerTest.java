@@ -2,11 +2,13 @@ package com.hmdp.ai.service;
 
 import com.hmdp.ai.dto.CriteriaMergeResult;
 import com.hmdp.ai.dto.DecisionConstraints;
+import com.hmdp.ai.dto.ConstraintSource;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConversationCriteriaMergerTest {
@@ -32,6 +34,24 @@ class ConversationCriteriaMergerTest {
         assertTrue(result.getConstraints().getPreferences().contains("清淡"));
         assertTrue(result.getReplaced().stream().anyMatch(item -> item.startsWith("cuisine:")));
         assertFalse(result.getInherited().isEmpty());
+    }
+
+    @Test
+    void carriesPreferenceSourceUpdatesAndRemoval() {
+        ConversationCriteriaMerger merger = new ConversationCriteriaMerger();
+        DecisionConstraints delta = new DecisionConstraints();
+        delta.setPreferences(java.util.Collections.singletonList("安静"));
+        delta.getSourceHints().put("preference:安静", ConstraintSource.DERIVED);
+        CriteriaMergeResult added = merger.merge(new DecisionConstraints(), delta, "适合聊天");
+        assertEquals(ConstraintSource.DERIVED, added.getSourceUpdates().get("preference:安静"));
+
+        DecisionConstraints previous = new DecisionConstraints();
+        previous.setPreferences(java.util.Collections.singletonList("安静"));
+        DecisionConstraints removed = new DecisionConstraints();
+        removed.setRemovedPreferences(java.util.Collections.singletonList("安静"));
+        CriteriaMergeResult cleared = merger.merge(previous, removed, "不要安静了");
+        assertTrue(cleared.getSourceUpdates().containsKey("preference:安静"));
+        assertNull(cleared.getSourceUpdates().get("preference:安静"));
     }
 
     @Test

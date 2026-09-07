@@ -1,12 +1,15 @@
 package com.hmdp.ai.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -42,4 +45,7 @@ public class DecisionConstraints {
     private List<String> clearedFields = new ArrayList<>();
     /** Explicit preference removals, extracted as structured delta rather than inferred by merger text rules. */
     private List<String> removedPreferences = new ArrayList<>();
+    /** Request-scoped extraction hints; ignored by Working Memory serialization. */
+    @JsonIgnore
+    private Map<String, ConstraintSource> sourceHints = new LinkedHashMap<>();
 }

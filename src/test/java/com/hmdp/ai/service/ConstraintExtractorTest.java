@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.dto.DecisionConstraints;
+import com.hmdp.ai.dto.ConstraintSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.util.LinkedHashMap;
@@ -17,6 +18,39 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class ConstraintExtractorTest {
+    @Test
+    void recordsExplicitAndDerivedPreferenceSourceHintsDuringExtraction() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        when(client.chatCompletion(any(), any(), any(), any())).thenThrow(new IllegalStateException("model unavailable"));
+
+        DecisionConstraints explicit = extractor.extract("想找安静的火锅");
+        DecisionConstraints derived = extractor.extract("适合聊天的火锅");
+
+        assertEquals(ConstraintSource.USER_EXPLICIT, explicit.getSourceHints().get("preference:安静"));
+        assertEquals(ConstraintSource.DERIVED, derived.getSourceHints().get("preference:安静"));
+    }
+
+    @Test
+    void canonicalizesModelChatPreferenceAsDerivedQuietPreference() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = objectMapper.readTree("{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"targetCity\\\":\\\"福州\\\",\\\"targetArea\\\":\\\"\\\",\\\"keyword\\\":\\\"\\\",\\\"cuisine\\\":\\\"\\\",\\\"budgetPerPerson\\\":-1,\\\"radiusKm\\\":-1,\\\"nearby\\\":false,\\\"arrivalTime\\\":\\\"\\\",\\\"preferences\\\":[\\\"适合聊天\\\"],\\\"missingInformation\\\":[] }\"}}]}}]}" );
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("福州有什么吃的，适合聊天");
+
+        assertTrue(constraints.getPreferences().contains("安静"));
+        assertTrue(!constraints.getPreferences().contains("适合聊天"));
+        assertEquals(ConstraintSource.DERIVED, constraints.getSourceHints().get("preference:安静"));
+    }
+
     @Test
     void normalizesModelCuisineAliasesBeforeRetrieval() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();

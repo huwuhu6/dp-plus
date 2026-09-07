@@ -122,6 +122,44 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    void routesDecisionContextWhyQueryBeforeBusinessFollowUp() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("为什么推荐第一家？");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext context =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(request, null);
+        context.setOriginalMessage(request.getMessage());
+        context.setEffectiveMessage(request.getMessage());
+
+        com.hmdp.ai.runtime.RoutingDecisionAssessment assessment = ReflectionTestUtils.invokeMethod(
+                service, "assessRouting", context, false);
+
+        assertEquals(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY,
+                assessment.getCandidateAction());
+        assertTrue(assessment.isContextRequired());
+    }
+
+    @Test
+    void routesCurrentCriteriaQueryWithoutCriteriaIntent() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("现在是按哪些要求帮我找？");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext context =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(request, null);
+        context.setOriginalMessage(request.getMessage());
+        context.setEffectiveMessage(request.getMessage());
+
+        com.hmdp.ai.runtime.RoutingDecisionAssessment assessment = ReflectionTestUtils.invokeMethod(
+                service, "assessRouting", context, false);
+        ReflectionTestUtils.invokeMethod(service, "selectAction", context,
+                com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY, "test");
+
+        assertEquals(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY,
+                assessment.getCandidateAction());
+        assertEquals(com.hmdp.ai.dto.CriteriaIntent.NONE, context.getTurnPlan().getCriteriaIntent());
+    }
+
+    @Test
     void streamsSafeGeneralChatFromModelAndRetainsCompleteAnswer() throws Exception {
         ChatOrchestrationService service = new ChatOrchestrationService();
         OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);

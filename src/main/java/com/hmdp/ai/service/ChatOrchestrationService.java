@@ -12,6 +12,8 @@ import com.hmdp.ai.dto.ChatStreamEventData;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.DecisionContextFacts;
+import com.hmdp.ai.dto.DecisionContextQuery;
 import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.ConversationSlots;
 import com.hmdp.ai.dto.AgentSessionContext;
@@ -67,6 +69,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     @Resource private ConversationEventService conversationEventService;
     @Resource private ObjectMapper objectMapper;
     @Resource private AdministrativeRegionResolver administrativeRegionResolver;
+    @Resource private DecisionContextQueryService decisionContextQueryService;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
         return chat(request, null);
@@ -183,6 +186,19 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         String message = context.getOriginalMessage();
         if (request.getSelectedOptionId() != null && isPausedDecision(activeDecision)) {
             selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT, "selected_option_for_paused_decision");
+            return;
+        }
+        if (isDecisionContextQuery(message)) {
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY,
+                    "decision_context_query");
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY);
+            assessment.setSource("RULE");
+            boolean reference = isReferenceMessage(message);
+            assessment.setContextRequired(reference);
+            assessment.setContextResolved(!reference || (context.getContextRewrite() != null
+                    && context.getContextRewrite().getResolvedReferences() != null
+                    && !context.getContextRewrite().getResolvedReferences().isEmpty()));
+            assessment.setRequiredContextMissing(reference && !assessment.isContextResolved());
             return;
         }
         if (isLocationClarification(activeDecision) && request.getLocation() == null && isPotentialNamedLocation(message)) {
@@ -444,6 +460,49 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 || constraints.getRemovedPreferences() != null && !constraints.getRemovedPreferences().isEmpty();
     }
 
+    /** Narrow deterministic guard for read-only context questions; open phrasing remains model-routed. */
+    private boolean isDecisionContextQuery(String message) {
+        String text = message == null ? "" : message.replaceAll("\\s+", "");
+        return isWhyRecommendedQuery(text) || isCurrentCriteriaQuery(text)
+                || ((text.contains("说过") || text.contains("前面") || text.contains("之前"))
+                && constraintKey(text) != null);
+    }
+
+    private boolean isReferenceMessage(String message) {
+        if (message == null) return false;
+        return message.contains("第一家") || message.contains("第二家") || message.contains("第三家")
+                || message.contains("这家") || message.contains("那家") || message.contains("这个") || message.contains("刚才那家");
+    }
+
+    private boolean isWhyRecommendedQuery(String message) {
+        String text = message == null ? "" : message.replaceAll("\\s+", "");
+        return (text.contains("推荐") && (text.contains("为什么") || text.contains("依据") || text.contains("理由")))
+                || (text.contains("为什么") && text.contains("排"))
+                || text.contains("根据什么推荐") || text.contains("什么理由推荐");
+    }
+
+    private boolean isCurrentCriteriaQuery(String message) {
+        String text = message == null ? "" : message.replaceAll("\\s+", "");
+        return (text.contains("当前") || text.contains("现在"))
+                && (text.contains("条件") || text.contains("要求") || text.contains("依据"));
+    }
+
+    private String constraintKey(String message) {
+        String text = message == null ? "" : message.replaceAll("\\s+", "");
+        if (text.contains("预算")) return "budgetPerPerson";
+        if (text.contains("半径") || text.contains("距离") || text.contains("近") || text.contains("多远")) return "radiusKm";
+        if (text.contains("附近")) return "nearby";
+        if (text.contains("安静") || text.contains("聊天")) return "preference:安静";
+        if (text.contains("约会")) return "preference:约会";
+        if (text.contains("排队")) return "preference:不排队";
+        if (text.contains("菜系") || text.contains("口味")) return "cuisine";
+        if (text.contains("店名") || text.contains("关键词")) return "keyword";
+        if (text.contains("省份")) return "targetProvince";
+        if (text.contains("城市")) return "targetCity";
+        if (text.contains("区县") || text.contains("地区")) return "targetDistrict";
+        return null;
+    }
+
     private Long mutationAnchorShopId(ChatProcessingContext context) {
         if (context.getContextRewrite() == null || context.getContextRewrite().getResolvedReferences() == null) return null;
         for (com.hmdp.ai.dto.ResolvedShopReference reference : context.getContextRewrite().getResolvedReferences()) {
@@ -471,6 +530,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                         context.getActiveDecisionSessionId(), context.getActiveDecision());
             case START_DECISION:
                 return executeDecision(context);
+            case DECISION_CONTEXT_QUERY:
+                return executeDecisionContextQuery(context);
             case BUSINESS_FOLLOW_UP:
                 return executeBusinessFollowUp(context);
             case EXIT_DECISION:
@@ -501,6 +562,42 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         conversationStateService.snapshotDecision(context.getChatSession(), decision);
         return buildDecisionResponse(context.getChatId(), context.getOriginalMessage(), context.getChatSession(), context.isUsedModel(),
                 context.getContextRewrite(), decision, context.getPolicyDecision());
+    }
+
+    private ChatMessageResponse executeDecisionContextQuery(ChatProcessingContext context) {
+        DecisionContextQuery query = buildDecisionContextQuery(context);
+        context.setDecisionContextQuery(query);
+        DecisionContextQueryService.QueryResult result = decisionContextQueryService == null
+                ? new DecisionContextQueryService.QueryResult("目前无法读取决策上下文。", new DecisionContextFacts())
+                : decisionContextQueryService.execute(context.getChatSession(), query);
+        ChatMessageResponse response = newResponse(context, "DECISION_CONTEXT_QUERY");
+        response.setDecisionContextQuery(query);
+        response.setDecisionContextFacts(result.facts());
+        response.setAnswer(result.answer());
+        if (context.getActiveDecision() != null) {
+            response.setDecisionSessionId(context.getActiveDecisionSessionId());
+            response.setDecisionStatus(context.getActiveDecision().getStatus());
+        }
+        recordTurn(context.getChatId(), context.getOriginalMessage(), response);
+        return response;
+    }
+
+    private DecisionContextQuery buildDecisionContextQuery(ChatProcessingContext context) {
+        String message = context.getOriginalMessage() == null ? "" : context.getOriginalMessage().replaceAll("\\s+", "");
+        DecisionContextQuery query = new DecisionContextQuery();
+        if (isWhyRecommendedQuery(message)) query.setType(DecisionContextQuery.QueryType.WHY_RECOMMENDED);
+        else if (isCurrentCriteriaQuery(message)) query.setType(DecisionContextQuery.QueryType.CURRENT_CRITERIA);
+        else query.setType(DecisionContextQuery.QueryType.CONSTRAINT_PROVENANCE);
+        if (query.getType() == DecisionContextQuery.QueryType.WHY_RECOMMENDED
+                && context.getContextRewrite() != null
+                && context.getContextRewrite().getResolvedReferences() != null
+                && !context.getContextRewrite().getResolvedReferences().isEmpty()) {
+            query.setResolvedReference(context.getContextRewrite().getResolvedReferences().get(0));
+        }
+        String key = constraintKey(message);
+        query.setConstraintKey(key);
+        if (key != null && key.startsWith("preference:")) query.setPreferenceValue(key.substring("preference:".length()));
+        return query;
     }
 
     private ChatMessageResponse executeBusinessFollowUp(ChatProcessingContext context) {
@@ -577,6 +674,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private com.hmdp.ai.service.pipeline.ChatProcessingAction toProcessingAction(String route) {
         if ("START_DECISION".equals(route)) return com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION;
+        if ("DECISION_CONTEXT_QUERY".equals(route)) return com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY;
         if ("BUSINESS_FOLLOW_UP".equals(route)) return com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP;
         if ("EXIT_DECISION".equals(route)) return com.hmdp.ai.service.pipeline.ChatProcessingAction.EXIT_DECISION;
         if ("EXPLAIN_SUSPENDED_DECISION".equals(route)) return com.hmdp.ai.service.pipeline.ChatProcessingAction.EXPLAIN_SUSPENDED;
@@ -642,6 +740,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择唯一路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求、需求不完整，或无法归类到其他路由；START_DECISION=用户明确要求新餐饮推荐（找餐厅/吃饭/菜品/订餐），或在同一句中同时出现可信的命名目的地（城市、行政区、商圈、地标）与餐饮消费/推荐意图，即使没有指定菜系或预算也必须开始广泛推荐；BUSINESS_FOLLOW_UP=围绕已推荐的具体餐饮商户追问评价、优惠券、营业时间、排队、地址或备选比较，对象是候选池中的某一家店；EXIT_DECISION=用户明确结束或放弃本次餐饮推荐；EXPLAIN_SUSPENDED_DECISION=用户询问当前无结果/暂停推荐的原因或下一步如何处理，该路由不发起新搜索也不查询商户详情。领域边界：没有命名目的地且只有‘附近有啥’、‘有什么推荐’、‘有没有地方推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索；‘北京天气’、‘朋友刚从北京回来’、‘北京有哪些景点’等城市名但非餐饮消费意图仍是 GENERAL_CHAT。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。上下文边界：餐饮上下文中‘福州有什么吃的’后接‘鼓楼呢？’可以是 START_DECISION 的地点 refinement；旅游上下文中‘帮我选个地方去旅游’后接‘福建省内呢？’必须是 GENERAL_CHAT。行政实体本身不等于餐饮意图。"));
             messages.add(message("system", "当前决策状态=" + decisionStatus));
             messages.add(message("system", "反偏置：当用户表述指向更换需求、换品类或重新开始时，忽略对话历史里旧推荐结果的倾向，选择 START_DECISION，不要把它当成追问候选池。边界示例：'看看有没有别的吃的'→START_DECISION；'这家店评价怎么样'→BUSINESS_FOLLOW_UP；'换一家餐厅'→START_DECISION；'算了不吃了'→EXIT_DECISION；'这家店几点关门'→BUSINESS_FOLLOW_UP。"));
+            messages.add(message("system", "只读上下文查询边界：'为什么推荐这家/第一家'、'为什么第二家排这么前'、'我前面有说过安静吗'、'这个预算是我说的吗'、'现在按哪些要求帮我找'都选择 DECISION_CONTEXT_QUERY；这家几点关门、优惠券、评价、地址等商户事实仍选择 BUSINESS_FOLLOW_UP。DECISION_CONTEXT_QUERY 不发起搜索、不修改决策状态。"));
             messages.addAll(chatHistory);
             messages.add(message("user", message));
             JsonNode result = aiProperties.getRouting() != null && aiProperties.getRouting().isConfigured()
@@ -711,6 +810,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private String fallbackRoute(String message, String decisionStatus) {
         boolean hasDecision = !"NONE".equals(decisionStatus);
+        if (isDecisionContextQuery(message)) return "DECISION_CONTEXT_QUERY";
         if (message.contains("算了") || message.contains("不聊了") || message.contains("结束")) return hasDecision ? "EXIT_DECISION" : "GENERAL_CHAT";
         boolean dining = message.contains("吃") || message.contains("餐厅") || message.contains("饭") || message.contains("菜") || message.contains("订餐");
         if (!dining) return "GENERAL_CHAT";
@@ -820,6 +920,16 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             assessment.setSource("RULE"); assessment.setShouldEscalate(true); assessment.setReason("competing_actions");
             return assessment;
         }
+        if (isDecisionContextQuery(effective)) {
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY);
+            assessment.setSource("RULE");
+            boolean requiresReference = isReferenceMessage(message);
+            assessment.setContextRequired(requiresReference);
+            assessment.setContextResolved(!requiresReference);
+            assessment.setRequiredContextMissing(requiresReference);
+            assessment.setReason("decision_context_query");
+            return assessment;
+        }
         if (isAlternativeRecommendation(message, effective) || isNewRecommendationIntent(effective)) {
             assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION);
             assessment.setSource("RULE"); assessment.setReason("explicit_recommendation_or_alternative");
@@ -863,6 +973,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private boolean isRouteAllowed(String route, DecisionResponse decision) {
         if (route == null) return false;
         if ("EXPLAIN_SUSPENDED_DECISION".equals(route)) return isSuspendedDecision(decision);
+        if ("DECISION_CONTEXT_QUERY".equals(route)) return true;
         if ("BUSINESS_FOLLOW_UP".equals(route)) return decision != null && "COMPLETED".equals(decision.getStatus());
         if ("EXIT_DECISION".equals(route)) return true;
         return "GENERAL_CHAT".equals(route) || "START_DECISION".equals(route);
@@ -913,7 +1024,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     }
 
     private boolean isFocusedShopQuestion(String message) {
-        return message.contains("这家") || message.contains("那家") || message.contains("这一个")
+        return message.contains("这家") || message.contains("那家") || message.contains("这个") || message.contains("这一个")
                 || message.contains("上一家") || message.contains("刚才那家");
     }
 
@@ -1160,7 +1271,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private Map<String, Object> routeTool() {
         Map<String, Object> route = new LinkedHashMap<String, Object>();
         route.put("type", "string");
-        route.put("enum", Arrays.asList("GENERAL_CHAT", "START_DECISION", "BUSINESS_FOLLOW_UP", "EXIT_DECISION", "EXPLAIN_SUSPENDED_DECISION"));
+        route.put("enum", Arrays.asList("GENERAL_CHAT", "START_DECISION", "DECISION_CONTEXT_QUERY", "BUSINESS_FOLLOW_UP", "EXIT_DECISION", "EXPLAIN_SUSPENDED_DECISION"));
         Map<String, Object> properties = new LinkedHashMap<String, Object>();
         properties.put("route", route);
         Map<String, Object> parameters = new LinkedHashMap<String, Object>();
