@@ -341,7 +341,7 @@ public class ConversationStateService {
         ConversationLocationSlot target = ensureActiveTask(memory).getSearchLocation();
         boolean changed = materialLocationChange(target, candidate.getLatitude(), candidate.getLongitude());
         target.setStatus("AVAILABLE"); target.setLatitude(candidate.getLatitude()); target.setLongitude(candidate.getLongitude());
-        target.setPoiId(candidate.getPoiId()); target.setCanonicalName(candidate.getCanonicalName());
+        target.setPoiId(candidate.getPoiId()); target.setCanonicalName(candidate.getCanonicalName()); target.setCampusLabel(candidate.getCampusLabel());
         target.setProvince(candidate.getProvince()); target.setCity(candidate.getCity()); target.setDistrict(candidate.getDistrict());
         target.setSource(candidate.getSource()); target.setCapturedAt(LocalDateTime.now()); target.setExpiresAt(target.getCapturedAt().plusMinutes(LOCATION_TTL_MINUTES));
         if (changed) {
@@ -876,7 +876,7 @@ public class ConversationStateService {
         if (location.getExpiresAt() != null && !location.getExpiresAt().isAfter(LocalDateTime.now())) return null;
         return location.getLatitude() == null || location.getLongitude() == null ? null : location;
     }
-    private void clearLocation(ConversationLocationSlot location, String status) { location.setStatus(status); location.setPoiId(null); location.setCanonicalName(null); location.setLatitude(null); location.setLongitude(null); location.setProvince(null); location.setCity(null); location.setDistrict(null); location.setAccuracyMeters(null); location.setExpiresAt(null); }
+    private void clearLocation(ConversationLocationSlot location, String status) { location.setStatus(status); location.setPoiId(null); location.setCanonicalName(null); location.setCampusLabel(null); location.setLatitude(null); location.setLongitude(null); location.setProvince(null); location.setCity(null); location.setDistrict(null); location.setAccuracyMeters(null); location.setExpiresAt(null); }
     private void ensureOwner(AiChatSession state) { if (state.getUserId() == null) return; if (UserHolder.getUser() == null || !state.getUserId().equals(UserHolder.getUser().getId())) throw new SecurityException("No permission to access this chat session"); }
     private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
     private boolean sameText(String left, String right) { return java.util.Objects.equals(left == null ? "" : left, right == null ? "" : right); }

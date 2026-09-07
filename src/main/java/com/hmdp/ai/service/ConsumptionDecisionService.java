@@ -310,7 +310,7 @@ public class ConsumptionDecisionService {
                 if (hasAdministrativeScope(request) && !hasRelaxableConstraints(constraints)) {
                     return pauseForNoData(session, request, response, metrics, start);
                 }
-                return pauseForRelaxation(session, response, metrics, start);
+                return pauseForRelaxation(session, request, response, metrics, start);
             }
 
             long answerStart = System.currentTimeMillis();
@@ -422,7 +422,8 @@ public class ConsumptionDecisionService {
         return finishPausedDecision(session, response, metrics, DecisionCommand.REQUIRE_LOCATION, "LOCATION", startedAt);
     }
 
-    private DecisionResponse pauseForRelaxation(AiDecisionSession session, DecisionResponse response,
+    private DecisionResponse pauseForRelaxation(AiDecisionSession session, DecisionRequest request,
+                                                DecisionResponse response,
                                                 DecisionMetrics metrics, long startedAt) throws Exception {
         DecisionConstraints constraints = response.getConstraints();
         response.setStatus("WAITING_RELAXATION");
@@ -455,7 +456,7 @@ public class ConsumptionDecisionService {
         // 让位置恢复对用户可发现；转移表已允许 WAITING_RELAXATION + PROVIDE_LOCATION → RESUMING。
         response.getOptions().add(new DecisionOption("PROVIDE_LOCATION", "改用当前位置重新搜索"));
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
-        response.setQuestion(failureExplanationFormatter.format(response)
+        response.setQuestion(failureExplanationFormatter.format(response, request == null ? null : request.getLocationName())
                 + " 你也可以回复“我附近”，改用当前位置重新搜索。");
         recordStep(response, session.getId(), "WAITING_RELAXATION", "候选为空，等待用户明确选择放宽项", startedAt);
         return finishPausedDecision(session, response, metrics, DecisionCommand.STRICT_SEARCH_EMPTY, "RELAXATION", startedAt);
@@ -579,6 +580,7 @@ public class ConsumptionDecisionService {
             request.setUseLocationScope(true);
         }
         request.setLocationStatus("AVAILABLE");
+        if (hasText(followUp.getLocationName())) request.setLocationName(followUp.getLocationName());
     }
 
     private void switchToCurrentDevice(DecisionConstraints constraints) {

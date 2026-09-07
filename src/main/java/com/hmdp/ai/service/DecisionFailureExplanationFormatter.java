@@ -18,9 +18,14 @@ import java.util.List;
 public class DecisionFailureExplanationFormatter {
 
     public String format(DecisionResponse response) {
+        return format(response, null);
+    }
+
+    /** Formats failure facts with the canonical named search location when one was confirmed. */
+    public String format(DecisionResponse response, String canonicalLocationName) {
         if (response == null) return "当前没有可解释的搜索结果。";
         DecisionConstraints constraints = response.getConstraints();
-        String scope = searchScope(constraints);
+        String scope = searchScope(constraints, canonicalLocationName);
         String conditions = foodConditions(constraints);
         int resultCount = response.getRecommendations() == null ? 0 : response.getRecommendations().size();
         StringBuilder answer = new StringBuilder("我刚才按").append(scope);
@@ -52,16 +57,23 @@ public class DecisionFailureExplanationFormatter {
         return answer.toString();
     }
 
-    private String searchScope(DecisionConstraints constraints) {
+    private String searchScope(DecisionConstraints constraints, String canonicalLocationName) {
         if (constraints == null) return "当前搜索范围";
+        if (hasText(canonicalLocationName)) {
+            String scope = canonicalLocationName + "附近";
+            if (constraints.getRadiusKm() != null && constraints.getRadiusKm() > 0D) {
+                scope += " " + formatDistance(constraints.getRadiusKm()) + "km";
+            }
+            return scope;
+        }
         String named = hasText(constraints.getTargetArea()) ? constraints.getTargetArea()
                 : (hasText(constraints.getTargetDistrict()) ? constraints.getTargetDistrict()
                 : (hasText(constraints.getTargetCity()) ? constraints.getTargetCity() : constraints.getTargetProvince()));
         String base;
-        if ("CURRENT_DEVICE".equalsIgnoreCase(constraints.getLocationIntent()) || Boolean.TRUE.equals(constraints.getNearby())) {
-            base = "当前位置附近";
-        } else if (hasText(named)) {
+        if (hasText(named)) {
             base = named;
+        } else if ("CURRENT_DEVICE".equalsIgnoreCase(constraints.getLocationIntent()) || Boolean.TRUE.equals(constraints.getNearby())) {
+            base = "当前位置附近";
         } else {
             base = "当前搜索范围";
         }

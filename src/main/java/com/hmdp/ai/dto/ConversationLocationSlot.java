@@ -9,6 +9,7 @@ public class ConversationLocationSlot {
     private String status = "MISSING";
     private String poiId;
     private String canonicalName;
+    private String campusLabel;
     private Double latitude;
     private Double longitude;
     private String province;

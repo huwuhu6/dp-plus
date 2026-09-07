@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.LocationResolutionContext;
 import com.hmdp.ai.dto.LocationResolutionRequest;
+import com.hmdp.ai.geo.AmapPoiSearchProvider;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import jakarta.annotation.Resource;
@@ -35,10 +36,12 @@ public class AmapMcpLocationResolutionService implements LocationResolutionProvi
     private long toolTimeoutMs = 800L;
     @Autowired(required = false)
     private List<McpSyncClient> mcpClients = Collections.emptyList();
+    @Autowired(required = false)
+    private AmapPoiSearchProvider poiSearchProvider;
     @Resource private ObjectMapper objectMapper;
 
     public boolean isAvailable() {
-        return enabled && !mcpClients.isEmpty();
+        return (enabled && !mcpClients.isEmpty()) || (poiSearchProvider != null && poiSearchProvider.isAvailable());
     }
 
     public List<ResolvedLocationCandidate> resolve(String placeText) {
@@ -52,6 +55,12 @@ public class AmapMcpLocationResolutionService implements LocationResolutionProvi
         String query = contextualQuery(placeText.trim(), request == null ? null : request.getContext());
         long startedAt = System.currentTimeMillis();
         try {
+            if (poiSearchProvider != null && poiSearchProvider.isAvailable()) {
+                List<ResolvedLocationCandidate> poiCandidates = poiSearchProvider.resolve(
+                        new LocationResolutionRequest(placeText.trim(), request == null ? null : request.getContext()));
+                if (!poiCandidates.isEmpty()) return poiCandidates;
+            }
+            if (!enabled || mcpClients.isEmpty()) return Collections.emptyList();
             Map<String, Object> arguments = new LinkedHashMap<>();
             arguments.put("address", query);
             McpSchema.CallToolResult result = callMapsGeo(arguments);

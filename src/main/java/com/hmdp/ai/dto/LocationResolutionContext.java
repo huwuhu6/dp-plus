@@ -10,5 +10,7 @@ public class LocationResolutionContext {
     private String activeProvince;
     private String activeCity;
     private String activeDistrict;
+    private String activeCityAdcode;
+    private String activeDistrictAdcode;
     private String currentNamedLocation;
 }

@@ -558,7 +558,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 return executeGeneralChat(context, "GENERAL_CHAT");
             case EXPLAIN_SUSPENDED:
                 return explainSuspendedDecision(context.getChatId(), context.getOriginalMessage(),
-                        context.getActiveDecisionSessionId(), context.getActiveDecision());
+                        context.getChatSession(), context.getActiveDecisionSessionId(), context.getActiveDecision());
             case START_DECISION:
                 return executeDecision(context);
             case DECISION_CONTEXT_QUERY:
@@ -1141,7 +1141,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return true;
     }
 
-    private ChatMessageResponse explainSuspendedDecision(String chatId, String message, Long activeSessionId,
+    private ChatMessageResponse explainSuspendedDecision(String chatId, String message, AiChatSession state,
+                                                         Long activeSessionId,
                                                          DecisionResponse decision) {
         ChatMessageResponse response = new ChatMessageResponse();
         response.setChatId(chatId);
@@ -1150,11 +1151,23 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         response.setDecision(decision);
         response.setDecisionSessionId(activeSessionId);
         response.setDecisionStatus(decision.getStatus());
-        response.setAnswer(failureExplanationFormatter.format(decision));
+        String canonicalLocationName = null;
+        if (conversationStateService != null && state != null) {
+            ConversationLocationSlot searchLocation = conversationStateService.searchLocation(
+                    conversationStateService.workingMemory(state));
+            canonicalLocationName = searchLocation == null ? null : searchLocation.getCanonicalName();
+        }
+        response.setAnswer(failureExplanationFormatter.format(decision, canonicalLocationName));
         log.info("[AI][chat] event=SUSPENDED_DECISION_EXPLAINED chatId={} sessionId={} status={} query={}",
                 chatId, activeSessionId, decision.getStatus(), compact(message));
         recordTurn(chatId, message, response);
         return response;
+    }
+
+    /** Compatibility overload for direct unit tests and callers without a session snapshot. */
+    private ChatMessageResponse explainSuspendedDecision(String chatId, String message, Long activeSessionId,
+                                                         DecisionResponse decision) {
+        return explainSuspendedDecision(chatId, message, null, activeSessionId, decision);
     }
 
     private boolean isWaitingRelaxation(DecisionResponse decision) {
@@ -1413,6 +1426,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                                                     ChatMessageResponse response) {
         String optionId = request.getSelectedOptionId();
         DecisionResponse suspendedDecision = activeSessionId == null ? null : decisionService.getDecision(activeSessionId);
+        String confirmedLocationName = null;
         boolean confirmedNamedLocation = optionId != null
                 && optionId.startsWith("CONFIRM_RESOLVED_LOCATION_");
         if (optionId == null) {
@@ -1440,6 +1454,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             int index = Integer.parseInt(optionId.substring("CONFIRM_RESOLVED_LOCATION_".length()));
             ResolvedLocationCandidate candidate = conversationStateService.acceptPendingSearchLocation(state, index);
             optionId = "PROVIDE_LOCATION";
+            confirmedLocationName = candidate.getCanonicalName();
             log.info("[AI][chat] event=LOCATION_RESOLUTION_CONFIRMED chatId={} sessionId={} label={} latitude={} longitude={}",
                     chatId, activeSessionId, candidate.getLabel(), candidate.getLatitude(), candidate.getLongitude());
         }
@@ -1450,6 +1465,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
         followUp.setSelectedOptionId(optionId);
         followUp.setMessage(message);
+        followUp.setLocationName(confirmedLocationName);
         if ("PROVIDE_LOCATION".equals(optionId)) {
             ConversationLocationSlot location = conversationStateService.usableSearchLocation(state);
             if (location == null) location = conversationStateService.usableLocation(state);
@@ -1540,6 +1556,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (location != null) {
             request.setLatitude(location.getLatitude());
             request.setLongitude(location.getLongitude());
+            request.setLocationName(location.getCanonicalName());
             request.setProvince(location.getProvince());
             request.setCity(location.getCity());
             request.setDistrict(location.getDistrict());

@@ -13,6 +13,8 @@ public class DecisionRequest {
     private String province;
     private String city;
     private String district;
+    /** Canonical named POI used as the search center; request-scoped, not durable criteria. */
+    private String locationName;
     private String locationStatus = "MISSING";
     /** Whether a location restored from conversation state should constrain this search to nearby shops. */
     private Boolean useLocationScope = false;

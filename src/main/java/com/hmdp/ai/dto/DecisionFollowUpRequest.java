@@ -11,4 +11,6 @@ public class DecisionFollowUpRequest {
     private String province;
     private String city;
     private String district;
+    /** Canonical named POI selected during location clarification. */
+    private String locationName;
 }

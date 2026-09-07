@@ -2,6 +2,8 @@ package com.hmdp.ai.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
+import com.hmdp.ai.dto.LocationResolutionRequest;
+import com.hmdp.ai.geo.AmapPoiSearchProvider;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
@@ -58,5 +60,23 @@ class AmapMcpLocationResolutionServiceTest {
 
         assertTrue(result.isEmpty());
         assertTrue(System.currentTimeMillis() - startedAt < 180L);
+    }
+
+    @Test
+    void prefersContextAwarePoiProviderBeforeMcpGeocoder() {
+        AmapPoiSearchProvider poiProvider = mock(AmapPoiSearchProvider.class);
+        ResolvedLocationCandidate candidate = new ResolvedLocationCandidate();
+        candidate.setPoiId("poi-1");
+        candidate.setCanonicalName("福建理工大学旗山校区");
+        when(poiProvider.isAvailable()).thenReturn(true);
+        when(poiProvider.resolve(any(LocationResolutionRequest.class))).thenReturn(List.of(candidate));
+
+        AmapMcpLocationResolutionService service = new AmapMcpLocationResolutionService();
+        ReflectionTestUtils.setField(service, "poiSearchProvider", poiProvider);
+        ReflectionTestUtils.setField(service, "mcpClients", List.of());
+
+        List<ResolvedLocationCandidate> result = service.resolve(new LocationResolutionRequest("理工大学", null));
+
+        assertEquals("福建理工大学旗山校区", result.get(0).getCanonicalName());
     }
 }

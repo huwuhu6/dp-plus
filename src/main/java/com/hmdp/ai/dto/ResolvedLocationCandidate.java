@@ -7,6 +7,7 @@ public class ResolvedLocationCandidate {
     private String poiId;
     private String label;
     private String canonicalName;
+    private String campusLabel;
     private String province;
     private String city;
     private String district;

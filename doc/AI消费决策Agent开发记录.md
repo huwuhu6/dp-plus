@@ -2316,6 +2316,16 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 
 定向测试结果：ConversationStateServiceTest 8/8、DecisionTransitionServiceTest 17/17、TurnUnderstandingServiceTest 14/14、ChatOrchestrationServiceTest 46 通过/1 跳过、ConsumptionDecisionServiceTest 46/46；本轮未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
 
+### Context-aware POI Search 与命名位置解释收口（2026-09-07）
+
+真实对话中“理工大学附近”虽然能由地图地理编码返回结果，但确认消息仍可能只回显用户简称，且失败解释会把已确认的命名 POI 错写成“当前位置附近”。问题的边界是实体 grounding 和执行范围解释，不是 Working Memory/Task 架构。
+
+新增独立 `AmapPoiSearchProvider`，直接调用高德 WebService POI Text Search；MCP `maps_geo` 继续作为地址类 fallback，不依赖 MCP 是否暴露 `maps_text_search`。POI 请求优先使用当前有效设备位置提供的行政上下文（有城市时做 city-limited keyword search），设备坐标只用于候选距离排序，不作为 Named POI 的最终 search anchor。provider 返回正式 POI `poiId/canonicalName/latitude/longitude/province/city/district` 及可用的 `campusLabel`；未配置高德 key 或无法权威解析时继续澄清，不静默猜“农大/理工大学”的本地别名。
+
+确认候选后，`ConversationLocationSlot` 持久化 POI 身份、坐标、层级和 `source=AMAP_POI`，与 deviceLocation 独立保存。`DecisionRequest.locationName` 作为 request-scoped 执行投影，失败解释优先使用 canonical named POI，再拼接 radius；因此 `nearby=true` 不再覆盖“福建理工大学旗山校区附近 5km”的真实范围。
+
+定向测试通过：`AmapPoiSearchProviderTest`、`AmapMcpLocationResolutionServiceTest`、`DecisionFailureExplanationFormatterTest`、`ChatOrchestrationServiceTest`、`ConversationStateServiceTest`。8081 真实 HTTP smoke 已验证：当前环境未配置 `AI_LOCATION_AMAP_API_KEY` 时，“理工大学/农大附近”安全进入 LOCATION_RESOLUTION/CLARIFYING，不回显为已确认 POI、不请求 GPS 替代；provider 的真实高德成功路径由 parser、城市限定和设备距离排序单测覆盖。按本轮要求未运行三套 full regression，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
 ### 上下文实体引用与商户事实查询收口（2026-09-07）
 
 真实对话暴露了三个共因：简称 POI 缺少设备/行政上下文，描述性商户引用只按 focusedShop 解析，以及主观事实问题没有稳定落到证据工具。本轮保持 Task/Working Memory 主模型不变，补齐了三个轻量 contract。
