@@ -18,6 +18,7 @@ import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionContextQuery;
+import com.hmdp.ai.dto.RelaxationInfo;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.entity.AiChatSession;
 import org.junit.jupiter.api.Test;
@@ -1076,6 +1077,85 @@ class ChatOrchestrationServiceTest {
         assertEquals(26.0745D, captor.getValue().getLatitude());
         assertEquals(119.1978D, captor.getValue().getLongitude());
         verifyNoInteractions(aiClient);
+    }
+
+    @Test
+    void waitingRelaxationBroadensFoodScopeFromNaturalLanguage() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        OpenAiCompatibleClient aiClient = mock(OpenAiCompatibleClient.class);
+        ConsumptionDecisionService decisionService = mock(ConsumptionDecisionService.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "aiClient", aiClient);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        ReflectionTestUtils.setField(service, "turnUnderstandingService", new TurnUnderstandingService());
+        ReflectionTestUtils.setField(service, "decisionService", decisionService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        when(memoryService.resolveChatId(any())).thenReturn("test-chat");
+        when(memoryService.load("test-chat")).thenReturn(Collections.emptyList());
+        AiChatSession state = new AiChatSession();
+        state.setChatId("test-chat");
+        state.setActiveDecisionSessionId(100L);
+        when(stateService.getOrCreate("test-chat")).thenReturn(state);
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        constraints.setNearby(true);
+        constraints.setRadiusKm(5D);
+        constraints.setKeyword("兰州拉面");
+        constraints.setCuisine("面食");
+        DecisionResponse paused = new DecisionResponse();
+        paused.setSessionId(100L);
+        paused.setStatus("WAITING_RELAXATION");
+        paused.setConstraints(constraints);
+        paused.getOptions().add(new com.hmdp.ai.dto.DecisionOption("BROADEN_FOOD_SCOPE", "看看附近其他餐饮"));
+        when(decisionService.getDecision(100L)).thenReturn(paused);
+        DecisionResponse resumed = new DecisionResponse();
+        resumed.setSessionId(100L);
+        resumed.setStatus("WAITING_RELAXATION");
+        resumed.setAnswer("已按附近其他餐饮重新搜索");
+        when(decisionService.continueDecision(org.mockito.Mockito.eq(100L), any())).thenReturn(resumed);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("那附近有啥");
+        ChatMessageResponse response = service.chat(request);
+
+        assertEquals("DECISION_EVENT", response.getRoute());
+        ArgumentCaptor<DecisionFollowUpRequest> captor = ArgumentCaptor.forClass(DecisionFollowUpRequest.class);
+        verify(decisionService).continueDecision(org.mockito.Mockito.eq(100L), captor.capture());
+        assertEquals("BROADEN_FOOD_SCOPE", captor.getValue().getSelectedOptionId());
+    }
+
+    @Test
+    void suspendedExplanationIncludesScopeFoodConstraintsAndAutomaticExpansion() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ReflectionTestUtils.setField(service, "chatMemoryService", mock(ChatMemoryService.class));
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        constraints.setNearby(true);
+        constraints.setRadiusKm(5D);
+        constraints.setKeyword("兰州拉面");
+        constraints.setCuisine("面食");
+        constraints.getSystemNotes().add("系统默认附近范围已从 3km 扩展至 5km");
+        DecisionResponse paused = new DecisionResponse();
+        paused.setSessionId(100L);
+        paused.setStatus("WAITING_RELAXATION");
+        paused.setConstraints(constraints);
+        RelaxationInfo relaxation = new RelaxationInfo();
+        relaxation.setAutomatic(true);
+        paused.setRelaxation(relaxation);
+        paused.getOptions().add(new com.hmdp.ai.dto.DecisionOption("BROADEN_FOOD_SCOPE", "看看附近其他餐饮"));
+
+        ChatMessageResponse response = ReflectionTestUtils.invokeMethod(service, "explainSuspendedDecision",
+                "test-chat", "什么意思？", 100L, paused);
+
+        assertTrue(response.getAnswer().contains("当前位置附近 5km"));
+        assertTrue(response.getAnswer().contains("兰州拉面"));
+        assertTrue(response.getAnswer().contains("面食"));
+        assertTrue(response.getAnswer().contains("找到0家"));
+        assertTrue(response.getAnswer().contains("自动扩大"));
+        assertTrue(response.getAnswer().contains("附近其他餐饮"));
     }
 
     @Test

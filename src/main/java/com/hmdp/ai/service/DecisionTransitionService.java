@@ -73,6 +73,7 @@ public class DecisionTransitionService {
         registerRelaxation(DecisionCommand.ALLOW_QUEUE);
         registerRelaxation(DecisionCommand.RELAX_LIGHT_TASTE);
         registerRelaxation(DecisionCommand.RELAX_HARD_CONSTRAINTS);
+        registerRelaxation(DecisionCommand.BROADEN_FOOD_SCOPE);
         register(ZERO_RESULT_NO_DATA, DecisionCommand.SWITCH_CITY, ZERO_RESULT_NO_DATA, DecisionSideEffect.REQUEST_NEW_SEARCH);
         register(CLARIFYING, DecisionCommand.END_DECISION, CANCELLED,
                 DecisionSideEffect.CLEAR_PENDING_OPTIONS, DecisionSideEffect.CANCEL_TASK, DecisionSideEffect.PERSIST_RESULT);
@@ -204,7 +205,7 @@ public class DecisionTransitionService {
             case "PROVIDE_LOCATION": case "DECLINE_LOCATION": case "END_DECISION":
             case "EXPAND_RADIUS": case "INCREASE_BUDGET": case "RELAX_CUISINE":
             case "RELAX_QUIET": case "ALLOW_QUEUE": case "RELAX_LIGHT_TASTE":
-            case "RELAX_HARD_CONSTRAINTS": case "SWITCH_CITY":
+            case "RELAX_HARD_CONSTRAINTS": case "BROADEN_FOOD_SCOPE": case "SWITCH_CITY":
                 return true;
             default:
                 return false;

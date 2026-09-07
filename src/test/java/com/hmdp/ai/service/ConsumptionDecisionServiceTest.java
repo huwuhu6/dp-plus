@@ -11,6 +11,7 @@ import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.entity.AiDecisionSession;
+import com.hmdp.ai.runtime.DecisionCommand;
 import com.hmdp.ai.entity.AiDecisionMetric;
 import com.hmdp.ai.entity.AiReviewDocument;
 import com.hmdp.ai.entity.AiShopProfile;
@@ -997,5 +998,27 @@ class ConsumptionDecisionServiceTest {
         assertEquals("不存在菜系", resumed.getConstraints().getCuisine());
         assertTrue("WAITING_RELAXATION".equals(resumed.getStatus())
                 || "COMPLETED".equals(resumed.getStatus()));
+    }
+
+    @Test
+    void broadFoodScopeClearsOnlyKeywordAndCuisine() {
+        DecisionConstraints constraints = new DecisionConstraints();
+        constraints.setLocationIntent("CURRENT_DEVICE");
+        constraints.setNearby(true);
+        constraints.setRadiusKm(5D);
+        constraints.setBudgetPerPerson(120);
+        constraints.setKeyword("兰州拉面");
+        constraints.setCuisine("面食");
+        constraints.getPreferences().add("安静");
+
+        ReflectionTestUtils.invokeMethod(service, "applyRelaxation", constraints,
+                DecisionCommand.BROADEN_FOOD_SCOPE);
+
+        assertEquals("", constraints.getKeyword());
+        assertEquals("", constraints.getCuisine());
+        assertTrue(constraints.getNearby());
+        assertEquals(5D, constraints.getRadiusKm());
+        assertEquals(120, constraints.getBudgetPerPerson());
+        assertTrue(constraints.getPreferences().contains("安静"));
     }
 }

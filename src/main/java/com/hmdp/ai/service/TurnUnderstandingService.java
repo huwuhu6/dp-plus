@@ -2,6 +2,7 @@ package com.hmdp.ai.service;
 
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionContextQuery;
+import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.TurnCommand;
 import com.hmdp.ai.dto.TurnCommandSet;
 import com.hmdp.ai.dto.ResolvedShopReference;
@@ -19,6 +20,17 @@ import java.util.Map;
 public class TurnUnderstandingService {
     public TurnCommandSet understand(String originalMessage, String effectiveMessage,
                                       List<Map<String, Object>> history, ContextRewriteResult rewrite) {
+        return understand(originalMessage, effectiveMessage, history, rewrite, null, null);
+    }
+
+    /**
+     * Adds paused-decision context without changing the ordinary turn semantics
+     * contract. Recovery commands are emitted only for WAITING_RELAXATION and only
+     * when the paused constraints still contain a concrete food target.
+     */
+    public TurnCommandSet understand(String originalMessage, String effectiveMessage,
+                                      List<Map<String, Object>> history, ContextRewriteResult rewrite,
+                                      String decisionStatus, DecisionConstraints pausedConstraints) {
         String text = normalize(originalMessage);
         TurnCommandSet result = new TurnCommandSet();
         boolean hasReference = rewrite != null && rewrite.getResolvedReferences() != null
@@ -48,7 +60,25 @@ public class TurnUnderstandingService {
             result.getCommands().add(new TurnCommand(TurnCommand.Type.EXCLUDE_CONSTRAINT, "cuisine", null));
         }
         if (mutation) result.getCommands().add(new TurnCommand(TurnCommand.Type.SET_CONSTRAINT, null, null));
+        if (isBroadeningFoodRecovery(text, decisionStatus, pausedConstraints)) {
+            result.getCommands().add(new TurnCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE,
+                    "foodTarget", "CLEAR_KEYWORD_AND_CUISINE"));
+        }
         return result;
+    }
+
+    private boolean isBroadeningFoodRecovery(String text, String decisionStatus,
+                                             DecisionConstraints pausedConstraints) {
+        if (!"WAITING_RELAXATION".equals(decisionStatus) || pausedConstraints == null) return false;
+        boolean hasFoodTarget = hasText(pausedConstraints.getKeyword()) || hasText(pausedConstraints.getCuisine());
+        if (!hasFoodTarget) return false;
+        boolean nearbyScope = Boolean.TRUE.equals(pausedConstraints.getNearby())
+                || containsAny(text, "附近", "周边", "周围");
+        if (!nearbyScope) return false;
+        boolean relinquishesSpecificTarget = containsAny(text, "随便", "都行", "都可以", "不限",
+                "不一定", "其他", "啥", "什么");
+        boolean foodSearchIntent = containsAny(text, "吃", "餐", "店", "看看", "找", "推荐", "附近");
+        return relinquishesSpecificTarget && foodSearchIntent;
     }
 
     /** A resolved reference turn does not become a criteria mutation merely because a shop name contains a cuisine. */
@@ -137,4 +167,6 @@ public class TurnUnderstandingService {
     }
 
     private String normalize(String value) { return value == null ? "" : value.replaceAll("\\s+", ""); }
+
+    private boolean hasText(String value) { return value != null && !value.trim().isEmpty(); }
 }

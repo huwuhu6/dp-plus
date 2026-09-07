@@ -16,6 +16,8 @@ public enum DecisionCommand {
     ALLOW_QUEUE,
     RELAX_LIGHT_TASTE,
     RELAX_HARD_CONSTRAINTS,
+    /** User abandons a specific food target while keeping the current search scope. */
+    BROADEN_FOOD_SCOPE,
     SWITCH_CITY,
     STRICT_SEARCH_EMPTY,
     NO_DATA_FOUND,

@@ -20,6 +20,7 @@ import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.CriteriaIntent;
 import com.hmdp.ai.dto.TurnPlan;
+import com.hmdp.ai.dto.TurnCommand;
 import com.hmdp.ai.dto.TurnCommandSet;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.PolicyDecision;
@@ -189,8 +190,20 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         TurnCommandSet turnCommands = turnUnderstandingService == null
                 ? new TurnCommandSet()
                 : turnUnderstandingService.understand(message, context.getEffectiveMessage(),
-                context.getChatHistory(), context.getContextRewrite());
+                context.getChatHistory(), context.getContextRewrite(),
+                activeDecision == null ? null : activeDecision.getStatus(),
+                activeDecision == null ? activeCriteriaForTurn(context) : activeDecision.getConstraints());
         context.setTurnCommandSet(turnCommands);
+        if (request.getSelectedOptionId() == null
+                && isWaitingRelaxation(activeDecision)
+                && turnCommands.hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE)) {
+            request.setSelectedOptionId(com.hmdp.ai.runtime.DecisionCommand.BROADEN_FOOD_SCOPE.name());
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT,
+                    "waiting_relaxation_broaden_food_scope");
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT);
+            assessment.setSource("RULE");
+            return;
+        }
         if (request.getSelectedOptionId() != null && isPausedDecision(activeDecision)) {
             selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT, "selected_option_for_paused_decision");
             return;
@@ -1133,25 +1146,93 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         response.setDecisionSessionId(activeSessionId);
         response.setDecisionStatus(decision.getStatus());
         com.hmdp.ai.dto.DecisionConstraints constraints = decision.getConstraints();
-        String province = constraints == null ? "" : constraints.getTargetProvince();
-        String city = constraints == null ? "" : constraints.getTargetCity();
-        String area = constraints == null ? "" : constraints.getTargetArea();
-        String scope = hasText(area) ? area : (hasText(city) ? city : province);
+        String scope = suspendedSearchScope(constraints);
+        String conditions = suspendedFoodConditions(constraints);
+        int resultCount = decision.getRecommendations() == null ? 0 : decision.getRecommendations().size();
         if ("ZERO_RESULT_NO_DATA".equals(decision.getStatus())) {
-            response.setAnswer("我记得你要找" + (hasText(scope) ? scope : "指定城市")
-                    + "的餐饮商户。当前暂停不是因为条件需要放宽，而是该范围暂无入库商户；可以切换城市或周边区域后再搜。");
+            StringBuilder answer = new StringBuilder("我刚才按").append(hasText(scope) ? scope : "指定城市");
+            if (hasText(conditions)) answer.append("，保留").append(conditions).append("条件");
+            answer.append("搜索，当前找到").append(resultCount).append("家匹配商户。该范围暂无入库商户。");
+            answer.append("你可以切换城市或周边区域后再搜");
+            response.setAnswer(answer.append("。").toString());
         } else {
+            com.hmdp.ai.dto.RelaxationInfo relaxation = decision.getRelaxation();
+            StringBuilder answer = new StringBuilder("我刚才按").append(hasText(scope) ? scope : "当前搜索范围");
+            if (hasText(conditions)) answer.append("，保留").append(conditions).append("条件");
+            answer.append("搜索，当前找到").append(resultCount).append("家匹配商户。");
+            if (relaxation != null && Boolean.TRUE.equals(relaxation.getAutomatic())) {
+                String automaticNote = automaticRelaxationNote(constraints);
+                answer.append("系统已自动扩大过一次默认附近范围");
+                if (hasText(automaticNote)) answer.append("（").append(automaticNote).append("）");
+                answer.append("，扩大后仍未找到匹配结果。");
+            }
             List<String> choices = new ArrayList<>();
             for (com.hmdp.ai.dto.DecisionOption option : decision.getOptions()) {
                 if (!"END_DECISION".equals(option.getId())) choices.add(option.getLabel());
             }
-            response.setAnswer(choices.isEmpty() ? "当前没有可放宽的条件，推荐已暂停。"
-                    : "当前没有匹配商户，可以选择放宽以下任一条件后继续：" + String.join("；", choices) + "。");
+            if (!choices.isEmpty()) answer.append("你可以").append(String.join("；", choices)).append("。");
+            else answer.append("当前没有可执行的放宽选项。");
+            response.setAnswer(answer.toString());
         }
         log.info("[AI][chat] event=SUSPENDED_DECISION_EXPLAINED chatId={} sessionId={} status={} query={}",
                 chatId, activeSessionId, decision.getStatus(), compact(message));
         recordTurn(chatId, message, response);
         return response;
+    }
+
+    private boolean isWaitingRelaxation(DecisionResponse decision) {
+        return decision != null && "WAITING_RELAXATION".equals(decision.getStatus());
+    }
+
+    private com.hmdp.ai.dto.DecisionConstraints activeCriteriaForTurn(ChatProcessingContext context) {
+        if (context == null || context.getWorkingMemory() == null || conversationStateService == null) return null;
+        return conversationStateService.activeCriteria(context.getWorkingMemory());
+    }
+
+    private String suspendedSearchScope(com.hmdp.ai.dto.DecisionConstraints constraints) {
+        if (constraints == null) return "当前搜索范围";
+        String named = hasText(constraints.getTargetArea()) ? constraints.getTargetArea()
+                : (hasText(constraints.getTargetDistrict()) ? constraints.getTargetDistrict()
+                : (hasText(constraints.getTargetCity()) ? constraints.getTargetCity() : constraints.getTargetProvince()));
+        String base;
+        if ("CURRENT_DEVICE".equalsIgnoreCase(constraints.getLocationIntent()) || Boolean.TRUE.equals(constraints.getNearby())) {
+            base = "当前位置附近";
+        } else if (hasText(named)) {
+            base = named;
+        } else {
+            base = "当前搜索范围";
+        }
+        if (constraints.getRadiusKm() != null && constraints.getRadiusKm() > 0D) {
+            base += " " + formatDistance(constraints.getRadiusKm()) + "km";
+        }
+        return base;
+    }
+
+    private String suspendedFoodConditions(com.hmdp.ai.dto.DecisionConstraints constraints) {
+        if (constraints == null) return "";
+        List<String> values = new ArrayList<>();
+        if (hasText(constraints.getKeyword())) values.add("“" + constraints.getKeyword() + "”");
+        if (hasText(constraints.getCuisine())) values.add("“" + constraints.getCuisine() + "”");
+        if (constraints.getBudgetPerPerson() != null && constraints.getBudgetPerPerson() > 0) {
+            values.add("人均预算" + constraints.getBudgetPerPerson() + "元");
+        }
+        if (constraints.getPreferences() != null) {
+            for (String preference : constraints.getPreferences()) if (hasText(preference)) values.add("偏好“" + preference + "”");
+        }
+        return String.join("/", values);
+    }
+
+    private String automaticRelaxationNote(com.hmdp.ai.dto.DecisionConstraints constraints) {
+        if (constraints == null || constraints.getSystemNotes() == null) return "";
+        for (String note : constraints.getSystemNotes()) {
+            if (note != null && note.contains("系统默认附近范围已从")) return note;
+        }
+        return "";
+    }
+
+    private String formatDistance(Double value) {
+        if (value == null) return "";
+        return value == Math.rint(value) ? String.valueOf(value.intValue()) : String.valueOf(value);
     }
 
     /** A paused recommendation may be refined after unrelated small talk. */

@@ -2,9 +2,11 @@ package com.hmdp.ai.service;
 
 import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionContextQuery;
+import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.ReferenceIntent;
 import com.hmdp.ai.dto.ResolvedShopReference;
 import com.hmdp.ai.dto.TurnCommandSet;
+import com.hmdp.ai.dto.TurnCommand;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -88,5 +90,34 @@ class TurnUnderstandingServiceTest {
                 java.util.Map.of("role", "assistant", "content", "好的，我们可以聊点别的")), null);
 
         assertFalse(result.isContextQueryRequested());
+    }
+
+    @Test
+    void recognizesBroadFoodRecoveryOnlyForWaitingRelaxationWithSpecificTarget() {
+        DecisionConstraints paused = new DecisionConstraints();
+        paused.setNearby(true);
+        paused.setRadiusKm(5D);
+        paused.setKeyword("兰州拉面");
+        paused.setCuisine("面食");
+
+        TurnCommandSet result = service.understand("那附近有啥", "那附近有啥", Collections.emptyList(), null,
+                "WAITING_RELAXATION", paused);
+
+        assertTrue(result.hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+    }
+
+    @Test
+    void broadFoodRecoveryDoesNotApplyToOrdinaryConversationOrExplanation() {
+        DecisionConstraints paused = new DecisionConstraints();
+        paused.setNearby(true);
+        paused.setKeyword("兰州拉面");
+        paused.setCuisine("面食");
+
+        assertFalse(service.understand("附近有啥", "附近有啥", Collections.emptyList(), null,
+                "COMPLETED", paused).hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+        assertFalse(service.understand("什么意思", "什么意思", Collections.emptyList(), null,
+                "WAITING_RELAXATION", paused).hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+        assertFalse(service.understand("没有兰州拉面吗", "没有兰州拉面吗", Collections.emptyList(), null,
+                "WAITING_RELAXATION", paused).hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
     }
 }

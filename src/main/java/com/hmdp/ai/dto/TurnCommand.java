@@ -12,6 +12,7 @@ public class TurnCommand {
         SET_LOCATION_INTENT,
         ASK_DECISION_CONTEXT,
         ASK_SHOP_FACT,
+        BROADEN_FOOD_SCOPE,
         REFERENCE
     }
 

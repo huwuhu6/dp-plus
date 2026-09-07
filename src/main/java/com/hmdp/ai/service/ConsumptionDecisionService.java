@@ -457,6 +457,9 @@ public class ConsumptionDecisionService {
         if (hasRelaxablePreferenceTag(constraints)) {
             response.getOptions().add(new DecisionOption("RELAX_HARD_CONSTRAINTS", "保留地点和核心需求，移除额外偏好要求"));
         }
+        if (hasText(constraints.getKeyword()) || hasText(constraints.getCuisine())) {
+            response.getOptions().add(new DecisionOption("BROADEN_FOOD_SCOPE", "保留当前位置和其他条件，看看附近其他餐饮"));
+        }
         // B 修复 #case30：WAITING_RELAXATION 态提供"改用当前位置"选项（按钮 + 自然语言"我附近"双通道），
         // 让位置恢复对用户可发现；转移表已允许 WAITING_RELAXATION + PROVIDE_LOCATION → RESUMING。
         response.getOptions().add(new DecisionOption("PROVIDE_LOCATION", "改用当前位置重新搜索"));
@@ -549,6 +552,10 @@ public class ConsumptionDecisionService {
             constraints.getPreferences().remove("清淡");
         } else if (command == DecisionCommand.RELAX_HARD_CONSTRAINTS && hasRelaxablePreferenceTag(constraints)) {
             constraints.setPreferences(removeRelaxablePreferenceTags(constraints.getPreferences()));
+        } else if (command == DecisionCommand.BROADEN_FOOD_SCOPE
+                && (hasText(constraints.getKeyword()) || hasText(constraints.getCuisine()))) {
+            constraints.setKeyword("");
+            constraints.setCuisine("");
         } else {
             throw new IllegalArgumentException("Decision Command 无效或不适用于当前约束: " + command);
         }

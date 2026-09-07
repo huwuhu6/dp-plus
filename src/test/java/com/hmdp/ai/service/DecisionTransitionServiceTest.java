@@ -167,6 +167,17 @@ class DecisionTransitionServiceTest {
     }
 
     @Test
+    void broadFoodScopeIsOnlyLegalAsWaitingRelaxationRecovery() {
+        DecisionTransition transition = transitions.resolve("WAITING_RELAXATION", DecisionCommand.BROADEN_FOOD_SCOPE);
+        assertEquals("RESUMING", transition.getNextState());
+        assertTrue(transition.getSideEffects().contains(DecisionSideEffect.APPLY_RELAXATION));
+        assertTrue(transition.getSideEffects().contains(DecisionSideEffect.CLEAR_PENDING_OPTIONS));
+        assertTrue(transition.getSideEffects().contains(DecisionSideEffect.RETRY_SEARCH));
+        assertThrows(IllegalArgumentException.class,
+                () -> transitions.resolve("COMPLETED", DecisionCommand.BROADEN_FOOD_SCOPE));
+    }
+
+    @Test
     void registersEverySupportedCommandWithOneStableTransitionMeaning() {
         assertEquals("CREATED", transitions.resolve("NEW", DecisionCommand.START_DECISION).getNextState());
         assertEquals("EXTRACTING", transitions.resolve("CREATED", DecisionCommand.EXTRACT_CONSTRAINTS).getNextState());
@@ -187,7 +198,7 @@ class DecisionTransitionServiceTest {
     void mapsAllUserOptionsToDomainCommandsWithoutTreatingThemAsState() {
         for (String option : List.of("PROVIDE_LOCATION", "DECLINE_LOCATION", "END_DECISION",
                 "EXPAND_RADIUS", "INCREASE_BUDGET", "RELAX_CUISINE", "RELAX_QUIET",
-                "ALLOW_QUEUE", "RELAX_LIGHT_TASTE", "RELAX_HARD_CONSTRAINTS", "SWITCH_CITY")) {
+                "ALLOW_QUEUE", "RELAX_LIGHT_TASTE", "RELAX_HARD_CONSTRAINTS", "BROADEN_FOOD_SCOPE", "SWITCH_CITY")) {
             assertEquals(option, transitions.commandForOption(option).name());
         }
         assertThrows(IllegalArgumentException.class, () -> transitions.commandForOption("REQUIRE_LOCATION"));

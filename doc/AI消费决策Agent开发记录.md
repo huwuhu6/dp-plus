@@ -2299,3 +2299,11 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 本轮将 `TurnUnderstandingService` 收敛为引用态 mutation permission 的唯一 authority：`isCompoundMutationFollowUp()` 与 `selectAction()` 统一调用同一个结构化语义门；只有语义层明确允许 mutation 后，才调用 Extractor 获取 Delta。Extractor 只提供 Delta 内容，不再决定当前 Turn 是否有状态写权限；缺少 TurnUnderstandingService 时生产路径 fail-closed。旧的 `hasMutation(DecisionConstraints)` 判定器已删除。
 
 新增测试覆盖：事实追问即使 Extractor 返回 cuisine 也保持 `CriteriaIntent.NONE` 且不调用 Extractor；结构化 mutation anchor 的“第一家太贵，第二家有插座吗”仍为 `APPLY_DELTA`；缺少语义服务时引用态 mutation 不被旧 Delta 重新激活。相关 `TurnUnderstandingServiceTest`、`TurnPlanTest`、`ChatOrchestrationServiceTest` 定向测试通过；按任务要求未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
+### WAITING_RELAXATION 的泛化搜索恢复契约（2026-09-07）
+
+真实对话 `web-1788773711194-stkamtyi` 暴露：兰州拉面在当前位置附近无硬过滤结果后，会话进入 `WAITING_RELAXATION`；用户说“那附近有啥”时被普通路由判为 `GENERAL_CHAT`，没有清除具体食物目标并重试。问题不是 GPS 未写入，而是暂停态缺少“放弃具体食物、保留搜索范围”的结构化恢复命令。
+
+本轮新增 `DecisionCommand.BROADEN_FOOD_SCOPE` 及同名 request-scoped TurnCommand。它只在 `WAITING_RELAXATION` 且当前暂停约束仍有 keyword/cuisine 时生效：转移到 `RESUMING`，清空 pending options，清除 keyword/cuisine 后重试；CURRENT_DEVICE、已解析位置、radius、budget、其他偏好和历史 RecommendationBatch 均保留。自然语言识别使用暂停状态、现有 food target、附近范围和泛化意图特征的组合，不影响非暂停会话中的“附近有啥”。
+
+`EXPLAIN_SUSPENDED_DECISION` 改为基于持久化 `DecisionResponse.constraints` 与 `RelaxationInfo` 输出事实：搜索范围、当前 food/budget 条件、0 家结果、是否自动扩大过默认半径及可执行的下一步。相关语义、状态转移、编排和决策服务定向测试通过（13/13、17/17、46 tests/1 skipped、46/46）；未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
