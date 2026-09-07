@@ -327,5 +327,58 @@ class ConstraintExtractorTest {
         assertEquals("福州市", constraints.getTargetCity());
     }
 
+    @Test
+    void doesNotGroundCityHintFromPoiPrefix() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = modelResponse(objectMapper, "{\"targetCity\":\"福州市\",\"targetArea\":\"福州大学\",\"locationIntent\":\"EXPLICIT_TARGET\",\"keyword\":\"\",\"cuisine\":\"\",\"budgetPerPerson\":-1,\"radiusKm\":-1,\"nearby\":false,\"arrivalTime\":\"\",\"preferences\":[],\"missingInformation\":[]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
 
+        DecisionConstraints constraints = extractor.extract("福州大学附近有什么吃的");
+
+        assertEquals("", constraints.getTargetCity());
+        assertEquals("福州大学", constraints.getTargetArea());
+    }
+
+    @Test
+    void keepsExplicitCityAndPoiTogether() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = modelResponse(objectMapper, "{\"targetCity\":\"福州市\",\"targetArea\":\"福州大学\",\"locationIntent\":\"EXPLICIT_TARGET\",\"keyword\":\"\",\"cuisine\":\"\",\"budgetPerPerson\":-1,\"radiusKm\":-1,\"nearby\":false,\"arrivalTime\":\"\",\"preferences\":[],\"missingInformation\":[]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("福州市福州大学附近有什么吃的");
+
+        assertEquals("福州市", constraints.getTargetCity());
+        assertEquals("福州大学", constraints.getTargetArea());
+    }
+
+    @Test
+    void doesNotGroundDistrictHintFromAnotherPoiPrefix() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ConstraintExtractor extractor = new ConstraintExtractor();
+        ReflectionTestUtils.setField(extractor, "aiClient", client);
+        ReflectionTestUtils.setField(extractor, "objectMapper", objectMapper);
+        JsonNode modelResponse = modelResponse(objectMapper, "{\"targetDistrict\":\"仓山区\",\"targetArea\":\"仓山公园\",\"locationIntent\":\"EXPLICIT_TARGET\",\"keyword\":\"\",\"cuisine\":\"\",\"budgetPerPerson\":-1,\"radiusKm\":-1,\"nearby\":false,\"arrivalTime\":\"\",\"preferences\":[],\"missingInformation\":[]}");
+        when(client.chatCompletion(any(), any(), any(), any())).thenReturn(modelResponse);
+
+        DecisionConstraints constraints = extractor.extract("仓山公园附近有什么吃的");
+
+        assertEquals("", constraints.getTargetDistrict());
+        assertEquals("仓山公园", constraints.getTargetArea());
+    }
+    private JsonNode modelResponse(ObjectMapper objectMapper, String arguments) {
+        Map<String, Object> function = new LinkedHashMap<>();
+        function.put("arguments", arguments);
+        Map<String, Object> toolCall = Map.of("function", function);
+        Map<String, Object> message = Map.of("tool_calls", List.of(toolCall));
+        return objectMapper.valueToTree(Map.of("choices", List.of(Map.of("message", message))));
+    }
 }

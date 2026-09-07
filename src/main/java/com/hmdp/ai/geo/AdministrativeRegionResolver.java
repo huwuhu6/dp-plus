@@ -49,6 +49,42 @@ public class AdministrativeRegionResolver {
         }
     }
 
+    /**
+     * Validates an administrative candidate produced by an untrusted extractor.
+     *
+     * The extractor may know the canonical name (for example, "福州市") while
+     * the user message only contains an alias.  That alias is accepted only when
+     * it is independently grounded in the message; an alias embedded in a POI
+     * such as "福州大学" is not an administrative mention.  Once grounded, the
+     * ordinary resolver remains the sole authority for identity and hierarchy.
+     */
+    public AdministrativeResolution resolveHint(String rawQuery, DecisionConstraints hint,
+                                                DecisionConstraints context) {
+        if (hint == null) return AdministrativeResolution.notFound();
+        String query = normalize(rawQuery);
+        if (query.isEmpty()) return AdministrativeResolution.notFound();
+
+        StringBuilder grounded = new StringBuilder();
+        appendGroundedHint(grounded, query, hint.getTargetProvince());
+        appendGroundedHint(grounded, query, hint.getTargetCity());
+        appendGroundedHint(grounded, query, hint.getTargetDistrict());
+        if (grounded.length() == 0) return AdministrativeResolution.notFound();
+        return resolve(grounded.toString(), context);
+    }
+
+    private void appendGroundedHint(StringBuilder grounded, String query, String hintedName) {
+        String canonical = normalize(hintedName);
+        if (!canonical.isEmpty() && independentlyMentioned(query, canonical)) grounded.append(canonical);
+    }
+
+    private boolean independentlyMentioned(String query, String canonical) {
+        if (query.contains(canonical)) return true;
+        String alias = stripSuffix(canonical);
+        // A suffixless alias is useful for natural input ("连江"), but an
+        // alias occurring inside a known POI/landmark is not sufficient evidence.
+        return !alias.isEmpty() && query.contains(alias) && !looksLikePoi(query);
+    }
+
     private AdministrativeResolution resolveLocal(String query, DecisionConstraints context) {
         List<AdministrativeRegion> districts = repository.findCandidates(query).stream()
                 .filter(region -> region.getLevel() == AdministrativeLevel.DISTRICT)

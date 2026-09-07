@@ -55,9 +55,7 @@ public class ConstraintExtractor {
         // state merely because the model filled a slot.
         if (regionResolution != null && regionResolution.status() != AdministrativeResolution.Status.RESOLVED
                 && hasAdministrativeHint(constraints)) {
-            String groundedHint = administrativeHint(query, constraints);
-            AdministrativeResolution hinted = groundedHint.isEmpty()
-                    ? AdministrativeResolution.notFound() : resolver().resolve(groundedHint, locationContext);
+            AdministrativeResolution hinted = resolver().resolveHint(query, constraints, locationContext);
             if (hinted.status() != AdministrativeResolution.Status.NOT_FOUND) regionResolution = hinted;
         }
         mergeAdministrativeResolution(constraints, regionResolution);
@@ -114,7 +112,9 @@ public class ConstraintExtractor {
             constraints.setTargetCity(region.getCity());
             constraints.setTargetDistrict(region.getDistrict());
         }
-        constraints.setTargetArea("");
+        // Administrative scope and a POI may be stated together (for example,
+        // "福州市福州大学").  Resolver validation must not erase the independent
+        // targetArea extracted from the same turn.
         constraints.setLocationIntent("EXPLICIT_TARGET");
     }
 
@@ -134,31 +134,6 @@ public class ConstraintExtractor {
     private boolean hasAdministrativeHint(DecisionConstraints constraints) {
         return constraints != null && (hasText(constraints.getTargetProvince())
                 || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetDistrict()));
-    }
-
-    private String administrativeHint(String query, DecisionConstraints constraints) {
-        String normalized = query == null ? "" : query.replaceAll("[\\s\\p{Punct}，。！？：；、“”‘’（）【】]+", "");
-        List<String> grounded = new ArrayList<>();
-        if (containsAdminName(normalized, constraints.getTargetProvince())) grounded.add(nonBlank(constraints.getTargetProvince()));
-        if (containsAdminName(normalized, constraints.getTargetCity())) grounded.add(nonBlank(constraints.getTargetCity()));
-        if (containsAdminName(normalized, constraints.getTargetDistrict())) grounded.add(nonBlank(constraints.getTargetDistrict()));
-        return String.join("", grounded);
-    }
-
-    private boolean containsAdminName(String query, String value) {
-        String normalized = value == null ? "" : value.replaceAll("[\\s\\p{Punct}，。！？：；、“”‘’（）【】]+", "");
-        if (normalized.isEmpty()) return false;
-        return query.contains(normalized) || query.contains(stripAdminSuffix(normalized));
-    }
-
-    private String nonBlank(String value) { return hasText(value) ? value : ""; }
-
-    private String stripAdminSuffix(String value) {
-        if (value == null) return "";
-        for (String suffix : new String[]{"省", "市", "区", "县"}) {
-            if (value.endsWith(suffix) && value.length() > suffix.length()) return value.substring(0, value.length() - suffix.length());
-        }
-        return value;
     }
 
     private AdministrativeRegionResolver resolver() {

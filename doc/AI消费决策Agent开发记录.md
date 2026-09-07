@@ -2229,6 +2229,12 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 
 本轮没有新增自然语言 `contains`/`startsWith` 词表或 Regex；仅有一处系统备注去重的结构性 `contains` 和一处 `CONFIRM_RESOLVED_LOCATION_` 选项 ID 前缀判断，均不参与用户语言理解。其余改动是路由结构化 prompt、统一半径 normalization，以及显式地点确认与设备定位恢复的边界保护。`mvn -q test` 全绿。
 
+### 行政候选原文 grounding 与 POI 边界收口（2026-09-07）
+
+模型返回的行政候选仍属于 untrusted hint。旧实现由 `ConstraintExtractor` 直接使用 canonical 名称及去后缀别名做 substring 判断，导致“福州大学”可能被误认为用户独立提到了“福州市”。本轮将 grounding authority 收口到 `AdministrativeRegionResolver.resolveHint(...)`：Resolver 先验证 raw query 是否包含完整行政名称，或是否包含未嵌入已知 POI/地标边界的 suffixless alias，再调用既有行政 authority 完成 identity 与 hierarchy 验证；Extractor 不再维护第二套行政 substring 规则。
+
+完整行政名称可以与 POI 共存（“福州市福州大学附近”同时保留 city 与 targetArea）；仅嵌在 POI 前缀中的 alias 不进入 canonical 行政状态（“福州大学附近”“仓山公园附近”）。连江等 suffixless 行政表达仍通过 provider/registry 验证，authority 不可用或层级不完整时继续 clarification，不回退 GPS。生产代码新增具体行政名称 hardcode=0，未新增 Case/商户特判或用户语言词表；Resolver 复用了已有 `looksLikePoi` boundary。相关 Resolver、Provider、ConstraintExtractor、Policy/Orchestration 定向测试通过，FULL REGRESSION: DEFERRED BY INSTRUCTION。
+
 ### 行政区解析与模型空 tool call 解耦（2026-09-07）
 
 真实聊天 `web-1788740642112-dhfwjshz` 暴露：用户说“帮我看看鼓楼有什么东西吃”时，ConstraintExtractor 收到模型成功响应但 `tool_calls=[]`，随后整体回退到普通规则抽取，行政区语义丢失；用户拒绝定位后因此退化为跨城市全局检索。问题不在 `tbl_shop` 的鼓楼数据覆盖，而在行政语义没有独立 authority。

@@ -59,4 +59,35 @@ class AdministrativeRegionResolverTest {
         assertEquals("福建省", result.candidates().get(0).getProvince());
         assertEquals("福州市", result.candidates().get(0).getCity());
     }
+
+    @Test
+    void rejectsAdministrativeAliasEmbeddedInPoiWhenValidatingModelHint() {
+        DecisionConstraints hint = new DecisionConstraints();
+        hint.setTargetCity("福州市");
+
+        AdministrativeResolution result = resolver.resolveHint("福州大学附近有什么吃的", hint, null);
+
+        assertEquals(AdministrativeResolution.Status.NOT_FOUND, result.status());
+    }
+
+    @Test
+    void acceptsFullAdministrativeNameAlongsidePoi() {
+        DecisionConstraints hint = new DecisionConstraints();
+        hint.setTargetCity("福州市");
+
+        AdministrativeResolution result = resolver.resolveHint("福州市福州大学附近有什么吃的", hint, null);
+
+        assertEquals(AdministrativeResolution.Status.RESOLVED, result.status());
+        assertEquals("福州市", result.candidates().get(0).getCity());
+    }
+
+    @Test
+    void rejectsAnotherPoiPrefixInsteadOfTreatingItAsDistrict() {
+        DecisionConstraints hint = new DecisionConstraints();
+        hint.setTargetDistrict("仓山区");
+
+        AdministrativeResolution result = resolver.resolveHint("仓山公园附近有什么吃的", hint, null);
+
+        assertEquals(AdministrativeResolution.Status.NOT_FOUND, result.status());
+    }
 }
