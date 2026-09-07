@@ -139,4 +139,23 @@ class TurnUnderstandingServiceTest {
         assertFalse(keepTarget.hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
         assertTrue(abandonTarget.hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
     }
+
+    @Test
+    void broadFoodRecoveryIgnoresBlankPausedFoodTargetsWhenCheckingRepetition() {
+        DecisionConstraints cuisineOnly = new DecisionConstraints();
+        cuisineOnly.setNearby(true);
+        cuisineOnly.setCuisine("火锅");
+        DecisionConstraints keywordOnly = new DecisionConstraints();
+        keywordOnly.setNearby(true);
+        keywordOnly.setKeyword("兰州拉面");
+
+        assertTrue(service.understand("那附近有啥", "那附近有啥", Collections.emptyList(), null,
+                "WAITING_RELAXATION", cuisineOnly).hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+        assertTrue(service.understand("那附近有啥", "那附近有啥", Collections.emptyList(), null,
+                "WAITING_RELAXATION", keywordOnly).hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+        assertFalse(service.understand("附近有什么火锅", "附近有什么火锅", Collections.emptyList(), null,
+                "WAITING_RELAXATION", cuisineOnly).hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+        assertFalse(service.understand("附近有什么兰州拉面", "附近有什么兰州拉面", Collections.emptyList(), null,
+                "WAITING_RELAXATION", keywordOnly).hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+    }
 }
