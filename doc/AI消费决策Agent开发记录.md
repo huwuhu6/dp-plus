@@ -1,5 +1,13 @@
 # AI 消费决策 Agent 开发记录
 
+### 餐饮路由领域边界校正（2026-09-07）
+
+本轮基于实际对话复盘，修正暂停/无结果餐饮决策被旅游目的误继承的问题。原确定性谓词把通用词“地方”计入 `asksForPlace`，与“有没有/推荐”等词组合后会命中 `START_DECISION`；同时 `replacesPausedDecision` 位于非餐饮领域守卫之前，命中后直接返回，使旅游语义无法进入 OOS 判定。行政区 Resolver 命中也不能单独证明用户要找餐饮。
+
+修复将非餐饮领域守卫前置到暂停决策替换之前，移除通用“地方”的餐饮证据，并要求行政实体路由、附近延续和新推荐规则具备真实餐饮信号；保留明确的“餐厅/吃饭/菜系/餐饮场景”路径。路由模型提示补充了餐饮上下文中的“福州→鼓楼”与旅游上下文中的“旅游→福建省内”对照，但没有增加旅游短语词表或 Case 特判。`GENERAL_CHAT` 仍保留 dormant dining Working Memory，未修改 ZERO_RESULT criteria 继承、Task 或状态清理行为。
+
+定向验证：`ChatOrchestrationServiceTest` **41 tests，0 failures，0 errors，1 skipped**；4 条边界 E2E（旅游漂移、旅游连续追问、福州→鼓楼 refinement、旅游后重新提出福建餐饮需求）均通过。完整 robustness、conversation-v1、holdout 与全量 Maven 回归按本轮范围未执行：`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
 ### Location Contract 收口：行政区、POI 与设备位置分离（2026-09-07）
 
 本轮将 Location Understanding 收敛为三个互不替代的 authority：命名省/市/直辖市/区县属于本地行政 Registry 的 closed-world entity resolution；POI/地标继续交给既有 AMap MCP `maps_geo` 做 geocoding；“我附近”“离我近”“当前位置”等相对用户的表达才进入 `CURRENT_DEVICE` 和 Browser GPS。行政范围更具体不意味着需要设备定位。

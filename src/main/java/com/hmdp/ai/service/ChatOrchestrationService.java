@@ -216,6 +216,16 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             assessment.setSource("RULE");
             return;
         }
+        // 非餐饮领域守卫（#29 修复）：无餐饮强信号且命中非餐饮领域词表 → 强制 GENERAL_CHAT，
+        // 必须先于暂停决策替换，避免旅游/运动等 OOS 话题继承旧餐饮 Criteria。
+        if (isNonDiningDomain(context.getOriginalMessage())) {
+            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT, "non_dining_domain_guard");
+            // 领域守卫是确定性 RULE 拦截，修正 assessRouting 预评估落 MODEL 的统计口径（case3 审计 2026-09-03）
+            assessment.setSource("RULE");
+            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT);
+            log.info("[AI][chat] event=DOMAIN_GUARD_BLOCKED chatId={} message={}", context.getChatId(), compact(context.getOriginalMessage()));
+            return;
+        }
         boolean replacesPausedDecision = !assessment.isConflictDetected()
                 && isPausedDecision(activeDecision) && request.getSelectedOptionId() == null
                 && (isSearchRefinement(context.getOriginalMessage(), context.getEffectiveMessage())
@@ -226,16 +236,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION, "new_recommendation_replaces_paused_decision");
             context.setUsedModel(false);
             assessment.setSource("RULE");
-            return;
-        }
-        // 非餐饮领域守卫（#29 修复）：无餐饮强信号且命中非餐饮领域词表 → 强制 GENERAL_CHAT，
-        // 在正向规则与 LLM 路由之前拦截，避免"附近+看看"等规则盲区误入餐饮决策。
-        if (isNonDiningDomain(context.getOriginalMessage())) {
-            selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT, "non_dining_domain_guard");
-            // 领域守卫是确定性 RULE 拦截，修正 assessRouting 预评估落 MODEL 的统计口径（case3 审计 2026-09-03）
-            assessment.setSource("RULE");
-            assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.GENERAL_CHAT);
-            log.info("[AI][chat] event=DOMAIN_GUARD_BLOCKED chatId={} message={}", context.getChatId(), compact(context.getOriginalMessage()));
             return;
         }
         if (isAdministrativeLocationTurn(context)) {
@@ -406,6 +406,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     /** Administrative names are closed-world scope changes, not merchant follow-up questions. */
     private boolean isAdministrativeLocationTurn(ChatProcessingContext context) {
         if (administrativeRegionResolver == null || context.getOriginalMessage() == null) return false;
+        if (!hasDiningIntentEvidence(context.getOriginalMessage())) return false;
         com.hmdp.ai.dto.DecisionConstraints active = context.getWorkingMemory() == null
                 ? null : conversationStateService.activeCriteria(context.getWorkingMemory());
         AdministrativeResolution resolution = administrativeRegionResolver.resolve(context.getOriginalMessage(), active);
@@ -638,7 +639,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (!aiProperties.isConfigured()) return fallbackRoute(message, decisionStatus);
         try {
             List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
-            messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择唯一路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求、需求不完整，或无法归类到其他路由；START_DECISION=用户明确要求新餐饮推荐（找餐厅/吃饭/菜品/订餐），或在同一句中同时出现可信的命名目的地（城市、行政区、商圈、地标）与餐饮消费/推荐意图，即使没有指定菜系或预算也必须开始广泛推荐；BUSINESS_FOLLOW_UP=围绕已推荐的具体餐饮商户追问评价、优惠券、营业时间、排队、地址或备选比较，对象是候选池中的某一家店；EXIT_DECISION=用户明确结束或放弃本次餐饮推荐；EXPLAIN_SUSPENDED_DECISION=用户询问当前无结果/暂停推荐的原因或下一步如何处理，该路由不发起新搜索也不查询商户详情。领域边界：没有命名目的地且只有‘附近有啥’、‘有什么推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索；‘北京天气’、‘朋友刚从北京回来’、‘北京有哪些景点’等城市名但非餐饮消费意图仍是 GENERAL_CHAT。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。"));
+            messages.add(message("system", "你是消费决策 Agent 的对话路由器。当前业务只支持餐饮商户的消费决策。根据用户最新一句话选择唯一路由：GENERAL_CHAT=普通闲聊、能力问答、非餐饮需求、需求不完整，或无法归类到其他路由；START_DECISION=用户明确要求新餐饮推荐（找餐厅/吃饭/菜品/订餐），或在同一句中同时出现可信的命名目的地（城市、行政区、商圈、地标）与餐饮消费/推荐意图，即使没有指定菜系或预算也必须开始广泛推荐；BUSINESS_FOLLOW_UP=围绕已推荐的具体餐饮商户追问评价、优惠券、营业时间、排队、地址或备选比较，对象是候选池中的某一家店；EXIT_DECISION=用户明确结束或放弃本次餐饮推荐；EXPLAIN_SUSPENDED_DECISION=用户询问当前无结果/暂停推荐的原因或下一步如何处理，该路由不发起新搜索也不查询商户详情。领域边界：没有命名目的地且只有‘附近有啥’、‘有什么推荐’、‘有没有地方推荐’这类未说明餐饮意图的句子必须是 GENERAL_CHAT，先自然追问想找什么，不能擅自开始餐饮检索；‘北京天气’、‘朋友刚从北京回来’、‘北京有哪些景点’等城市名但非餐饮消费意图仍是 GENERAL_CHAT。游泳、健身、运动场馆、医院、景点、住宿、交通等即使包含‘附近’也必须是 GENERAL_CHAT，绝不能进入餐饮推荐。上下文边界：餐饮上下文中‘福州有什么吃的’后接‘鼓楼呢？’可以是 START_DECISION 的地点 refinement；旅游上下文中‘帮我选个地方去旅游’后接‘福建省内呢？’必须是 GENERAL_CHAT。行政实体本身不等于餐饮意图。"));
             messages.add(message("system", "当前决策状态=" + decisionStatus));
             messages.add(message("system", "反偏置：当用户表述指向更换需求、换品类或重新开始时，忽略对话历史里旧推荐结果的倾向，选择 START_DECISION，不要把它当成追问候选池。边界示例：'看看有没有别的吃的'→START_DECISION；'这家店评价怎么样'→BUSINESS_FOLLOW_UP；'换一家餐厅'→START_DECISION；'算了不吃了'→EXIT_DECISION；'这家店几点关门'→BUSINESS_FOLLOW_UP。"));
             messages.addAll(chatHistory);
@@ -870,17 +871,13 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private boolean isNewRecommendationIntent(String message) {
         if (message == null || message.isEmpty() || isFocusedShopQuestion(message)) return false;
         boolean asksForPlace = message.contains("店") || message.contains("餐厅") || message.contains("餐馆")
-                || message.contains("地方") || message.contains("吃饭");
+                || message.contains("吃饭");
         boolean asksForNewOptions = message.contains("有没有") || message.contains("有没") || message.contains("还有")
                 || message.contains("有什么") || message.contains("推荐") || message.contains("找") || message.contains("来一家");
         boolean hasScene = message.contains("适合约会") || message.contains("约会") || message.contains("聚餐")
                 || message.contains("安静") || message.contains("清淡") || message.contains("性价比");
-        boolean hasDiningCategory = message.contains("烤肉") || message.contains("烧烤") || message.contains("火锅")
-                || message.contains("日料") || message.contains("料理") || message.contains("小吃") || message.contains("咖啡")
-                || message.contains("奶茶") || message.contains("川菜") || message.contains("粤菜")
-                || message.contains("闽菜") || message.contains("湘菜") || message.contains("江浙菜")
-                || message.contains("本帮菜") || message.contains("西餐") || message.contains("韩餐")
-                || message.contains("简餐") || message.contains("快餐");
+        boolean hasDiningCategory = hasDiningCategory(message);
+        boolean hasDiningIntent = hasDiningIntentEvidence(message);
         boolean refinement = message.contains("换成") || message.contains("改成") || message.contains("便宜点")
                 || message.contains("贵点") || message.contains("不要辣") || message.contains("不吃辣");
         boolean explicitSearchVerb = message.contains("帮我找") || message.contains("帮我搜") || message.contains("找一下")
@@ -890,14 +887,29 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 || message.contains("一个人吃") || message.contains("单人");
         boolean locationSearchContinuation = message.contains("附近")
                 && (message.contains("找") || message.contains("推荐") || message.contains("看看") || message.contains("有什么"))
-                // 领域守卫：仅"附近+看看"不足以判定餐饮推荐，需同时带餐饮语义（店/餐厅/地方/吃饭 或 菜系 或 场景词），
+                // 领域守卫：仅"附近+看看"不足以判定餐饮推荐，需同时带餐饮语义（店/餐厅/吃饭 或 菜系 或餐饮信号），
                 // 避免"帮我看看附近有没有羽毛球馆"被正向规则短路误判 START_DECISION（2026-09-02 修复 #29）
-                && (asksForPlace || hasDiningSignal(message) || hasScene);
+                && hasDiningIntent;
         // "附近的火锅"：附近+菜系无动词，词表补充（case32 审计）
         boolean nearbyCategory = message.contains("附近") && hasDiningCategory;
-        return (asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory))
+        boolean diningQuestion = hasDiningSignal(message) && asksForNewOptions;
+        return hasDiningIntent && ((asksForPlace && (asksForNewOptions || hasScene || hasDiningCategory))
                 || (hasDiningCategory && (explicitSearchVerb || mealPlanChanged)) || (refinement && hasDiningCategory)
-                || locationSearchContinuation || nearbyCategory;
+                || locationSearchContinuation || nearbyCategory || diningQuestion);
+    }
+
+    private boolean hasDiningIntentEvidence(String message) {
+        return message != null && (message.contains("店") || message.contains("餐厅") || message.contains("餐馆")
+                || message.contains("吃饭") || hasDiningSignal(message) || hasDiningCategory(message));
+    }
+
+    private boolean hasDiningCategory(String message) {
+        return message != null && (message.contains("烤肉") || message.contains("烧烤") || message.contains("火锅")
+                || message.contains("日料") || message.contains("料理") || message.contains("小吃") || message.contains("咖啡")
+                || message.contains("奶茶") || message.contains("川菜") || message.contains("粤菜")
+                || message.contains("闽菜") || message.contains("湘菜") || message.contains("江浙菜")
+                || message.contains("本帮菜") || message.contains("西餐") || message.contains("韩餐")
+                || message.contains("简餐") || message.contains("快餐"));
     }
 
     private boolean isFocusedShopQuestion(String message) {

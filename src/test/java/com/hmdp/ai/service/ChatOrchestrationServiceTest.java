@@ -1226,6 +1226,50 @@ class ChatOrchestrationServiceTest {
         assertEquals("GENERAL_CHAT", ReflectionTestUtils.invokeMethod(service, "fallbackRoute",
                 "北京天气怎么样", "NONE"));
     }
+
+    @Test
+    void genericPlaceRecommendationIsNotDiningIntent() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "我不知道要去哪里玩，你有没有推荐的？"));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "有没有地方推荐？"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "有没有餐厅推荐？"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "推荐个吃饭的地方"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isNewRecommendationIntent", "那福建有什么好吃的？"));
+    }
+
+    @Test
+    void pausedDiningDecisionDoesNotDeterministicallyStartForTravelTopic() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("我刚好不知道要去哪里玩，你有没有推荐的？");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext context =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(request, null);
+        context.setOriginalMessage(request.getMessage());
+        context.setEffectiveMessage(request.getMessage());
+        DecisionResponse paused = new DecisionResponse();
+        paused.setStatus("ZERO_RESULT_NO_DATA");
+        context.setActiveDecision(paused);
+
+        com.hmdp.ai.runtime.RoutingDecisionAssessment assessment = ReflectionTestUtils.invokeMethod(
+                service, "assessRouting", context, false);
+
+        assertEquals("MODEL", assessment.getSource());
+        assertNull(assessment.getCandidateAction());
+    }
+
+    @Test
+    void administrativeEntityDoesNotCreateDiningIntentByItself() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ReflectionTestUtils.setField(service, "administrativeRegionResolver", new com.hmdp.ai.geo.AdministrativeRegionResolver());
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("福建省内有没有什么地方？");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext context =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(request, null);
+        context.setOriginalMessage(request.getMessage());
+
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "isAdministrativeLocationTurn", context));
+    }
     @Test
     void critiqueWordsDoNotSwallowShopInquiry() {
         // GLM 碰撞疫苗（2026-09-04）：critique 词表新增「实惠/平价/好贵」后，
