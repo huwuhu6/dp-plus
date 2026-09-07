@@ -80,6 +80,7 @@ public class ConsumptionDecisionService {
     @Resource private AiConversationEventMapper conversationEventMapper;
     @SuppressWarnings("unused") @Resource private AiDecisionMessageMapper messageMapper;
     @Resource private ConversationEventService conversationEventService;
+    @Resource private DecisionFailureExplanationFormatter failureExplanationFormatter = new DecisionFailureExplanationFormatter();
     @Resource private ResultEvaluationService resultEvaluationService;
     @Autowired(required = false) private SemanticShopRetriever semanticShopRetriever;
     @Value("${ai.retrieval.semantic-weight:18}") private double semanticWeight;
@@ -425,16 +426,6 @@ public class ConsumptionDecisionService {
                                                 DecisionMetrics metrics, long startedAt) throws Exception {
         DecisionConstraints constraints = response.getConstraints();
         response.setStatus("WAITING_RELAXATION");
-        boolean autoRetried = response.getRelaxation() != null && Boolean.TRUE.equals(response.getRelaxation().getAutomatic());
-        boolean lockedBudget = isLocked(constraints, "budgetPerPerson");
-        response.setQuestion(lockedBudget
-                ? "当前搜索范围内暂无人均低于 " + constraints.getBudgetPerPerson()
-                + " 元的商户。已保留你的“更便宜”要求，不会提高预算；你可以扩大搜索范围或结束本次推荐。"
-                : autoRetried
-                ? "默认附近范围已在保留地点、菜系、预算等硬条件下自动扩大一次，仍未找到匹配商户。请明确选择一项条件放宽后继续，或结束本次推荐。"
-                : "当前条件下没有找到匹配的餐饮商户。你可以选择明确放宽一项条件继续，或结束本次推荐；系统不会自动修改你的限制。");
-        // B 修复 #case30：让"改用当前位置重搜"这一恢复路径对用户可发现
-        response.setQuestion(response.getQuestion() + " 你也可以回复“我附近”，改用当前位置重新搜索。");
         if (constraints.getRadiusKm() > 0) {
             response.getOptions().add(new DecisionOption("EXPAND_RADIUS", "扩大搜索距离到 " + round(constraints.getRadiusKm() + 2D) + " km"));
         }
@@ -458,12 +449,14 @@ public class ConsumptionDecisionService {
             response.getOptions().add(new DecisionOption("RELAX_HARD_CONSTRAINTS", "保留地点和核心需求，移除额外偏好要求"));
         }
         if (hasText(constraints.getKeyword()) || hasText(constraints.getCuisine())) {
-            response.getOptions().add(new DecisionOption("BROADEN_FOOD_SCOPE", "保留当前位置和其他条件，看看附近其他餐饮"));
+            response.getOptions().add(new DecisionOption("BROADEN_FOOD_SCOPE", "保留当前搜索范围和其他条件，看看其他餐饮"));
         }
         // B 修复 #case30：WAITING_RELAXATION 态提供"改用当前位置"选项（按钮 + 自然语言"我附近"双通道），
         // 让位置恢复对用户可发现；转移表已允许 WAITING_RELAXATION + PROVIDE_LOCATION → RESUMING。
         response.getOptions().add(new DecisionOption("PROVIDE_LOCATION", "改用当前位置重新搜索"));
         response.getOptions().add(new DecisionOption("END_DECISION", "结束本次推荐"));
+        response.setQuestion(failureExplanationFormatter.format(response)
+                + " 你也可以回复“我附近”，改用当前位置重新搜索。");
         recordStep(response, session.getId(), "WAITING_RELAXATION", "候选为空，等待用户明确选择放宽项", startedAt);
         return finishPausedDecision(session, response, metrics, DecisionCommand.STRICT_SEARCH_EMPTY, "RELAXATION", startedAt);
     }

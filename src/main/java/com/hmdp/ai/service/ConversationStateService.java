@@ -22,6 +22,7 @@ import com.hmdp.ai.entity.AiWorkingMemory;
 import com.hmdp.ai.mapper.AiChatSessionMapper;
 import com.hmdp.ai.mapper.AiWorkingMemoryMapper;
 import com.hmdp.ai.runtime.ConversationEventType;
+import com.hmdp.ai.runtime.DecisionCommand;
 import com.hmdp.utils.UserHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -439,6 +440,96 @@ public class ConversationStateService {
         log.info("[AI][state] event=STATE_REDUCED chatId={} inherited={} replaced={} appended={} cleared={} invalidated={}",
                 state.getChatId(), reduction.getInherited(), reduction.getReplaced(), reduction.getAppended(),
                 reduction.getCleared(), reduction.getInvalidated());
+    }
+
+    /**
+     * Projects a validated WAITING_RELAXATION command into the canonical task.
+     * DecisionSession.constraints remains the execution snapshot; it is never
+     * copied wholesale into Working Memory here.
+     */
+    public void applyDecisionRelaxationCommand(AiChatSession state, DecisionCommand command,
+                                               DecisionConstraints resultingConstraints) {
+        if (state == null || command == null || resultingConstraints == null) return;
+        if (!isRelaxationCommand(command)) {
+            throw new IllegalArgumentException("命令不是 relaxation projection: " + command);
+        }
+        ConversationWorkingMemory memory = workingMemory(state);
+        DecisionTaskState task = ensureActiveTask(memory);
+        DecisionConstraints criteria = task.getCriteria();
+        if (criteria == null) {
+            criteria = new DecisionConstraints();
+            task.setCriteria(criteria);
+        }
+        switch (command) {
+            case BROADEN_FOOD_SCOPE:
+                criteria.setKeyword(resultingConstraints.getKeyword());
+                criteria.setCuisine(resultingConstraints.getCuisine());
+                removeConstraintSource(task, "keyword");
+                removeConstraintSource(task, "cuisine");
+                invalidateCandidatePool(memory);
+                break;
+            case RELAX_CUISINE:
+                criteria.setCuisine(resultingConstraints.getCuisine());
+                removeConstraintSource(task, "cuisine");
+                invalidateCandidatePool(memory);
+                break;
+            case EXPAND_RADIUS:
+                criteria.setRadiusKm(resultingConstraints.getRadiusKm());
+                task.getConstraintSources().put("radiusKm", ConstraintSource.USER_EXPLICIT);
+                invalidateCandidatePool(memory);
+                break;
+            case INCREASE_BUDGET:
+                criteria.setBudgetPerPerson(resultingConstraints.getBudgetPerPerson());
+                task.getConstraintSources().put("budgetPerPerson", ConstraintSource.USER_EXPLICIT);
+                invalidateCandidatePool(memory);
+                break;
+            case RELAX_QUIET:
+                removePreference(criteria, task, "安静");
+                invalidateCandidatePool(memory);
+                break;
+            case ALLOW_QUEUE:
+                removePreference(criteria, task, "不排队");
+                invalidateCandidatePool(memory);
+                break;
+            case RELAX_LIGHT_TASTE:
+                removePreference(criteria, task, "清淡");
+                invalidateCandidatePool(memory);
+                break;
+            case RELAX_HARD_CONSTRAINTS:
+                projectPreferenceRemovals(criteria, task, resultingConstraints);
+                invalidateCandidatePool(memory);
+                break;
+            default:
+                throw new IllegalArgumentException("命令不是 relaxation projection: " + command);
+        }
+        updateWorkingMemory(state, memory);
+    }
+
+    private boolean isRelaxationCommand(DecisionCommand command) {
+        return command == DecisionCommand.BROADEN_FOOD_SCOPE || command == DecisionCommand.RELAX_CUISINE
+                || command == DecisionCommand.EXPAND_RADIUS || command == DecisionCommand.INCREASE_BUDGET
+                || command == DecisionCommand.RELAX_QUIET || command == DecisionCommand.ALLOW_QUEUE
+                || command == DecisionCommand.RELAX_LIGHT_TASTE || command == DecisionCommand.RELAX_HARD_CONSTRAINTS;
+    }
+
+    private void projectPreferenceRemovals(DecisionConstraints criteria, DecisionTaskState task,
+                                           DecisionConstraints resultingConstraints) {
+        List<String> current = criteria.getPreferences() == null
+                ? new ArrayList<String>() : new ArrayList<String>(criteria.getPreferences());
+        List<String> resulting = resultingConstraints.getPreferences() == null
+                ? new ArrayList<String>() : resultingConstraints.getPreferences();
+        for (String preference : current) {
+            if (!resulting.contains(preference)) removePreference(criteria, task, preference);
+        }
+    }
+
+    private void removePreference(DecisionConstraints criteria, DecisionTaskState task, String preference) {
+        if (criteria.getPreferences() != null) criteria.getPreferences().remove(preference);
+        removeConstraintSource(task, "preference:" + preference);
+    }
+
+    private void removeConstraintSource(DecisionTaskState task, String key) {
+        if (task.getConstraintSources() != null) task.getConstraintSources().remove(key);
     }
 
     public void snapshotDecision(AiChatSession state, DecisionResponse decision) {

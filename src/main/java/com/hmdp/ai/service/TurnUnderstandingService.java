@@ -75,6 +75,9 @@ public class TurnUnderstandingService {
         boolean nearbyScope = Boolean.TRUE.equals(pausedConstraints.getNearby())
                 || containsAny(text, "附近", "周边", "周围");
         if (!nearbyScope) return false;
+        boolean repeatsSpecificTarget = containsAny(text, pausedConstraints.getKeyword(), pausedConstraints.getCuisine());
+        boolean explicitAbandonment = containsAny(text, "随便", "都行", "都可以", "不限", "不一定", "不必");
+        if (repeatsSpecificTarget && !explicitAbandonment) return false;
         boolean relinquishesSpecificTarget = containsAny(text, "随便", "都行", "都可以", "不限",
                 "不一定", "其他", "啥", "什么");
         boolean foodSearchIntent = containsAny(text, "吃", "餐", "店", "看看", "找", "推荐", "附近");
@@ -162,7 +165,8 @@ public class TurnUnderstandingService {
     }
 
     private boolean containsAny(String value, String... terms) {
-        for (String term : terms) if (value.contains(term)) return true;
+        if (value == null || terms == null) return false;
+        for (String term : terms) if (term != null && !term.isEmpty() && value.contains(term)) return true;
         return false;
     }
 

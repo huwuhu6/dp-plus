@@ -120,4 +120,23 @@ class TurnUnderstandingServiceTest {
         assertFalse(service.understand("没有兰州拉面吗", "没有兰州拉面吗", Collections.emptyList(), null,
                 "WAITING_RELAXATION", paused).hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
     }
+
+    @Test
+    void broadFoodRecoveryDoesNotTreatSpecificTargetBrowseAsRelaxation() {
+        DecisionConstraints paused = new DecisionConstraints();
+        paused.setNearby(true);
+        paused.setKeyword("兰州拉面");
+        paused.setCuisine("面食");
+
+        TurnCommandSet sameTarget = service.understand("附近有什么兰州拉面？", "附近有什么兰州拉面？",
+                Collections.emptyList(), null, "WAITING_RELAXATION", paused);
+        TurnCommandSet keepTarget = service.understand("还是找兰州拉面吧", "还是找兰州拉面吧",
+                Collections.emptyList(), null, "WAITING_RELAXATION", paused);
+        TurnCommandSet abandonTarget = service.understand("不一定要兰州拉面，附近吃啥都行", "不一定要兰州拉面，附近吃啥都行",
+                Collections.emptyList(), null, "WAITING_RELAXATION", paused);
+
+        assertFalse(sameTarget.hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+        assertFalse(keepTarget.hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+        assertTrue(abandonTarget.hasCommand(TurnCommand.Type.BROADEN_FOOD_SCOPE));
+    }
 }

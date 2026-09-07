@@ -2307,3 +2307,11 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 本轮新增 `DecisionCommand.BROADEN_FOOD_SCOPE` 及同名 request-scoped TurnCommand。它只在 `WAITING_RELAXATION` 且当前暂停约束仍有 keyword/cuisine 时生效：转移到 `RESUMING`，清空 pending options，清除 keyword/cuisine 后重试；CURRENT_DEVICE、已解析位置、radius、budget、其他偏好和历史 RecommendationBatch 均保留。自然语言识别使用暂停状态、现有 food target、附近范围和泛化意图特征的组合，不影响非暂停会话中的“附近有啥”。
 
 `EXPLAIN_SUSPENDED_DECISION` 改为基于持久化 `DecisionResponse.constraints` 与 `RelaxationInfo` 输出事实：搜索范围、当前 food/budget 条件、0 家结果、是否自动扩大过默认半径及可执行的下一步。相关语义、状态转移、编排和决策服务定向测试通过（13/13、17/17、46 tests/1 skipped、46/46）；未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
+### WAITING_RELAXATION 恢复契约的 canonical projection 与解释事实收口（2026-09-07）
+
+此前 `continueDecision()` 会在 `DecisionSession.constraints` 中应用放宽命令，而 `snapshotDecision()` 按设计不覆盖 `activeTask.criteria`，因此 DecisionSession 执行快照与 Working Memory canonical criteria 可能分叉。本轮增加 `ConversationStateService.applyDecisionRelaxationCommand()`，仅对白名单 relaxation command 投影允许字段：BROADEN_FOOD_SCOPE 清除 keyword/cuisine；RELAX_CUISINE 清除 cuisine；EXPAND_RADIUS/INCREASE_BUDGET 同步成功后的数值并记录 USER_EXPLICIT；各 preference relaxation 只删除对应 preference 及 value-level provenance。每个放宽命令都会失效当前 candidate/focus projection，但只追加空 Batch，不删除历史 RecommendationBatch；没有把完整 DecisionConstraints 复制回 canonical state。`snapshotDecision()` 的“不覆盖 criteria”不变量保持不变。
+
+首次进入 WAITING_RELAXATION 时，`pauseForRelaxation()` 与后续 `EXPLAIN_SUSPENDED_DECISION` 共同复用 `DecisionFailureExplanationFormatter`，从持久化 DecisionResponse 事实生成范围、radius、food/budget 条件、结果数量、自动扩大记录和下一步选项，避免两套文案对同一失败事实产生漂移。BROADEN 的弱泛化词（“啥/什么”）在用户再次提及当前具体 food target 时不触发；只有“随便/都行/不一定”等明确放弃信号，或未重复具体 target 的泛化表达，才在 WAITING_RELAXATION 下产生恢复命令。未增加具体 CaseCode、商户或食物名称的生产特判。
+
+定向测试结果：ConversationStateServiceTest 8/8、DecisionTransitionServiceTest 17/17、TurnUnderstandingServiceTest 14/14、ChatOrchestrationServiceTest 46 通过/1 跳过、ConsumptionDecisionServiceTest 46/46；本轮未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。

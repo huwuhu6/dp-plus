@@ -63,6 +63,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     @Resource private AgentConversationService conversationService;
     @Resource private ChatMemoryService chatMemoryService;
     @Resource private ConversationStateService conversationStateService;
+    @Resource private DecisionFailureExplanationFormatter failureExplanationFormatter = new DecisionFailureExplanationFormatter();
     @Resource private LocationResolutionProvider locationResolutionService;
     @Resource private ConversationContextRewriter contextRewriter;
     @Resource private ConstraintExtractor constraintExtractor;
@@ -1145,35 +1146,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         response.setDecision(decision);
         response.setDecisionSessionId(activeSessionId);
         response.setDecisionStatus(decision.getStatus());
-        com.hmdp.ai.dto.DecisionConstraints constraints = decision.getConstraints();
-        String scope = suspendedSearchScope(constraints);
-        String conditions = suspendedFoodConditions(constraints);
-        int resultCount = decision.getRecommendations() == null ? 0 : decision.getRecommendations().size();
-        if ("ZERO_RESULT_NO_DATA".equals(decision.getStatus())) {
-            StringBuilder answer = new StringBuilder("我刚才按").append(hasText(scope) ? scope : "指定城市");
-            if (hasText(conditions)) answer.append("，保留").append(conditions).append("条件");
-            answer.append("搜索，当前找到").append(resultCount).append("家匹配商户。该范围暂无入库商户。");
-            answer.append("你可以切换城市或周边区域后再搜");
-            response.setAnswer(answer.append("。").toString());
-        } else {
-            com.hmdp.ai.dto.RelaxationInfo relaxation = decision.getRelaxation();
-            StringBuilder answer = new StringBuilder("我刚才按").append(hasText(scope) ? scope : "当前搜索范围");
-            if (hasText(conditions)) answer.append("，保留").append(conditions).append("条件");
-            answer.append("搜索，当前找到").append(resultCount).append("家匹配商户。");
-            if (relaxation != null && Boolean.TRUE.equals(relaxation.getAutomatic())) {
-                String automaticNote = automaticRelaxationNote(constraints);
-                answer.append("系统已自动扩大过一次默认附近范围");
-                if (hasText(automaticNote)) answer.append("（").append(automaticNote).append("）");
-                answer.append("，扩大后仍未找到匹配结果。");
-            }
-            List<String> choices = new ArrayList<>();
-            for (com.hmdp.ai.dto.DecisionOption option : decision.getOptions()) {
-                if (!"END_DECISION".equals(option.getId())) choices.add(option.getLabel());
-            }
-            if (!choices.isEmpty()) answer.append("你可以").append(String.join("；", choices)).append("。");
-            else answer.append("当前没有可执行的放宽选项。");
-            response.setAnswer(answer.toString());
-        }
+        response.setAnswer(failureExplanationFormatter.format(decision));
         log.info("[AI][chat] event=SUSPENDED_DECISION_EXPLAINED chatId={} sessionId={} status={} query={}",
                 chatId, activeSessionId, decision.getStatus(), compact(message));
         recordTurn(chatId, message, response);
@@ -1187,52 +1160,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private com.hmdp.ai.dto.DecisionConstraints activeCriteriaForTurn(ChatProcessingContext context) {
         if (context == null || context.getWorkingMemory() == null || conversationStateService == null) return null;
         return conversationStateService.activeCriteria(context.getWorkingMemory());
-    }
-
-    private String suspendedSearchScope(com.hmdp.ai.dto.DecisionConstraints constraints) {
-        if (constraints == null) return "当前搜索范围";
-        String named = hasText(constraints.getTargetArea()) ? constraints.getTargetArea()
-                : (hasText(constraints.getTargetDistrict()) ? constraints.getTargetDistrict()
-                : (hasText(constraints.getTargetCity()) ? constraints.getTargetCity() : constraints.getTargetProvince()));
-        String base;
-        if ("CURRENT_DEVICE".equalsIgnoreCase(constraints.getLocationIntent()) || Boolean.TRUE.equals(constraints.getNearby())) {
-            base = "当前位置附近";
-        } else if (hasText(named)) {
-            base = named;
-        } else {
-            base = "当前搜索范围";
-        }
-        if (constraints.getRadiusKm() != null && constraints.getRadiusKm() > 0D) {
-            base += " " + formatDistance(constraints.getRadiusKm()) + "km";
-        }
-        return base;
-    }
-
-    private String suspendedFoodConditions(com.hmdp.ai.dto.DecisionConstraints constraints) {
-        if (constraints == null) return "";
-        List<String> values = new ArrayList<>();
-        if (hasText(constraints.getKeyword())) values.add("“" + constraints.getKeyword() + "”");
-        if (hasText(constraints.getCuisine())) values.add("“" + constraints.getCuisine() + "”");
-        if (constraints.getBudgetPerPerson() != null && constraints.getBudgetPerPerson() > 0) {
-            values.add("人均预算" + constraints.getBudgetPerPerson() + "元");
-        }
-        if (constraints.getPreferences() != null) {
-            for (String preference : constraints.getPreferences()) if (hasText(preference)) values.add("偏好“" + preference + "”");
-        }
-        return String.join("/", values);
-    }
-
-    private String automaticRelaxationNote(com.hmdp.ai.dto.DecisionConstraints constraints) {
-        if (constraints == null || constraints.getSystemNotes() == null) return "";
-        for (String note : constraints.getSystemNotes()) {
-            if (note != null && note.contains("系统默认附近范围已从")) return note;
-        }
-        return "";
-    }
-
-    private String formatDistance(Double value) {
-        if (value == null) return "";
-        return value == Math.rint(value) ? String.valueOf(value.intValue()) : String.valueOf(value);
     }
 
     /** A paused recommendation may be refined after unrelated small talk. */
@@ -1460,11 +1387,11 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                                                     AiChatSession state, Long activeSessionId,
                                                     ChatMessageResponse response) {
         String optionId = request.getSelectedOptionId();
+        DecisionResponse suspendedDecision = activeSessionId == null ? null : decisionService.getDecision(activeSessionId);
         boolean confirmedNamedLocation = optionId != null
                 && optionId.startsWith("CONFIRM_RESOLVED_LOCATION_");
         if (optionId == null) {
-            DecisionResponse current = decisionService.getDecision(activeSessionId);
-            if (current != null && "WAITING_RELAXATION".equals(current.getStatus())
+            if (suspendedDecision != null && "WAITING_RELAXATION".equals(suspendedDecision.getStatus())
                     && isLocationRecoveryExpression(message)) {
                 // B 修复 #case30：WAITING_RELAXATION 态自然语言"我附近" → 恢复（PROVIDE_LOCATION），保留约束换位置重搜
                 optionId = "PROVIDE_LOCATION";
@@ -1516,12 +1443,39 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         response.setAnswer(decision.getAnswer() == null ? decision.getQuestion() : decision.getAnswer());
         if ("CANCELLED".equals(decision.getStatus())) conversationStateService.clearActiveDecision(state);
         else conversationStateService.activateDecision(state, decision.getSessionId());
+        com.hmdp.ai.runtime.DecisionCommand relaxationCommand = relaxationCommand(optionId);
+        if (suspendedDecision != null && "WAITING_RELAXATION".equals(suspendedDecision.getStatus())
+                && relaxationCommand != null && !"CANCELLED".equals(decision.getStatus())) {
+            conversationStateService.applyDecisionRelaxationCommand(state, relaxationCommand, decision.getConstraints());
+        }
         if ("PROVIDE_LOCATION".equals(optionId) && !confirmedNamedLocation) {
             conversationStateService.applyCurrentDeviceSearchScope(state, decision.getConstraints());
         }
         conversationStateService.snapshotDecision(state, decision);
         recordTurn(chatId, message, response);
         return response;
+    }
+
+    private com.hmdp.ai.runtime.DecisionCommand relaxationCommand(String optionId) {
+        if (optionId == null) return null;
+        try {
+            com.hmdp.ai.runtime.DecisionCommand command = com.hmdp.ai.runtime.DecisionCommand.valueOf(optionId);
+            switch (command) {
+                case BROADEN_FOOD_SCOPE:
+                case RELAX_CUISINE:
+                case EXPAND_RADIUS:
+                case INCREASE_BUDGET:
+                case RELAX_QUIET:
+                case ALLOW_QUEUE:
+                case RELAX_LIGHT_TASTE:
+                case RELAX_HARD_CONSTRAINTS:
+                    return command;
+                default:
+                    return null;
+            }
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private void applyLocationSlot(DecisionRequest request, AiChatSession state,

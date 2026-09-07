@@ -88,6 +88,89 @@ class ConversationStateServiceTest {
         assertFalse(task.getConstraintSources().containsKey("preference:安静"));
     }
 
+    @Test void broadFoodRelaxationProjectsExecutionSnapshotWithoutReplacingTask() throws Exception {
+        ConversationStateService service = new ConversationStateService();
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "objectMapper", mapper);
+        WorkingMemoryVersionService versionService = org.mockito.Mockito.mock(WorkingMemoryVersionService.class);
+        org.mockito.Mockito.when(versionService.append(org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    AiWorkingMemory committed = new AiWorkingMemory();
+                    committed.setVersion(1);
+                    committed.setMemoryJson(mapper.writeValueAsString(invocation.getArgument(3)));
+                    return committed;
+                });
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "workingMemoryVersionService", versionService);
+
+        AiChatSession state = new AiChatSession();
+        state.setChatId("relaxation-projection"); state.setVersion(0);
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        DecisionTaskState task = service.ensureActiveTask(memory);
+        task.getCriteria().setKeyword("兰州拉面"); task.getCriteria().setCuisine("面食");
+        task.getCriteria().setNearby(true); task.getCriteria().setRadiusKm(5D); task.getCriteria().setBudgetPerPerson(60);
+        task.getConstraintSources().put("keyword", ConstraintSource.USER_EXPLICIT);
+        task.getConstraintSources().put("cuisine", ConstraintSource.USER_EXPLICIT);
+        TestTaskFixture.append(memory, 10L, Collections.singletonList(shop(1)));
+        state.setWorkingMemoryJson(mapper.writeValueAsString(memory));
+
+        DecisionConstraints resulting = new DecisionConstraints();
+        resulting.setNearby(true); resulting.setRadiusKm(5D); resulting.setBudgetPerPerson(60);
+        service.applyDecisionRelaxationCommand(state, com.hmdp.ai.runtime.DecisionCommand.BROADEN_FOOD_SCOPE, resulting);
+
+        ConversationWorkingMemory projected = service.workingMemory(state);
+        DecisionTaskState projectedTask = service.activeTask(projected);
+        assertEquals("", projectedTask.getCriteria().getKeyword());
+        assertEquals("", projectedTask.getCriteria().getCuisine());
+        assertTrue(projectedTask.getCriteria().getNearby());
+        assertEquals(5D, projectedTask.getCriteria().getRadiusKm());
+        assertEquals(60, projectedTask.getCriteria().getBudgetPerPerson());
+        assertEquals(2, projectedTask.getRecommendationBatches().size());
+        assertEquals(Collections.emptyList(), service.latestCandidatePool(projected));
+        assertFalse(projectedTask.getConstraintSources().containsKey("keyword"));
+        assertFalse(projectedTask.getConstraintSources().containsKey("cuisine"));
+        assertEquals(Collections.singletonList(1L), service.shownShopIds(projected));
+    }
+
+    @Test void cuisineAndRadiusRelaxationsProjectOnlyTheirCommandFields() throws Exception {
+        ConversationStateService service = new ConversationStateService();
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "objectMapper", mapper);
+        WorkingMemoryVersionService versionService = org.mockito.Mockito.mock(WorkingMemoryVersionService.class);
+        org.mockito.Mockito.when(versionService.append(org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    AiWorkingMemory committed = new AiWorkingMemory();
+                    committed.setVersion(1);
+                    committed.setMemoryJson(mapper.writeValueAsString(invocation.getArgument(3)));
+                    return committed;
+                });
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "workingMemoryVersionService", versionService);
+        AiChatSession state = new AiChatSession(); state.setChatId("relaxation-fields"); state.setVersion(0);
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        DecisionTaskState task = service.ensureActiveTask(memory);
+        task.getCriteria().setCuisine("面食"); task.getCriteria().setRadiusKm(5D);
+        task.getConstraintSources().put("cuisine", ConstraintSource.USER_EXPLICIT);
+        state.setWorkingMemoryJson(mapper.writeValueAsString(memory));
+
+        DecisionConstraints cuisineResult = new DecisionConstraints(); cuisineResult.setRadiusKm(5D);
+        service.applyDecisionRelaxationCommand(state, com.hmdp.ai.runtime.DecisionCommand.RELAX_CUISINE, cuisineResult);
+        assertEquals("", service.activeCriteria(service.workingMemory(state)).getCuisine());
+        assertFalse(service.activeTask(service.workingMemory(state)).getConstraintSources().containsKey("cuisine"));
+
+        DecisionConstraints radiusResult = new DecisionConstraints(); radiusResult.setRadiusKm(7D);
+        service.applyDecisionRelaxationCommand(state, com.hmdp.ai.runtime.DecisionCommand.EXPAND_RADIUS, radiusResult);
+        assertEquals(7D, service.activeCriteria(service.workingMemory(state)).getRadiusKm());
+        assertEquals(ConstraintSource.USER_EXPLICIT,
+                service.activeTask(service.workingMemory(state)).getConstraintSources().get("radiusKm"));
+    }
+
     @Test void currentDeviceProjectionClearsNamedTaskScope() throws Exception {
         ConversationStateService service = new ConversationStateService();
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper()
