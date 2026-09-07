@@ -65,8 +65,8 @@ logging:
 ai:
   location:
     amap:
-      enabled: ${AI_LOCATION_AMAP_ENABLED:false}
-      api-key: ${AI_LOCATION_AMAP_API_KEY:}
+      enabled: ${AI_LOCATION_AMAP_ENABLED:true}
+      api-key: ${AI_LOCATION_AMAP_API_KEY:${AMAP_MAPS_API_KEY:}}
       poi-endpoint: ${AI_LOCATION_AMAP_POI_ENDPOINT:https://restapi.amap.com/v5/place/text}
       poi-timeout-ms: ${AI_LOCATION_AMAP_POI_TIMEOUT_MS:1500}
     mcp:
