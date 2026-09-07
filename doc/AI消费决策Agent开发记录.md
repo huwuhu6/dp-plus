@@ -2291,3 +2291,11 @@ Ghost Budget 用例改为完整城市/区域表达，canonical cuisine 按当前
 `excludedCuisines` 被纳入 `ConversationStateService` 的 search-domain invalidation。新增或移除排除菜系都会清空当前 candidate projection 和 focused shop，但只追加空 Batch，不删除历史 RecommendationBatch。负向菜系 fallback 改为提取“除了 <candidate>” span，再复用 `CuisineCanonicalizer` 并校验 known canonical set，覆盖日料、火锅、烧烤、韩国料理等别名，同时拒绝未知文本。
 
 “所有/全部” follow-up 只检查最近一条 assistant 消息，避免旧 ChatMemory 中的澄清问题触发过期 CURRENT_CRITERIA。定向测试覆盖六类引用事实问题、结构化 mutation anchor、负向菜系别名、未知候选、candidate invalidation 与历史 Batch 保留；未运行 robustness、v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
+### 收敛 BUSINESS_FOLLOW_UP 的 Mutation Authority（2026-09-07）
+
+Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题 fail-closed，但 `ChatOrchestrationService` 的 `route()` 仍通过 `ConstraintExtractor → DecisionConstraints → hasMutation()` 判断复合 mutation；`selectAction()` 又通过 `TurnUnderstandingService` 做一次判断，形成两个 Mutation authority。典型后果是“第一家那个日本料理环境怎么样”中商户描述的菜系被错误写入 canonical criteria。
+
+本轮将 `TurnUnderstandingService` 收敛为引用态 mutation permission 的唯一 authority：`isCompoundMutationFollowUp()` 与 `selectAction()` 统一调用同一个结构化语义门；只有语义层明确允许 mutation 后，才调用 Extractor 获取 Delta。Extractor 只提供 Delta 内容，不再决定当前 Turn 是否有状态写权限；缺少 TurnUnderstandingService 时生产路径 fail-closed。旧的 `hasMutation(DecisionConstraints)` 判定器已删除。
+
+新增测试覆盖：事实追问即使 Extractor 返回 cuisine 也保持 `CriteriaIntent.NONE` 且不调用 Extractor；结构化 mutation anchor 的“第一家太贵，第二家有插座吗”仍为 `APPLY_DELTA`；缺少语义服务时引用态 mutation 不被旧 Delta 重新激活。相关 `TurnUnderstandingServiceTest`、`TurnPlanTest`、`ChatOrchestrationServiceTest` 定向测试通过；按任务要求未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。

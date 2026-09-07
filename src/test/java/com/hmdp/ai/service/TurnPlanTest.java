@@ -49,10 +49,12 @@ class TurnPlanTest {
     @Test
     void compoundFollowUpCanCarryStructuredDeltaWithoutSecondAction() {
         ChatOrchestrationService service = new ChatOrchestrationService();
+        TurnUnderstandingService turnSemantics = new TurnUnderstandingService();
         ConstraintExtractor extractor = mock(ConstraintExtractor.class);
         DecisionConstraints delta = new DecisionConstraints(); delta.setBudgetDirection(-1);
         when(extractor.extract("第一家太贵，第二家有插座吗")).thenReturn(delta);
         ReflectionTestUtils.setField(service, "constraintExtractor", extractor);
+        ReflectionTestUtils.setField(service, "turnUnderstandingService", turnSemantics);
 
         ChatMessageRequest request = new ChatMessageRequest(); request.setMessage("第一家太贵，第二家有插座吗");
         ChatProcessingContext context = new ChatProcessingContext(request, null);
@@ -64,10 +66,65 @@ class TurnPlanTest {
         ReferenceIntent intent = new ReferenceIntent(ReferenceIntent.Scope.LATEST, 1, "第一家", 0, 3);
         rewrite.setResolvedReferences(List.of(new ResolvedShopReference(intent, batch, 1, 1L, "A")));
         context.setContextRewrite(rewrite);
+        context.setTurnCommandSet(turnSemantics.understand(context.getOriginalMessage(), context.getEffectiveMessage(),
+                List.of(), rewrite));
 
         ReflectionTestUtils.invokeMethod(service, "selectAction", context, ChatProcessingAction.BUSINESS_FOLLOW_UP, "test");
 
         assertEquals(CriteriaIntent.APPLY_DELTA, context.getTurnPlan().getCriteriaIntent());
         assertEquals(ChatProcessingAction.BUSINESS_FOLLOW_UP, context.getTurnPlan().getExecutionAction());
+    }
+
+    @Test
+    void factQuestionCannotMutateFromExtractorValues() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        TurnUnderstandingService turnSemantics = new TurnUnderstandingService();
+        ConstraintExtractor extractor = mock(ConstraintExtractor.class);
+        ReflectionTestUtils.setField(service, "turnUnderstandingService", turnSemantics);
+        ReflectionTestUtils.setField(service, "constraintExtractor", extractor);
+
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("第一家那个日本料理环境怎么样");
+        ChatProcessingContext context = new ChatProcessingContext(request, null);
+        context.setOriginalMessage(request.getMessage());
+        context.setEffectiveMessage(request.getMessage());
+        ContextRewriteResult rewrite = ContextRewriteResult.unchanged(request.getMessage(), "test");
+        rewrite.setResolvedReferences(List.of(new ResolvedShopReference(
+                new ReferenceIntent(ReferenceIntent.Scope.LATEST, 1, "第一家", 0, 3),
+                new RecommendationBatch(), 1, 1L, "日本料理店")));
+        context.setContextRewrite(rewrite);
+        context.setTurnCommandSet(turnSemantics.understand(context.getOriginalMessage(), context.getEffectiveMessage(),
+                List.of(), rewrite));
+
+        DecisionConstraints extracted = new DecisionConstraints();
+        extracted.setCuisine("日料");
+        when(extractor.extract(request.getMessage())).thenReturn(extracted);
+
+        ReflectionTestUtils.invokeMethod(service, "selectAction", context, ChatProcessingAction.BUSINESS_FOLLOW_UP, "test");
+
+        assertEquals(CriteriaIntent.NONE, context.getTurnPlan().getCriteriaIntent());
+        org.mockito.Mockito.verifyNoInteractions(extractor);
+    }
+
+    @Test
+    void missingTurnSemanticsFailsClosedForReferenceMutation() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ChatMessageRequest request = new ChatMessageRequest();
+        request.setMessage("第一家太贵了");
+        ChatProcessingContext context = new ChatProcessingContext(request, null);
+        context.setOriginalMessage(request.getMessage());
+        context.setEffectiveMessage(request.getMessage());
+        ContextRewriteResult rewrite = ContextRewriteResult.unchanged(request.getMessage(), "test");
+        rewrite.setResolvedReferences(List.of(new ResolvedShopReference(
+                new ReferenceIntent(ReferenceIntent.Scope.LATEST, 1, "第一家", 0, 3),
+                new RecommendationBatch(), 1, 1L, "店铺")));
+        context.setContextRewrite(rewrite);
+        DecisionConstraints extracted = new DecisionConstraints();
+        extracted.setBudgetDirection(-1);
+        context.setCriteriaDelta(extracted);
+
+        ReflectionTestUtils.invokeMethod(service, "selectAction", context, ChatProcessingAction.BUSINESS_FOLLOW_UP, "test");
+
+        assertEquals(CriteriaIntent.NONE, context.getTurnPlan().getCriteriaIntent());
     }
 }

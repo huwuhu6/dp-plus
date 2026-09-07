@@ -406,13 +406,11 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 ? CriteriaIntent.APPLY_DELTA : CriteriaIntent.NONE;
         if (action == com.hmdp.ai.service.pipeline.ChatProcessingAction.BUSINESS_FOLLOW_UP
                 && hasResolvedReference(context)) {
-            // Compound follow-ups are the one non-search route that can carry a criteria delta.
-            // Reuse the structured extractor; do not add another routing phrase dictionary.
             try {
-                ensureCriteriaDelta(context);
-                if (turnUnderstandingService == null
-                        ? hasMutation(context.getCriteriaDelta())
-                        : turnUnderstandingService.shouldApplyReferenceMutation(context.getTurnCommandSet())) {
+                // Turn semantics is the sole authority for whether a reference follow-up may
+                // mutate state. Only after that permission is granted do we extract the delta.
+                if (hasStructuredReferenceMutation(context)) {
+                    ensureCriteriaDelta(context);
                     criteriaIntent = CriteriaIntent.APPLY_DELTA;
                 }
             } catch (RuntimeException ignored) {
@@ -441,9 +439,21 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     }
 
     private boolean isCompoundMutationFollowUp(ChatProcessingContext context) {
-        if (!hasResolvedReference(context)) return false;
-        ensureCriteriaDelta(context);
-        return hasMutation(context.getCriteriaDelta());
+        return hasStructuredReferenceMutation(context);
+    }
+
+    /**
+     * The single permission gate for mutation on a resolved-reference follow-up.
+     * Extracted constraint values are data only; they cannot grant mutation permission.
+     * A missing semantic interpreter fails closed instead of reviving the old extractor
+     * based authority.
+     */
+    private boolean hasStructuredReferenceMutation(ChatProcessingContext context) {
+        if (!hasResolvedReference(context) || turnUnderstandingService == null) return false;
+        TurnCommandSet commands = context.getTurnCommandSet();
+        return commands != null
+                && commands.isMutationRequested()
+                && turnUnderstandingService.shouldApplyReferenceMutation(commands);
     }
 
     private void ensureCriteriaDelta(ChatProcessingContext context) {
@@ -455,21 +465,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             // Compatibility fallback for test doubles and optional integrations that only implement the legacy API.
             context.setCriteriaDelta(constraintExtractor.extract(context.getOriginalMessage()));
         }
-    }
-
-    private boolean hasMutation(com.hmdp.ai.dto.DecisionConstraints constraints) {
-        if (constraints == null) return false;
-        return hasText(constraints.getTargetProvince()) || hasText(constraints.getTargetCity()) || hasText(constraints.getTargetDistrict()) || hasText(constraints.getTargetArea())
-                || hasText(constraints.getCuisine()) || hasText(constraints.getKeyword())
-                || constraints.getBudgetPerPerson() != null && constraints.getBudgetPerPerson() > 0
-                || constraints.getRadiusKm() != null && constraints.getRadiusKm() > 0
-                || Boolean.TRUE.equals(constraints.getNearby())
-                || constraints.getBudgetDirection() != null && constraints.getBudgetDirection() != 0
-                || constraints.getRadiusDirection() != null && constraints.getRadiusDirection() != 0
-                || constraints.getPreferences() != null && !constraints.getPreferences().isEmpty()
-                || constraints.getExcludedCuisines() != null && !constraints.getExcludedCuisines().isEmpty()
-                || constraints.getClearedFields() != null && !constraints.getClearedFields().isEmpty()
-                || constraints.getRemovedPreferences() != null && !constraints.getRemovedPreferences().isEmpty();
     }
 
     /** Narrow deterministic guard for read-only context questions; open phrasing remains model-routed. */
