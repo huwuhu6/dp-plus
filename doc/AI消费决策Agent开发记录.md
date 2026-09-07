@@ -8,6 +8,16 @@
 
 `ConstraintExtractor` 继续负责开放消费语义，行政字段最终由 Resolver 覆盖；`ensureCriteriaDelta` 与 START_DECISION 共用 request-scoped active criteria。基于 Resolver 三态结果增加行政位置路由入口，避免已完成决策中的 district refinement 被旧 BUSINESS_FOLLOW_UP guard 截走。adcode 仅保留在 Resolver candidate，不扩大 Working Memory/DecisionConstraints。
 
+### 高德行政区 Provider parser 与 partial identity 校正（2026-09-07）
+
+复核高德 `/v3/config/district` 官方响应后确认，节点稳定字段是 `citycode`、`adcode`、`name`、`center`、`level`、`districts`；节点不保证直接提供 `province`、`city`、`parent`。原 Provider 读取这些不存在字段，导致高德 district candidate 虽有 adcode/name，却无法形成可靠层级。
+
+Provider 现在按官方 `level=province/city/district` 解析，并优先用本地 Repository 按 adcode enrichment：例如 `350102 → 350100 → 350000` 补全福州市、福建省和 parentAdcode。若本地没有该 adcode，则保留 hierarchy incomplete，不编造 parent。查询不再依赖未经验证的 city-level `filter`，只发 keywords 查询并由本地上下文做二次判断；高德仍只是行政 fallback，不改变 POI MCP / GPS 边界。
+
+同时删除 partial district registry 中“输入带区/县后缀即可全国唯一”的隐含规则。`level=DISTRICT` 只说明层级，不说明 identity；无 parent 且 `completeDistrict=false` 时，即使本地只有一条候选也返回 AMBIGUOUS。官方 provider 返回的带 adcode 候选才可作为 authoritative identity。
+
+新增真实高德风格 JSON parser、层级 enrichment、partial 单候选歧义、parent 解析和 malformed response 安全降级测试。定向测试共 **10 tests，0 failures，0 errors**。按要求未运行全量 Maven 或任何完整评测：`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
 相关 Resolver/Repository/Provider、ConstraintExtractor、ChatOrchestrationService 与 AMap MCP 测试共 **59 tests，0 failures，0 errors，1 skipped**；6 条定向 Location E2E 通过，覆盖福建省、福州、福州鼓楼区、裸鼓楼澄清、CURRENT_DEVICE 无 GPS 澄清、福州大学作为 targetArea。未运行完整 robustness、conversation-v1、holdout 或全量 `mvn test`：`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
 
 ## 2026-09-05：Conversation Evaluation 增加按轮状态断言

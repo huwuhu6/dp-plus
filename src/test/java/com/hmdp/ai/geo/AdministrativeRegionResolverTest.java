@@ -42,4 +42,21 @@ class AdministrativeRegionResolverTest {
         assertEquals("闽侯县", result.candidates().get(0).getName());
         assertEquals("福州市", result.candidates().get(0).getCity());
     }
+
+    @Test
+    void doesNotTreatPartialRegistrySingleDistrictAsNationwideUnique() {
+        AdministrativeResolution result = resolver.resolve("西湖区", null);
+
+        assertEquals(AdministrativeResolution.Status.AMBIGUOUS, result.status());
+        assertEquals("330106", result.candidates().get(0).getAdcode());
+    }
+
+    @Test
+    void districtSuffixWithParentStillResolves() {
+        AdministrativeResolution result = resolver.resolve("福州鼓楼区", null);
+
+        assertEquals(AdministrativeResolution.Status.RESOLVED, result.status());
+        assertEquals("福建省", result.candidates().get(0).getProvince());
+        assertEquals("福州市", result.candidates().get(0).getCity());
+    }
 }

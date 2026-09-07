@@ -10,7 +10,11 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
-/** Deterministic administrative entity resolution. POIs and device location are separate concerns. */
+/**
+ * Deterministic administrative entity resolution. POIs and device location are separate concerns.
+ * Knowing that a name is a DISTRICT does not identify which district it is; identity requires
+ * a parent context, a complete registry, or an authoritative provider result.
+ */
 @Service
 public class AdministrativeRegionResolver {
     private final AdministrativeRegionRepository repository;
@@ -57,7 +61,7 @@ public class AdministrativeRegionResolver {
                     .filter(region -> hasParentInQuery(query, region)).toList();
             if (!explicitParentMatches.isEmpty()) districts = explicitParentMatches;
             boolean parentKnown = hasParentInQuery(query, districts.get(0)) || hasDistrictContext(context);
-            if (districts.size() == 1 && (parentKnown || repository.completeDistrict() || hasFullDistrictSuffix(query))) {
+            if (districts.size() == 1 && (parentKnown || repository.completeDistrict())) {
                 return resolved(districts);
             }
             return new AdministrativeResolution(AdministrativeResolution.Status.AMBIGUOUS, districts);
@@ -111,12 +115,9 @@ public class AdministrativeRegionResolver {
         return context != null && (hasText(context.getTargetCity()) || hasText(context.getTargetProvince()));
     }
 
-    private boolean hasFullDistrictSuffix(String query) {
-        return query.contains("区") || query.contains("县") || query.contains("自治州") || query.contains("地区");
-    }
-
     private boolean looksLikeAdministrativeQuery(String query) {
-        return hasFullDistrictSuffix(query) || query.contains("省") || query.contains("市") || query.contains("自治州");
+        return query.contains("区") || query.contains("县") || query.contains("自治州") || query.contains("地区")
+                || query.contains("省") || query.contains("市");
     }
 
     private boolean looksLikePoi(String query) {
