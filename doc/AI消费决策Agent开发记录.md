@@ -10,6 +10,12 @@
 
 定向验证：相关单元测试 **103 tests，0 failures，0 errors，1 skipped**（含新增 `DecisionContextQueryServiceTest`、路由、来源、Merger、State、Reference 和 Extractor 覆盖）；E2E 验证了历史第一家引用、focused “这个”、当前 criteria、USER_EXPLICIT/DERIVED provenance，以及查询后继续 mutation。完整 robustness、conversation-v1、holdout 与全量 Maven 回归按本轮指令未执行：`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
 
+### DECISION_CONTEXT_QUERY 冻结前边界校正（2026-09-07）
+
+补齐现有语义派生的 provenance：抽取阶段已由“女朋友/男朋友/情侣”推导出的 canonical `约会` 标记为 `DERIVED`，用户直接表达“约会”仍为 `USER_EXPLICIT`；StateService 不重新猜来源。`constraintKey` 先识别“附近”作为 `nearby`，只有明确半径、距离、多远或更近才映射 `radiusKm`，避免“附近”被“近”子串抢占。
+
+路由预评估和 `DECISION_CONTEXT_QUERY` 分支现在共用同一个 reference-required predicate；`ReferenceIntentExtractor` 补齐“刚才那个/上一轮那个”等 focused fast path，具体 Batch、ordinal、shopId 仍只由 ReferenceIntent/Resolver contract 决定。这样“为什么推荐刚才那个？”会在 rewrite 前标记需要上下文，并使用 focused historical Recommendation grounding。定向单测 **77 tests，0 failures，0 errors，1 skipped**，3 条 E2E 通过（约会 derived、nearby provenance、focused historical query）。完整回归按指令延期：`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
 ### 餐饮路由领域边界校正（2026-09-07）
 
 本轮基于实际对话复盘，修正暂停/无结果餐饮决策被旅游目的误继承的问题。原确定性谓词把通用词“地方”计入 `asksForPlace`，与“有没有/推荐”等词组合后会命中 `START_DECISION`；同时 `replacesPausedDecision` 位于非餐饮领域守卫之前，命中后直接返回，使旅游语义无法进入 OOS 判定。行政区 Resolver 命中也不能单独证明用户要找餐饮。

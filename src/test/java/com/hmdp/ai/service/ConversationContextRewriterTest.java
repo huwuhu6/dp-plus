@@ -56,6 +56,25 @@ class ConversationContextRewriterTest {
     }
 
     @Test
+    void resolvesFocusedReferenceForContextQuery() {
+        ConversationContextRewriter rewriter = new ConversationContextRewriter();
+        QueryRewriteClient textClient = mock(QueryRewriteClient.class);
+        ReflectionTestUtils.setField(rewriter, "queryRewriteClient", textClient);
+        AgentSessionContext context = workingMemory();
+        RecommendationBatch batch = new RecommendationBatch(); batch.setDecisionSessionId(2L);
+        RecommendationCandidateRef focused = new RecommendationCandidateRef(); focused.setShopId(101L); focused.setShopName("聚焦商户");
+        batch.setCandidates(Collections.singletonList(focused));
+        context.setRecommendationBatches(Collections.singletonList(batch));
+
+        ContextRewriteResult result = rewriter.rewrite("为什么推荐刚才那个？", Collections.emptyList(), context);
+
+        assertEquals("BATCH_REFERENCE_RESOLVED", result.getReason());
+        assertEquals(101L, result.getResolvedReferences().get(0).shopId());
+        assertTrue(result.getRewrittenQuery().contains("聚焦商户"));
+        verifyNoInteractions(textClient);
+    }
+
+    @Test
     void keepsSelfContainedQueryOutOfModelRewrite() {
         ConversationContextRewriter rewriter = new ConversationContextRewriter();
         QueryRewriteClient textClient = mock(QueryRewriteClient.class);

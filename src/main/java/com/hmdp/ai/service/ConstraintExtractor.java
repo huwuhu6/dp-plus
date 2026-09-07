@@ -61,6 +61,8 @@ public class ConstraintExtractor {
     private void assignPreferenceSourceHints(DecisionConstraints constraints, String query) {
         if (constraints == null || constraints.getPreferences() == null) return;
         String text = query == null ? "" : query.replaceAll("\\s+", "");
+        boolean derivedDating = !text.contains("约会")
+                && (text.contains("女朋友") || text.contains("男朋友") || text.contains("情侣"));
         if (text.contains("聊天") && !text.contains("安静")) {
             constraints.getPreferences().removeIf(item -> item != null && item.contains("聊天"));
             if (!constraints.getPreferences().contains("安静")) constraints.getPreferences().add("安静");
@@ -69,6 +71,9 @@ public class ConstraintExtractor {
             if (preference == null || preference.isBlank()) continue;
             ConstraintSource source = ConstraintSource.USER_EXPLICIT;
             if ("安静".equals(preference) && text.contains("聊天") && !text.contains("安静")) {
+                source = ConstraintSource.DERIVED;
+            }
+            if ("约会".equals(preference) && derivedDating) {
                 source = ConstraintSource.DERIVED;
             }
             constraints.getSourceHints().put("preference:" + preference, source);

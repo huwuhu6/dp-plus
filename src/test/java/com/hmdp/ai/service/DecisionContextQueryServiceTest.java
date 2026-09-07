@@ -37,6 +37,14 @@ class DecisionContextQueryServiceTest {
         task.getConstraintSources().put("preference:安静", ConstraintSource.USER_EXPLICIT);
         memory.getTasks().add(task);
         memory.setActiveTaskId(task.getTaskId());
+        memory.setActiveDecisionSessionId(100L);
+        memory.setFocusedShopId(7L);
+        memory.setFocusedShopName("聚焦商户");
+        RecommendationBatch batch = new RecommendationBatch();
+        batch.setDecisionSessionId(100L);
+        task.setRecommendationBatches(Collections.singletonList(batch));
+        AiChatSession session = new AiChatSession();
+        session.setVersion(9);
         when(stateService.workingMemory(org.mockito.ArgumentMatchers.any())).thenReturn(memory);
         when(stateService.activeTask(memory)).thenReturn(task);
 
@@ -44,12 +52,15 @@ class DecisionContextQueryServiceTest {
         DecisionContextQuery query = new DecisionContextQuery();
         query.setType(DecisionContextQuery.QueryType.CONSTRAINT_PROVENANCE);
         query.setConstraintKey("preference:安静");
-        AiChatSession session = new AiChatSession();
         DecisionContextQueryService.QueryResult result = service.execute(session, query);
 
         assertTrue(result.answer().contains("明确提出"));
         assertEquals(ConstraintSource.USER_EXPLICIT, result.facts().getSource());
         assertEquals(Collections.singletonList("安静"), memory.activeTask().getCriteria().getPreferences());
+        assertEquals(9, session.getVersion());
+        assertEquals(100L, memory.getActiveDecisionSessionId());
+        assertEquals(7L, memory.getFocusedShopId());
+        assertEquals(1, memory.activeTask().getRecommendationBatches().size());
     }
 
     @Test

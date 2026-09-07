@@ -29,9 +29,13 @@ class ConstraintExtractorTest {
 
         DecisionConstraints explicit = extractor.extract("想找安静的火锅");
         DecisionConstraints derived = extractor.extract("适合聊天的火锅");
+        DecisionConstraints explicitDating = extractor.extract("想找适合约会的餐厅");
+        DecisionConstraints derivedDating = extractor.extract("和女朋友吃个饭");
 
         assertEquals(ConstraintSource.USER_EXPLICIT, explicit.getSourceHints().get("preference:安静"));
         assertEquals(ConstraintSource.DERIVED, derived.getSourceHints().get("preference:安静"));
+        assertEquals(ConstraintSource.USER_EXPLICIT, explicitDating.getSourceHints().get("preference:约会"));
+        assertEquals(ConstraintSource.DERIVED, derivedDating.getSourceHints().get("preference:约会"));
     }
 
     @Test

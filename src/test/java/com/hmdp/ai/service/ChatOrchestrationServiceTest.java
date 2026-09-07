@@ -122,6 +122,38 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    void contextQueryUsesNearbyKeyAndRequiresReferenceBeforeRewrite() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ChatMessageRequest nearbyRequest = new ChatMessageRequest();
+        nearbyRequest.setMessage("我前面有说过要附近搜索吗？");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext nearbyContext =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(nearbyRequest, null);
+        nearbyContext.setOriginalMessage(nearbyRequest.getMessage());
+        nearbyContext.setEffectiveMessage(nearbyRequest.getMessage());
+        com.hmdp.ai.runtime.RoutingDecisionAssessment nearbyAssessment = ReflectionTestUtils.invokeMethod(
+                service, "assessRouting", nearbyContext, false);
+
+        assertEquals(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY,
+                nearbyAssessment.getCandidateAction());
+        assertEquals("nearby", ReflectionTestUtils.invokeMethod(service, "constraintKey", nearbyRequest.getMessage()));
+        assertEquals("radiusKm", ReflectionTestUtils.invokeMethod(service, "constraintKey", "我之前说距离多少？"));
+
+        ChatMessageRequest referenceRequest = new ChatMessageRequest();
+        referenceRequest.setMessage("为什么推荐刚才那个？");
+        com.hmdp.ai.service.pipeline.ChatProcessingContext referenceContext =
+                new com.hmdp.ai.service.pipeline.ChatProcessingContext(referenceRequest, null);
+        referenceContext.setOriginalMessage(referenceRequest.getMessage());
+        referenceContext.setEffectiveMessage(referenceRequest.getMessage());
+        com.hmdp.ai.runtime.RoutingDecisionAssessment referenceAssessment = ReflectionTestUtils.invokeMethod(
+                service, "assessRouting", referenceContext, false);
+
+        assertEquals(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_CONTEXT_QUERY,
+                referenceAssessment.getCandidateAction());
+        assertTrue(referenceAssessment.isContextRequired());
+        assertTrue(referenceAssessment.isRequiredContextMissing());
+    }
+
+    @Test
     void routesDecisionContextWhyQueryBeforeBusinessFollowUp() {
         ChatOrchestrationService service = new ChatOrchestrationService();
         ChatMessageRequest request = new ChatMessageRequest();

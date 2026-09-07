@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 public class ReferenceIntentExtractor {
     private static final Logger log = LoggerFactory.getLogger(ReferenceIntentExtractor.class);
     private static final Pattern ORDINAL = Pattern.compile("(?:(最开始|最初|一开始)\s*)?(第一家|首选|第二家|第三家)");
-    private static final Pattern FOCUSED = Pattern.compile("刚才那家|这家|那家|这个");
+    private static final Pattern FOCUSED = Pattern.compile("刚才那家|刚才那个|上一轮那个|上一家|这家|那家|这个");
 
     @Autowired(required = false)
     private OpenAiCompatibleClient aiClient;

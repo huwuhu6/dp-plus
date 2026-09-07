@@ -470,8 +470,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private boolean isReferenceMessage(String message) {
         if (message == null) return false;
-        return message.contains("第一家") || message.contains("第二家") || message.contains("第三家")
-                || message.contains("这家") || message.contains("那家") || message.contains("这个") || message.contains("刚才那家");
+        return isFocusedShopQuestion(message) || message.contains("第一家") || message.contains("第二家")
+                || message.contains("第三家") || message.contains("首选");
     }
 
     private boolean isWhyRecommendedQuery(String message) {
@@ -490,8 +490,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private String constraintKey(String message) {
         String text = message == null ? "" : message.replaceAll("\\s+", "");
         if (text.contains("预算")) return "budgetPerPerson";
-        if (text.contains("半径") || text.contains("距离") || text.contains("近") || text.contains("多远")) return "radiusKm";
         if (text.contains("附近")) return "nearby";
+        if (text.contains("半径") || text.contains("距离") || text.contains("多远") || text.contains("更近")) return "radiusKm";
         if (text.contains("安静") || text.contains("聊天")) return "preference:安静";
         if (text.contains("约会")) return "preference:约会";
         if (text.contains("排队")) return "preference:不排队";
@@ -911,8 +911,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             assessment.setReason("selected_option_command");
             return assessment;
         }
-        boolean reference = isFocusedShopQuestion(message) || message.contains("第一家") || message.contains("第二家")
-                || message.contains("第三家") || message.contains("刚才那个") || message.contains("上一轮那个");
+        boolean reference = isReferenceMessage(message);
         boolean conflict = ((isShopInquiry(message) || reference) && isAlternativeRecommendation(message, effective))
                 || (message.contains("先看看") && isAlternativeRecommendation(message, effective));
         assessment.setConflictDetected(conflict);
@@ -1025,7 +1024,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private boolean isFocusedShopQuestion(String message) {
         return message.contains("这家") || message.contains("那家") || message.contains("这个") || message.contains("这一个")
-                || message.contains("上一家") || message.contains("刚才那家");
+                || message.contains("上一家") || message.contains("刚才那家") || message.contains("刚才那个")
+                || message.contains("上一轮那个");
     }
 
     private boolean refersToCurrentDeviceLocation(String message) {
