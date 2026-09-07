@@ -2315,3 +2315,15 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 首次进入 WAITING_RELAXATION 时，`pauseForRelaxation()` 与后续 `EXPLAIN_SUSPENDED_DECISION` 共同复用 `DecisionFailureExplanationFormatter`，从持久化 DecisionResponse 事实生成范围、radius、food/budget 条件、结果数量、自动扩大记录和下一步选项，避免两套文案对同一失败事实产生漂移。BROADEN 的弱泛化词（“啥/什么”）在用户再次提及当前具体 food target 时不触发；只有“随便/都行/不一定”等明确放弃信号，或未重复具体 target 的泛化表达，才在 WAITING_RELAXATION 下产生恢复命令。未增加具体 CaseCode、商户或食物名称的生产特判。
 
 定向测试结果：ConversationStateServiceTest 8/8、DecisionTransitionServiceTest 17/17、TurnUnderstandingServiceTest 14/14、ChatOrchestrationServiceTest 46 通过/1 跳过、ConsumptionDecisionServiceTest 46/46；本轮未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
+### 上下文实体引用与商户事实查询收口（2026-09-07）
+
+真实对话暴露了三个共因：简称 POI 缺少设备/行政上下文，描述性商户引用只按 focusedShop 解析，以及主观事实问题没有稳定落到证据工具。本轮保持 Task/Working Memory 主模型不变，补齐了三个轻量 contract。
+
+位置解析新增 request/context 入口，携带设备坐标、当前行政范围和当前命名地点；当前环境确认可用的 MCP 仍只有 `maps_geo`，因此实现只复用已确认工具。设备坐标只作为 POI/campus 候选的消歧排序 prior，不作为静默最终搜索锚点；未能通过 provider 解析的简称继续进入 LOCATION_RESOLUTION。候选和命名地点只保存 `poiId`、`canonicalName` 等轻量身份元数据，不复制完整 POI payload，也没有增加具体大学或商户别名。
+
+`ReferenceIntent` 增加 `qualifier` 与 `deictic`。解析优先级为 ordinal → 唯一描述性 qualifier → 纯指示词 focused fallback；描述条件无匹配或多匹配时不回退到 focused。`RecommendationCandidateRef`/`DecisionRecommendation` 只增加 cuisine 和短 referenceTags，旧快照缺失时保持兼容。规则与模型引用结果在同一 contract 上合并，Context Rewrite 与 Tool binding 复用同一解析结果。
+
+商户事实问题增加 request-scoped `ShopFactQueryType`。主观口味、环境、服务、排队、约会适配和评价问题统一归入 EVIDENCE，并在 planner/fallback 两侧约束到 `search_shop_evidence`；静态详情和优惠券仍分别使用原有工具。证据工具先查主题证据，无主题命中时返回有限通用评价并显式标记 `topicMatched=false`，回答不得把通用评价伪装成主题结论。
+
+验证结果：相关 Unit Tests 与完整 `mvn -q test` 全部通过。真实应用使用 8082 端口验证了带位置上下文的推荐、纯指示词 batch 引用、描述性引用歧义和 evidence tool 路由；当前环境的 MCP location provider 不可用时，简称 POI 会安全进入澄清而不静默请求 GPS。完整评测 Run141（robustness 48 条：Complete 20、Route 43、Tool 47、Final 36、Locality 48）、Run142（conversation-v1 40 条：Complete 29、Route 38、Tool 33、Final 40、Locality 40）和 Run143（holdout 16 条：Complete 7、Route 13、Tool 14、Final 12、Locality 16）均已执行；剩余失败主要属于既有行政解析、澄清、Route/Tool 语义差异，未修改 Dataset Ground Truth。人工 smoke 记录了本地候选推荐、batch reference、描述性引用歧义和简称 POI 的安全澄清行为，未新增具体地名、shopId、CaseCode 或句子特判。

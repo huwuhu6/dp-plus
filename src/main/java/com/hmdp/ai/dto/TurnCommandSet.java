@@ -16,6 +16,7 @@ public class TurnCommandSet {
     private boolean contextQueryRequested;
     private boolean mutationRequested;
     private boolean referenceOnly;
+    private ShopFactQueryType factQueryType;
 
     public boolean hasCommand(TurnCommand.Type type) {
         if (type == null || commands == null) return false;

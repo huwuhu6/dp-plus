@@ -16,6 +16,10 @@ public class ReferenceIntent {
     private String surface;
     private Integer start;
     private Integer end;
+    /** Optional human-facing descriptor, for example "日本料理" or "烧烤". */
+    private String qualifier;
+    /** True when the expression is deictic (这个/这家/那个), even if qualified. */
+    private boolean deictic;
     /** Model-assigned association for a criteria critique in a compound turn. */
     private boolean mutationAnchor;
 

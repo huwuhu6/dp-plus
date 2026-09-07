@@ -91,6 +91,18 @@ class ReferenceIntentExtractorTest {
     }
 
     @Test
+    void enrichesRuleFocusedReferenceWithModelQualifier() throws Exception {
+        ReferenceIntentExtractor target = withModel("{\"intents\":[{\"scope\":\"FOCUSED\",\"surface\":\"这个日本料理\",\"start\":0,\"end\":6,\"qualifier\":\"日本料理\",\"deictic\":true}]}");
+
+        List<ReferenceIntent> intents = target.extract("这个日本料理重口吗？");
+
+        assertEquals(1, intents.size());
+        assertEquals("日本料理", intents.get(0).getQualifier());
+        assertTrue(intents.get(0).isDeictic());
+        assertEquals("这个日本料理", intents.get(0).getSurface());
+    }
+
+    @Test
     void extractsFocusedReferenceFromThisOne() {
         List<ReferenceIntent> intents = extractor.extract("为什么推荐这个？");
         assertEquals(1, intents.size());

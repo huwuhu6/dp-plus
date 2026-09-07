@@ -28,6 +28,33 @@ class BatchAwareReferenceResolverTest {
         assertEquals(101L, resolver.resolve(intent(ReferenceIntent.Scope.EARLIEST, 1), context).shopId());
     }
 
+    @Test
+    void resolvesUniqueDescriptorBeforeFocusedFallback() {
+        RecommendationBatch batch = batch(12L, 101L, 102L);
+        batch.getCandidates().get(0).setCuisine("东北菜");
+        batch.getCandidates().get(1).setCuisine("日本料理");
+        AgentSessionContext context = context(batch);
+        context.setFocusedShopId(101L);
+        ReferenceIntent intent = new ReferenceIntent(ReferenceIntent.Scope.FOCUSED, null, "这个日本料理", 0, 6);
+        intent.setQualifier("日本料理");
+        intent.setDeictic(true);
+
+        assertEquals(102L, resolver.resolve(intent, context).shopId());
+    }
+
+    @Test
+    void doesNotResolveDescriptorToFocusedWhenNoCandidateMatches() {
+        RecommendationBatch batch = batch(12L, 101L);
+        batch.getCandidates().get(0).setCuisine("东北菜");
+        AgentSessionContext context = context(batch);
+        context.setFocusedShopId(101L);
+        ReferenceIntent intent = new ReferenceIntent(ReferenceIntent.Scope.FOCUSED, null, "这个日本料理", 0, 6);
+        intent.setQualifier("日本料理");
+
+        assertNull(resolver.resolve(intent, context));
+        assertTrue(resolver.qualifierMatches(intent, context).isEmpty());
+    }
+
     private ReferenceIntent intent(ReferenceIntent.Scope scope, int ordinal) {
         return new ReferenceIntent(scope, ordinal, "ref", 0, 3);
     }

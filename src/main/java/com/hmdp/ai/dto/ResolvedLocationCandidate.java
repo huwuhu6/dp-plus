@@ -4,7 +4,9 @@ import lombok.Data;
 
 @Data
 public class ResolvedLocationCandidate {
+    private String poiId;
     private String label;
+    private String canonicalName;
     private String province;
     private String city;
     private String district;

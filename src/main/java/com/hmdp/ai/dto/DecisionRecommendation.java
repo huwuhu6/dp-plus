@@ -15,6 +15,8 @@ public class DecisionRecommendation {
     private Double semanticScore;
     private String address;
     private String openHours;
+    private String cuisine;
+    private List<String> referenceTags = new ArrayList<>();
     private List<String> matchedReasons = new ArrayList<>();
     private List<String> evidence = new ArrayList<>();
 }

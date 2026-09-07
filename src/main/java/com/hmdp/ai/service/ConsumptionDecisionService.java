@@ -921,6 +921,15 @@ public class ConsumptionDecisionService {
         item.setAvgPrice(shop.getAvgPrice());
         item.setAddress(shop.getAddress());
         item.setOpenHours(shop.getOpenHours());
+        if (profile != null && profile.getCuisine() != null) {
+            item.setCuisine(profile.getCuisine());
+            item.getReferenceTags().add(profile.getCuisine());
+        }
+        if (profile != null && profile.getSceneTags() != null) {
+            for (String tag : profile.getSceneTags().split("[,，]")) {
+                if (tag != null && !tag.trim().isEmpty() && item.getReferenceTags().size() < 5) item.getReferenceTags().add(tag.trim());
+            }
+        }
         double score = shop.getScore() == null ? 0 : shop.getScore() / 10.0D / 5.0D * 20D;
         if (constraints.getBudgetPerPerson() > 0 && shop.getAvgPrice() != null) {
             score += 20D * (1D - ((double) shop.getAvgPrice() / constraints.getBudgetPerPerson()) * 0.3D);

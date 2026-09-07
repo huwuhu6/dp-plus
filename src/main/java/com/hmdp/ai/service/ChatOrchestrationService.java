@@ -23,6 +23,8 @@ import com.hmdp.ai.dto.TurnPlan;
 import com.hmdp.ai.dto.TurnCommand;
 import com.hmdp.ai.dto.TurnCommandSet;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
+import com.hmdp.ai.dto.LocationResolutionContext;
+import com.hmdp.ai.dto.LocationResolutionRequest;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.geo.AdministrativeResolution;
@@ -958,7 +960,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 || message.contains("第三家") || message.contains("这家") || message.contains("那家")
                 // 距离/折扣高频确定性表述（审计 run78 落 MODEL 的 turn 补齐）：过去/距离/打折
                 || message.contains("多远") || message.contains("距离") || message.contains("几公里")
-                || message.contains("走过去") || message.contains("打折");
+                || message.contains("走过去") || message.contains("打折") || message.contains("重口")
+                || message.contains("清淡") || message.contains("味道") || message.contains("口味")
+                || message.contains("辣不辣") || message.contains("好吃");
     }
 
     private RoutingDecisionAssessment assessRouting(ChatProcessingContext context, boolean afterRewrite) {
@@ -1219,7 +1223,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             return response;
         }
         String normalizedLocationQuery = normalizeLocationQuery(locationQuery);
-        List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(normalizedLocationQuery);
+        LocationResolutionContext resolutionContext = locationResolutionContext(state);
+        List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(
+                new LocationResolutionRequest(normalizedLocationQuery, resolutionContext));
         if (candidates.isEmpty()) {
             log.info("[AI][chat] event=LOCATION_RESOLUTION_EMPTY chatId={} sessionId={} query={}",
                     chatId, activeSessionId, compact(normalizedLocationQuery));
@@ -1357,6 +1363,25 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private LocationResolutionContext locationResolutionContext(AiChatSession state) {
+        LocationResolutionContext context = new LocationResolutionContext();
+        com.hmdp.ai.dto.ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
+        ConversationLocationSlot device = conversationStateService.usableLocation(state);
+        ConversationLocationSlot named = conversationStateService.searchLocation(memory);
+        if (device != null) {
+            context.setDeviceLatitude(device.getLatitude());
+            context.setDeviceLongitude(device.getLongitude());
+        }
+        com.hmdp.ai.dto.DecisionConstraints criteria = conversationStateService.activeCriteria(memory);
+        if (criteria != null) {
+            context.setActiveProvince(criteria.getTargetProvince());
+            context.setActiveCity(criteria.getTargetCity());
+            context.setActiveDistrict(criteria.getTargetDistrict());
+        }
+        if (named != null) context.setCurrentNamedLocation(named.getCanonicalName());
+        return context;
     }
 
     private boolean hasCoordinates(ConversationLocationSlot location) {

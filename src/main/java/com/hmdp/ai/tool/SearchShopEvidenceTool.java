@@ -22,7 +22,7 @@ public class SearchShopEvidenceTool extends BaseAgentTool {
     @Resource private BlogCommentsMapper commentMapper;
 
     @Override public String name() { return "search_shop_evidence"; }
-    @Override public String description() { return "检索某家商户的演示评价证据、探店笔记与笔记评论。用户问评价如何、环境怎样、排队吗、适合约会吗时使用。"; }
+    @Override public String description() { return "检索某家商户的评价证据、探店笔记与笔记评论。用户询问主观体验、口味强弱（重口/清淡/辣咸油腻）、环境、服务、排队、适合场景或口碑时使用；没有主题命中时必须说明证据不足。"; }
     @Override public Map<String, Object> parameterSchema() {
         Map<String, Object> properties = new LinkedHashMap<String, Object>();
         properties.put("shopId", property("integer", "商户 ID；用户说这家时可以省略。"));
@@ -35,9 +35,19 @@ public class SearchShopEvidenceTool extends BaseAgentTool {
         String topic = input.get("topic") == null ? "" : String.valueOf(input.get("topic"));
         List<String> evidence = new ArrayList<String>();
         List<AiReviewDocument> documents = reviewMapper.selectList(new QueryWrapper<AiReviewDocument>().eq("shop_id", shopId).orderByDesc("sentiment").last("limit 4"));
+        boolean topicMatched = topic.trim().isEmpty();
         for (AiReviewDocument document : documents) {
-            if (!topic.trim().isEmpty() && !contains(document.getContent(), topic) && !contains(document.getTags(), topic)) continue;
-            evidence.add(compact(document.getContent()));
+            boolean matched = topic.trim().isEmpty() || contains(document.getContent(), topic) || contains(document.getTags(), topic);
+            if (matched) {
+                topicMatched = true;
+                evidence.add(compact(document.getContent()));
+            }
+        }
+        if (!topicMatched) {
+            for (AiReviewDocument document : documents) {
+                if (evidence.size() >= 2) break;
+                evidence.add(compact(document.getContent()));
+            }
         }
         List<Blog> blogs = blogMapper.selectList(new QueryWrapper<Blog>().eq("shop_id", shopId).orderByDesc("liked").last("limit 2"));
         for (Blog blog : blogs) {
@@ -46,10 +56,15 @@ public class SearchShopEvidenceTool extends BaseAgentTool {
             for (BlogComments comment : comments) evidence.add("[笔记评论] " + compact(comment.getContent()));
         }
         if (evidence.size() > 6) evidence = evidence.subList(0, 6);
-        StringBuilder text = new StringBuilder(evidence.isEmpty() ? "当前没有可引用的评价或探店证据。" : "可引用的评价证据：");
+        StringBuilder text = new StringBuilder(evidence.isEmpty() ? "当前没有可引用的评价或探店证据。"
+                : (!topic.trim().isEmpty() && !topicMatched
+                ? "现有评价没有明确提到“" + topic + "”，只能提供一般评价证据，暂时不能据此确定该主题："
+                : "可引用的评价证据："));
         for (String item : evidence) text.append("\n- ").append(item);
         AgentToolResult result = new AgentToolResult().summary("检索到 " + evidence.size() + " 条评价与笔记证据").displayText(text.toString());
         result.getFacts().put("evidence", evidence);
+        result.getFacts().put("topic", topic);
+        result.getFacts().put("topicMatched", topicMatched);
         return result;
     }
     private boolean contains(String source, String expected) { return source != null && source.contains(expected); }

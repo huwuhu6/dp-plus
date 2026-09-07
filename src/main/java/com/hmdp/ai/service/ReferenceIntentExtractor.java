@@ -44,6 +44,14 @@ public class ReferenceIntentExtractor {
             ReferenceIntent overlap = overlapping(candidate, rules);
             if (overlap != null) {
                 if (candidate.isMutationAnchor()) overlap.setMutationAnchor(true);
+                if (hasText(candidate.getQualifier())) overlap.setQualifier(candidate.getQualifier().trim());
+                if (candidate.isDeictic()) overlap.setDeictic(true);
+                if (hasText(candidate.getSurface()) && candidate.getSurface().length() >
+                        (overlap.getSurface() == null ? 0 : overlap.getSurface().length())) {
+                    overlap.setSurface(candidate.getSurface());
+                    overlap.setStart(candidate.getStart());
+                    overlap.setEnd(candidate.getEnd());
+                }
                 continue;
             }
             if (overlapsAny(candidate, merged)) continue;
@@ -86,6 +94,7 @@ public class ReferenceIntentExtractor {
         while (focused.find()) {
             intents.add(new ReferenceIntent(ReferenceIntent.Scope.FOCUSED, null,
                     focused.group(), focused.start(), focused.end()));
+            intents.get(intents.size() - 1).setDeictic(true);
         }
         intents.sort(Comparator.comparingInt(item -> item.getStart() == null ? Integer.MAX_VALUE : item.getStart()));
         return intents;
@@ -95,7 +104,7 @@ public class ReferenceIntentExtractor {
         if (aiClient == null) return new ArrayList<>();
         try {
             List<Map<String, Object>> messages = new ArrayList<>();
-            messages.add(message("system", "从用户消息中提取商户指代。只输出结构化引用数组，不回答问题。scope 只能是 LATEST（当前最新候选批次）、EARLIEST（明确指最开始/历史候选批次）或 FOCUSED（刚才/当前聚焦商户）。ordinal 是从1开始的序数；FOCUSED 不填 ordinal。每个 intent 必须保留原文 surface 及其 start/end 字符位置，支持一句话多个引用。若该引用是用户明确评价/批评所针对的商户，将 mutationAnchor=true，否则为false。无法确定引用时返回空数组。"));
+            messages.add(message("system", "从用户消息中提取商户指代。只输出结构化引用数组，不回答问题。scope 只能是 LATEST（当前最新候选批次）、EARLIEST（明确指最开始/历史候选批次）或 FOCUSED（刚才/当前聚焦商户）。ordinal 是从1开始的序数；FOCUSED 不填 ordinal。qualifier 是引用中的商户描述（如日本料理、烧烤），纯这个/这家/那个则为空；deictic 表示存在这个/这家/那个等指示词。每个 intent 必须保留原文 surface 及其 start/end 字符位置，支持一句话多个引用。若该引用是用户明确评价/批评所针对的商户，将 mutationAnchor=true，否则为false。无法确定引用时返回空数组。"));
             messages.add(message("user", message));
             Map<String, Object> function = new LinkedHashMap<>();
             function.put("name", "extract_reference_intents");
@@ -121,6 +130,8 @@ public class ReferenceIntentExtractor {
                 intent.setSurface(item.path("surface").asText(null));
                 intent.setStart(item.hasNonNull("start") ? item.path("start").asInt() : null);
                 intent.setEnd(item.hasNonNull("end") ? item.path("end").asInt() : null);
+                intent.setQualifier(item.path("qualifier").asText(null));
+                intent.setDeictic(item.path("deictic").asBoolean(false));
                 intent.setMutationAnchor(item.path("mutationAnchor").asBoolean(false));
                 if (validateSpan(message, intent)
                         && (intent.getScope() == ReferenceIntent.Scope.FOCUSED
@@ -168,6 +179,8 @@ public class ReferenceIntentExtractor {
         props.put("start", Map.of("type", "integer", "minimum", 0));
         props.put("end", Map.of("type", "integer", "minimum", 0));
         props.put("mutationAnchor", Map.of("type", "boolean"));
+        props.put("qualifier", Map.of("type", "string"));
+        props.put("deictic", Map.of("type", "boolean"));
         intent.put("properties", props);
         intent.put("required", List.of("scope", "surface", "start", "end"));
         Map<String, Object> schema = new LinkedHashMap<>();
@@ -175,6 +188,10 @@ public class ReferenceIntentExtractor {
         schema.put("properties", Map.of("intents", Map.of("type", "array", "items", intent)));
         schema.put("required", List.of("intents"));
         return schema;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private Map<String, Object> message(String role, String content) {

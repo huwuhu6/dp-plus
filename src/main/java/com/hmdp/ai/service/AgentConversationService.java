@@ -17,6 +17,7 @@ import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.ReferenceIntent;
 import com.hmdp.ai.dto.ResolvedShopReference;
+import com.hmdp.ai.dto.ShopFactQueryType;
 import com.hmdp.ai.entity.AiAgentToolCall;
 import com.hmdp.ai.entity.AiConversationEvent;
 import com.hmdp.ai.entity.AiDecisionMessage;
@@ -104,6 +105,18 @@ public class AgentConversationService {
                 saveMessage(sessionId, "ASSISTANT", "AGENT_REFERENCE_CLARIFY", response.getAnswer());
                 return response;
             }
+            if (reference.isBlocked()) {
+                saveMessage(sessionId, "USER", "AGENT_FOLLOW_UP", userMessage);
+                AgentConversationResponse response = new AgentConversationResponse();
+                response.setSessionId(sessionId);
+                response.setTurnNo(context.getTurnNo());
+                response.setFocusedShopId(context.getFocusedShopId());
+                response.setFocusedShopName(context.getFocusedShopName());
+                response.setUsedModel(false);
+                response.setAnswer("我没有在当前候选中找到与“" + reference.blockedQualifier + "”匹配的商户，请明确店名或换一种描述。");
+                saveMessage(sessionId, "ASSISTANT", "AGENT_REFERENCE_CLARIFY", response.getAnswer());
+                return response;
+            }
             if (reference.shop != null) {
                 context.setFocusedShopId(reference.shop.getShopId());
                 context.setFocusedShopName(reference.shop.getShopName());
@@ -175,6 +188,7 @@ public class AgentConversationService {
         if (context == null) return false;
         ReferenceResolution reference = resolveShopReference(message == null ? "" : message.trim(), context);
         return reference.shop != null || reference.isAmbiguous()
+                || reference.isBlocked()
                 || !resolveCompoundFactTasks(message == null ? "" : message.trim(), context).isEmpty();
     }
 
@@ -207,7 +221,7 @@ public class AgentConversationService {
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         if (!aiProperties.isConfigured()) return new ToolPlanningResult(results, false);
         List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
-        messages.add(message("system", "你是点评消费决策 Agent 的工具规划器。必须只使用提供的只读工具取得商户事实；不得编造商户、券、评价或价格。用户同时询问评价和优惠等独立事实时可调用多个工具，最多 3 个；候选扩展工具会修改会话候选池，不能与其他工具组合。"));
+        messages.add(message("system", "你是点评消费决策 Agent 的工具规划器。必须只使用提供的只读工具取得商户事实；不得编造商户、券、评价或价格。主观体验、口味强弱（重口/清淡/辣咸油腻）、环境、服务、排队、适合场景或口碑问题属于 EVIDENCE，必须优先调用 search_shop_evidence；优惠券属于 VOUCHER。用户同时询问评价和优惠等独立事实时可调用多个工具，最多 3 个；候选扩展工具会修改会话候选池，不能与其他工具组合。"));
         messages.add(message("system", "会话上下文：" + contextSummary(context)));
         messages.add(message("user", userMessage));
         try {
@@ -226,6 +240,7 @@ public class AgentConversationService {
                 requests.add(new ToolExecutionRequest(index, plan.getName(), plan.getArguments(), explicitlyReferencedShopId));
             }
             addMissingCompoundFactTools(requests, userMessage, explicitlyReferencedShopId);
+            enforceFactToolContract(requests, userMessage, explicitlyReferencedShopId);
             log.info("[AI][agent] event=TOOL_EXECUTION_BATCH sessionId={} turnNo={} plannedTools={} parallelEligible={}", sessionId,
                     context.getTurnNo(), requests.stream().map(ToolExecutionRequest::getToolName).toList(),
                     requests.stream().filter(item -> !"search_alternative_shops".equals(item.getToolName())).count());
@@ -367,7 +382,8 @@ public class AgentConversationService {
         List<AgentToolResult> results = new ArrayList<AgentToolResult>();
         for (String toolName : toolNames) {
             try {
-                AgentToolResult result = executeTool(sessionId, turnNo, toolName, "{}", context,
+                String arguments = "search_shop_evidence".equals(toolName) ? evidenceArguments(message) : "{}";
+                AgentToolResult result = executeTool(sessionId, turnNo, toolName, arguments, context,
                         explicitlyReferencedShopId, eventConsumer);
                 results.add(result);
             } catch (IllegalArgumentException e) {
@@ -380,8 +396,7 @@ public class AgentConversationService {
 
     private List<String> fallbackToolNames(String message) {
         boolean voucher = message.contains("优惠") || message.contains("券");
-        boolean evidence = message.contains("评价") || message.contains("评论") || message.contains("笔记")
-                || message.contains("排队") || message.contains("环境");
+        boolean evidence = isEvidenceQuestion(message);
         List<String> result = new ArrayList<String>();
         if (voucher) result.add("query_shop_vouchers");
         if (evidence) result.add("search_shop_evidence");
@@ -489,6 +504,15 @@ public class AgentConversationService {
         if (structured.size() == 1) return new ReferenceResolution(structured.get(0).recommendation(), new ArrayList<String>());
         if (structured.size() > 1) return new ReferenceResolution(null, new ArrayList<String>());
 
+        List<ReferenceIntent> intents = context.getReferenceIntents() == null
+                ? new ArrayList<ReferenceIntent>() : context.getReferenceIntents();
+        for (ReferenceIntent intent : intents) {
+            if (intent.getQualifier() == null || intent.getQualifier().trim().isEmpty()) continue;
+            List<ResolvedShopReference> matches = batchReferenceResolver.qualifierMatches(intent, context);
+            if (matches.size() > 1) return new ReferenceResolution(null, shopNamesFromReferences(matches), false, intent.getQualifier());
+            if (matches.isEmpty()) return new ReferenceResolution(null, new ArrayList<String>(), true, intent.getQualifier());
+        }
+
         List<DecisionRecommendation> exactMatches = new ArrayList<DecisionRecommendation>();
         for (DecisionRecommendation item : context.getCandidatePoolSnapshot()) {
             if (containsNormalizedShopName(message, item.getShopName())) exactMatches.add(item);
@@ -553,14 +577,69 @@ public class AgentConversationService {
     }
 
     private boolean containsEvidenceSignal(String text) {
-        return text.contains("\u8bc4\u4ef7") || text.contains("\u8bc4\u8bba") || text.contains("\u53e3\u7891")
-                || text.contains("\u6392\u961f") || text.contains("\u73af\u5883") || text.contains("\u670d\u52a1")
-                || text.contains("\u63d2\u5ea7");
+        return isEvidenceQuestion(text);
+    }
+
+    private boolean isEvidenceQuestion(String message) {
+        return classifyFactType(message) == ShopFactQueryType.EVIDENCE;
+    }
+
+    private ShopFactQueryType classifyFactType(String message) {
+        if (message == null) return ShopFactQueryType.STATIC_DETAIL;
+        if (message.contains("评价") || message.contains("评论") || message.contains("口碑")
+                || message.contains("排队") || message.contains("环境") || message.contains("服务")
+                || message.contains("插座") || message.contains("重口") || message.contains("清淡")
+                || message.contains("辣不辣") || message.contains("咸不咸") || message.contains("油不油")
+                || message.contains("味道") || message.contains("口味") || message.contains("好吃")) return ShopFactQueryType.EVIDENCE;
+        if (message.contains("优惠") || message.contains("券") || message.contains("团购")) return ShopFactQueryType.VOUCHER;
+        return ShopFactQueryType.STATIC_DETAIL;
+    }
+
+    private void enforceFactToolContract(List<ToolExecutionRequest> requests, String message, Long explicitlyReferencedShopId) {
+        if (!isEvidenceQuestion(message)) return;
+        boolean evidence = false;
+        for (ToolExecutionRequest request : requests) {
+            if ("search_shop_evidence".equals(request.getToolName())) {
+                evidence = true;
+                if (request.getArguments() == null || request.getArguments().trim().isEmpty()
+                        || "{}".equals(request.getArguments().trim())) request.setArguments(evidenceArguments(message));
+            } else if ("get_shop_detail".equals(request.getToolName())) {
+                request.setToolName("search_shop_evidence");
+                request.setArguments(evidenceArguments(message));
+            }
+        }
+        if (!evidence && requests.stream().noneMatch(item -> "query_shop_vouchers".equals(item.getToolName()))) {
+            int order = requests.stream().map(ToolExecutionRequest::getOrder).max(Integer::compareTo).orElse(-1) + 1;
+            requests.add(new ToolExecutionRequest(order, "search_shop_evidence", evidenceArguments(message), explicitlyReferencedShopId));
+        }
+    }
+
+    private String evidenceArguments(String message) {
+        String topic = evidenceTopic(message);
+        return topic.isEmpty() ? "{}" : "{\"topic\":\"" + topic + "\"}";
+    }
+
+    private String evidenceTopic(String message) {
+        if (message == null) return "";
+        if (message.contains("重口") || message.contains("清淡") || message.contains("辣不辣")
+                || message.contains("咸不咸") || message.contains("油不油") || message.contains("口味")
+                || message.contains("味道")) return "口味";
+        if (message.contains("排队")) return "排队";
+        if (message.contains("环境")) return "环境";
+        if (message.contains("服务")) return "服务";
+        if (message.contains("约会")) return "约会";
+        return "";
     }
 
     private List<String> shopNames(List<DecisionRecommendation> shops) {
         List<String> names = new ArrayList<String>();
         for (DecisionRecommendation item : shops) names.add(item.getShopName());
+        return names;
+    }
+
+    private List<String> shopNamesFromReferences(List<ResolvedShopReference> references) {
+        List<String> names = new ArrayList<String>();
+        for (ResolvedShopReference reference : references) names.add(reference.shopName());
         return names;
     }
 
@@ -664,13 +743,23 @@ public class AgentConversationService {
     private static class ReferenceResolution {
         private final DecisionRecommendation shop;
         private final List<String> candidateNames;
+        private final boolean blocked;
+        private final String blockedQualifier;
 
         private ReferenceResolution(DecisionRecommendation shop, List<String> candidateNames) {
+            this(shop, candidateNames, false, null);
+        }
+
+        private ReferenceResolution(DecisionRecommendation shop, List<String> candidateNames,
+                                    boolean blocked, String blockedQualifier) {
             this.shop = shop;
             this.candidateNames = candidateNames;
+            this.blocked = blocked;
+            this.blockedQualifier = blockedQualifier;
         }
 
         private boolean isAmbiguous() { return !candidateNames.isEmpty(); }
+        private boolean isBlocked() { return blocked; }
     }
 
     private static class ShopMention {

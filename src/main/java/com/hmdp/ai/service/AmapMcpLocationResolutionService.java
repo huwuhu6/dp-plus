@@ -3,6 +3,8 @@ package com.hmdp.ai.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
+import com.hmdp.ai.dto.LocationResolutionContext;
+import com.hmdp.ai.dto.LocationResolutionRequest;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import jakarta.annotation.Resource;
@@ -40,8 +42,14 @@ public class AmapMcpLocationResolutionService implements LocationResolutionProvi
     }
 
     public List<ResolvedLocationCandidate> resolve(String placeText) {
+        return resolve(new LocationResolutionRequest(placeText, null));
+    }
+
+    @Override
+    public List<ResolvedLocationCandidate> resolve(LocationResolutionRequest request) {
+        String placeText = request == null ? null : request.getRawText();
         if (!isAvailable() || placeText == null || placeText.trim().isEmpty()) return Collections.emptyList();
-        String query = placeText.trim();
+        String query = contextualQuery(placeText.trim(), request == null ? null : request.getContext());
         long startedAt = System.currentTimeMillis();
         try {
             Map<String, Object> arguments = new LinkedHashMap<>();
@@ -53,6 +61,7 @@ public class AmapMcpLocationResolutionService implements LocationResolutionProvi
                 return Collections.emptyList();
             }
             List<ResolvedLocationCandidate> candidates = parseCandidates(result, query);
+            rankByDeviceDistance(candidates, request == null ? null : request.getContext());
             log.info("[AI][location] event=MCP_GEO_SUCCESS query={} candidates={} durationMs={}",
                     compact(query), candidates.size(), System.currentTimeMillis() - startedAt);
             return candidates;
@@ -108,6 +117,7 @@ public class AmapMcpLocationResolutionService implements LocationResolutionProvi
         if (coordinates.length != 2) return null;
         try {
             ResolvedLocationCandidate candidate = new ResolvedLocationCandidate();
+            candidate.setPoiId(firstText(node, "id", "poi_id", "adcode"));
             candidate.setLongitude(Double.valueOf(coordinates[0].trim()));
             candidate.setLatitude(Double.valueOf(coordinates[1].trim()));
             candidate.setProvince(text(node, "province"));
@@ -115,6 +125,7 @@ public class AmapMcpLocationResolutionService implements LocationResolutionProvi
             candidate.setDistrict(text(node, "district"));
             String label = firstText(node, "formatted_address", "address", "name");
             candidate.setLabel(label == null ? query : label);
+            candidate.setCanonicalName(firstText(node, "name", "formatted_address", "address"));
             candidate.setSource("AMAP_MCP");
             return candidate;
         } catch (NumberFormatException ignored) {
@@ -141,5 +152,25 @@ public class AmapMcpLocationResolutionService implements LocationResolutionProvi
 
     private String compact(String value) {
         return value.length() > 120 ? value.substring(0, 120) + "..." : value;
+    }
+
+    private String contextualQuery(String rawText, LocationResolutionContext context) {
+        if (context == null || context.getActiveCity() == null || context.getActiveCity().trim().isEmpty()) return rawText;
+        String city = context.getActiveCity().trim();
+        return rawText.contains(city) ? rawText : city + " " + rawText;
+    }
+
+    private void rankByDeviceDistance(List<ResolvedLocationCandidate> candidates, LocationResolutionContext context) {
+        if (context == null || context.getDeviceLatitude() == null || context.getDeviceLongitude() == null) return;
+        double latitude = context.getDeviceLatitude();
+        double longitude = context.getDeviceLongitude();
+        candidates.sort(java.util.Comparator.comparingDouble(item -> distanceSquared(item, latitude, longitude)));
+    }
+
+    private double distanceSquared(ResolvedLocationCandidate candidate, double latitude, double longitude) {
+        if (candidate.getLatitude() == null || candidate.getLongitude() == null) return Double.MAX_VALUE;
+        double lat = candidate.getLatitude() - latitude;
+        double lon = candidate.getLongitude() - longitude;
+        return lat * lat + lon * lon;
     }
 }
