@@ -1,28 +1,48 @@
 # AI 消费决策 Agent——面试主线总纲
 
-> 当前唯一面试主资料。后续 Working Memory、Task、Reference、Location、Turn Semantics、Decision Context、No-result Recovery、Evaluation 的新结论统一维护在本文，不再拆新的“补充”文档。
+> 当前唯一面试主资料。Working Memory、Task、RecommendationBatch、Reference、Location、Turn Semantics、Decision Context、No-result Recovery、Fact Tool、Evaluation 后续统一维护在本文，不再拆新的“主线补充”文档。
 >
-> 当前 Code Truth：main `c45c71ba0a69235aaf485ee4759baae8a878f616`
+> 当前 Code Truth：main `b3f595f0f4d182df7c41d6ba5fc15ea3c1513c39`
 >
-> 最近一次完整全量评测仍是 `709c615` 上的 Robustness Run139、Conversation-v1 Run140。之后 `5a03adf → 5fdc9e3 → ec2b4b4 → c45c71b` 主要完成 Mutation Authority、No-result Recovery、Relaxation→Canonical WM 投影和恢复语义边界的定向修复，尚未重新跑 full regression；Holdout 尚未执行。
+> 当前归档评测：Robustness Run141、Conversation-v1 Run142、Holdout Run143；本轮未修改 Dataset Ground Truth。
 >
-> 本文的目的不是背类名，而是能完整回答：**遇到了什么真实问题 → 为什么原方案会失败 → 如何定位根因 → 有哪些方案 → 为什么选现在的方案 → 如何实现 → 如何验证 → 新方案又暴露了什么边界。**
+> 本文统一使用同一种讲法：**真实现象 → 第一版判断 → 为什么失败 → 根因 → 方案取舍 → 最终设计 → 代码职责 → 验证 → 新暴露边界 → 面试追问。**
 
 ---
 
-# 一、先把整个项目讲明白
+# 一、项目到底在解决什么
 
 ## 1. 30 秒版本
 
-我做的是一个本地生活餐饮消费决策 Agent，重点不是“调用大模型推荐餐厅”，而是多轮决策状态管理。用户会连续修改地点、预算、菜系，会切换多个方案，会问“最开始第二家”“为什么推荐这个”“我什么时候说过安静”“那附近有啥”。如果只把聊天历史塞给模型，状态很容易串、旧条件会幽灵继承、历史引用会漂移。
+我做的是一个本地生活餐饮消费决策 Agent，重点不是单轮“让大模型推荐餐厅”，而是多轮决策状态管理。用户会改地点、预算、菜系，会同时考虑多套方案，会问“最开始第二家”“这个日本料理重口吗”“我什么时候说过安静”“那附近有啥”。如果只靠 Chat History 和模型每轮重解释，状态会串、历史引用会漂移、事实问题会偷偷改搜索条件。
 
-所以项目后来逐步演化成：`Task-scoped Working Memory + RecommendationBatch + Reference Resolver + TurnPlan + OCC + Canonical Turn Semantics + Location Authority + Decision Context Query + Evaluation`。核心思路是：**模型负责开放语言理解，确定性代码负责业务状态和 authority。**
+项目因此逐步演化出：
+
+```text
+Task-scoped Working Memory
+RecommendationBatch
+Reference Resolver
+TurnPlan
+same-turn snapshot
+OCC / stale-result guard
+Location Authority
+Decision Context Query
+Canonical Turn Semantics
+No-result Recovery
+Descriptive Reference
+Fact → Tool Contract
+Evaluation
+```
+
+一句话：
+
+> 我做的核心不是“让模型更会聊”，而是把多轮 Agent 中容易漂移的业务语义逐步收敛成有唯一 authority、可持久化、可回放、可评测的状态系统。
 
 ---
 
 ## 2. 2 分钟版本
 
-入口是一条显式 Pipeline：
+聊天入口是一条显式 Pipeline：
 
 ```text
 Bootstrap
@@ -33,10 +53,10 @@ Bootstrap
 → Execution
 ```
 
-最早系统没有 canonical Working Memory，状态散在聊天历史、当前 Context、candidatePool、focusedShop 等地方。随着真实多轮测试，依次暴露了：
+最早系统没有 canonical Working Memory，状态散在 History、当前请求 Context、candidatePool、focusedShop 等位置。真实对话和 Evaluation 持续暴露问题：
 
 ```text
-历史候选被覆盖
+换一批后历史顺序丢失
 → RecommendationBatch
 
 A→B→A 方案串状态
@@ -48,23 +68,75 @@ A→B→A 方案串状态
 并发旧请求覆盖新状态
 → OCC + stale runtime result guard
 
-“第一家太贵，第二家有插座吗”无法同时表达
+一句话同时改条件又问第二家
 → TurnPlan
 
-GPS、命名地点、行政区、POI 混在一起
+GPS、行政区、POI、命名地点混用
 → Location Contract + Resolver Authority
 
-“为什么推荐”“我什么时候说过”靠模型重猜历史
-→ Decision Context Query + Provenance + Historical Decision Fact
+“为什么推荐”“我说过安静吗”靠 History 重猜
+→ Decision Context Query + Provenance
 
-“这个日料咋样”把日料写进搜索条件
+“这个日料咋样”被写成 cuisine=日料
 → Canonical Turn Semantics
 
-WAITING_RELAXATION 下“那附近有啥”无法恢复，而且解释不清刚才搜了什么
-→ BROADEN_FOOD_SCOPE + Failure Explanation + Relaxation Command Projection
+无结果后“那附近有啥”无法恢复
+→ BROADEN_FOOD_SCOPE + Failure Explanation
+
+Relaxation 只改 DecisionSession、WM 仍是旧条件
+→ Command Projection 回 canonical WM
+
+“这个日本料理重口吗”绑定 focused 东北菜
+→ Descriptive Candidate Reference
+
+“重口吗”走 detail / no tool
+→ Shop Fact Type → Evidence Tool Contract
 ```
 
-最终形成两条核心 authority：
+最终形成的不是“所有事情都交给 LLM”，而是：
+
+```text
+开放语义理解 → LLM
+实体/引用 Grounding → Resolver
+状态写权限 → Turn Semantics
+业务状态 → Deterministic Reducer
+命令合法性 → FSM
+外部事实 → Tool
+历史事实 → DecisionSession / RecommendationBatch
+```
+
+---
+
+# 二、先把几个核心概念分清
+
+## 1. History、Context、Working Memory、DecisionSession
+
+```text
+Chat History
+= 用户和系统说过什么
+
+ChatProcessingContext
+= 当前 Turn 的 runtime 数据
+
+ConversationWorkingMemory
+= 系统当前相信的 canonical business state
+
+DecisionSession
+= 某一次决策执行的输入、结果和历史事实
+
+RecommendationBatch
+= 某一轮推荐候选的身份、顺序与轻量 reference metadata
+```
+
+关键：
+
+> 历史里“说过”不等于当前仍生效；DecisionSession 当时如何执行，也不等于当前 Working Memory 现在是什么。
+
+---
+
+## 2. Canonical Working Memory 和 Canonical Turn Semantics
+
+这是当前项目最重要的一组区分：
 
 ```text
 Canonical Working Memory
@@ -74,127 +146,38 @@ Canonical Turn Semantics
 回答：用户这一轮允许系统做什么？
 ```
 
----
-
-## 3. 5 分钟版本怎么铺
-
-不要按“技术栈”讲，按事故演进讲：
+只有 WM，没有 Turn Semantics，仍可能发生：
 
 ```text
-1. 没有 canonical state
-2. candidatePool / shownPool / RecommendationBatch
-3. Flat WM → Task Scope
-4. same-turn snapshot
-5. OCC / stale runtime result
-6. Reference / TurnPlan
-7. Location Contract / Administrative Authority
-8. Decision Context / Provenance / Historical Fact
-9. Canonical Turn Semantics
-10. No-result Recovery / Failure Explainability
-11. Evaluation 如何推动每一轮架构变化
+用户问“这个日料咋样”
+→ Extractor 抽到 cuisine=日料
+→ 错误写进 WM
 ```
 
-面试官听完应该能感受到：这个项目不是“一开始画好架构再实现”，而是每次真实失败都推动一个更准确的不变量。
+所以“状态有唯一真相”不够，**写状态前的语义权限也必须有唯一真相。**
 
 ---
 
-# 二、当前系统里几个最容易混淆的概念
-
-## 1. Chat History、Context、Working Memory、DecisionSession 分别是什么
-
-```text
-Chat History
-= 用户和系统说过什么
-
-ChatProcessingContext
-= 当前 Turn 运行时临时数据
-
-ConversationWorkingMemory
-= 当前会话 canonical business state
-
-DecisionSession
-= 某一次决策执行的输入、结果和历史事实快照
-
-RecommendationBatch
-= 某一轮推荐候选的身份/顺序指针
-```
-
-最重要的区分：
-
-> “历史里说过”不等于“当前仍生效”；“DecisionSession 当时怎么执行”也不等于“当前 Working Memory 现在是什么”。
-
-OpenAI Agents SDK 的 Session 更接近“持久化 conversation items”；LangGraph checkpoint 更接近“thread state snapshot”；而本项目的 Working Memory 是业务特化状态，不是单纯消息历史。
-
----
-
-## 2. 为什么不能只用聊天历史
-
-例如：
-
-```text
-预算100
-→ 算了预算不限
-→ 还是100
-```
-
-History 只能证明三句话都说过，不能天然给出“当前预算=100”。如果每轮让 LLM 重读历史决定当前状态，会出现：
-
-```text
-旧值和新值竞争
-清除语义不稳定
-长上下文成本上涨
-多方案之间串状态
-并发没有 version
-历史 ordinal reference 不稳定
-```
-
-所以：
-
-```text
-History = Language Evidence
-Working Memory = Current Business Truth
-```
-
----
-
-# 三、演进循环 1：candidatePool 为什么不够
+# 三、演进循环 1：candidatePool → RecommendationBatch
 
 ## 真实现象
 
-第一次推荐：
-
 ```text
-A B C
+第一次推荐 A/B/C
+→ 用户“换一批”
+→ 第二次推荐 D/E/F
 ```
 
-用户说“换一批”，得到：
+系统既要知道当前操作的是 D/E/F，又不能忘记 A/B/C 已展示。
 
-```text
-D E F
-```
-
-这时系统既要知道：
-
-```text
-当前可继续操作的是 D/E/F
-```
-
-又要知道：
-
-```text
-A/B/C 已经展示过，不能无意重复
-```
-
-## 第一版思路
-
-拆成：
+## 第一版
 
 ```text
 candidatePool = 当前候选
-shownPool = 历史展示过的商户
+shownPool = 历史看过的商户
 ```
 
-## 为什么还失败
+## 为什么失败
 
 用户问：
 
@@ -202,20 +185,13 @@ shownPool = 历史展示过的商户
 最开始第二家怎么样？
 ```
 
-`shownPool=[A,B,C,D,E,F]` 只能知道“看过谁”，不能恢复：
-
-```text
-第一批第二家=B
-第二批第一家=D
-```
+`shownPool=[A,B,C,D,E,F]` 只能回答“看过谁”，不能回答“在哪一批、第几个”。
 
 ## 根因
 
-我们丢了“候选出现在哪一轮、顺序是什么”的历史结构。
+丢失了历史推荐的 batch boundary 和 ordinal。
 
 ## 最终方案
-
-新增：
 
 ```text
 RecommendationBatch
@@ -223,66 +199,70 @@ RecommendationBatch
 └─ candidates[]
 ```
 
-当前 Candidate Projection 由 latest batch 推导；历史 shown union 从所有 batch 推导。
+当前 candidate projection 来自 latest batch；历史 shown union 来自所有 batch。
 
-## 为什么不是把所有详细信息复制进 Batch
+当前 CandidateRef 不再只保存 id/name/price/distance，还补了轻量：
 
-Batch 只保存 identity/index/pointer，完整 `matchedReasons/evidence` 放在 `AiDecisionSession.resultJson`。否则每个 Working Memory snapshot 都会重复复制评论证据，既膨胀又形成两个历史事实源。
+```text
+cuisine
+referenceTags[]
+```
 
-## 面试追问
+原因是后续真实对话又出现：
 
-**Q：为什么不是 Event Sourcing？**
+```text
+“日本料理那个”
+“那个烧烤”
+```
 
-不是。RecommendationBatch 是历史推荐索引，当前状态仍然靠 versioned snapshot；事件主要做审计，不通过 replay 重建整个当前状态。
+如果 Batch 只有 shopId/name，就无法稳定做描述性 grounding。
+
+但仍然不把评论、evidence、matchedReasons 长文本复制进 WM。完整历史证据继续留在 `AiDecisionSession.resultJson`。
+
+## 面试结论
+
+> Historical identity 需要足够的 reference metadata，但不能为了方便引用把完整历史 payload 复制进每个 Working Memory snapshot。
 
 ---
 
-# 四、演进循环 2：Flat Working Memory 为什么会 Ghost Inheritance
+# 四、演进循环 2：Flat WM → Task Scope
 
 ## 真实现象
 
-用户：
-
 ```text
-福州火锅，人均100
-→ 换杭州西湖日料，人均300
+福州火锅100
+→ 杭州西湖日料300
 → 还是最开始那套
 ```
 
-Flat WM 只有一套 criteria，第二套覆盖第一套后，再恢复容易拼成：
+Flat WM 只有一套 criteria，很容易恢复成：
 
 ```text
 福州 + 火锅 + 西湖 + 300
 ```
 
-## 第一版思路
+## 第一版
 
-继续在一套 criteria 上做 replace/clear。
+继续在一套 criteria 上 replace / clear。
 
 ## 为什么失败
 
-这里不是单字段更新，而是“用户在同时考虑多个方案”。一套 flat state 无法表达多个并存方案。
-
-## 根因
-
-Conversation Scope 和 Decision Task Scope 混在了一起。
+这不是字段更新问题，而是用户同时维护多套 Decision Task。
 
 ## 最终方案
 
 ```text
 ConversationWorkingMemory
 └─ tasks[]
-   ├─ Task A
-   │  └─ 福州/火锅/100
-   └─ Task B
-      └─ 杭州/日料/300
+   ├─ Task A: 福州 / 火锅 / 100
+   └─ Task B: 杭州 / 日料 / 300
 ```
 
-恢复 A 是 re-activate Task A，不是重新拿当前状态拼 A。
+恢复 A 是 re-activate A，不是拿 B 再拼一遍。
 
-## Task Identity 为什么不包含预算
+## 为什么预算不做 Task Identity
 
-预算通常是 refinement，不代表一个新需求身份。否则：
+否则：
 
 ```text
 福州火锅100
@@ -290,83 +270,79 @@ ConversationWorkingMemory
 福州火锅120
 ```
 
-会碎成三个 Task。
+会碎成三个 Task。预算通常是 refinement，不是任务身份。
 
-当前 Task Identity 仍是业务启发式，不要吹成通用任务管理算法。
+## 当前边界
+
+Task Identity 仍是餐饮业务启发式，不是通用 Task Manager。
 
 ---
 
-# 五、演进循环 3：Task V2 单测过了，E2E 为什么还错
+# 五、演进循环 3：same-turn Snapshot 和 OCC
 
-## 真实现象
+## 真实问题
 
-Task 切换逻辑单测正确，但 E2E 中新 Task 又被旧状态覆盖。
+Task V2 单测正确，但 E2E 仍失败。
 
-## 定位过程
-
-发现同一个请求中：
+定位发现：
 
 ```text
 transitionTask()
-→ 修改 request-scoped WM
+→ 修改当前请求里的 WM
 
 reduceCriteria()
-→ 又从 DB reload 旧 version WM
+→ 又从 DB load 同 version 的旧 WM
 ```
+
+新 Task 被同一请求中的旧 Snapshot 覆盖。
 
 ## 根因
 
-同一 Turn 内出现了两个不同的世界视图。
+一个 Turn 内出现两个世界视图。
 
-## 最终不变量
+## 不变量
 
-> 一个 Turn 只能有一个 authoritative Working Memory Snapshot。
+```text
+一个 Turn
+只能有一个 authoritative Working Memory view
+```
 
 ```text
 bootstrap snapshot
-→ task transition
+→ transition
 → merge
 → reduce
 → persist
 ```
 
-必须基于同一份 request-scoped memory。
+都基于同一 request-scoped snapshot。
 
-## 和 OCC 有什么区别
+## 为什么还要 OCC
+
+same-turn snapshot 解决一个请求内部；OCC 解决多个请求之间：
 
 ```text
-same-turn snapshot consistency
-= 一个请求内部不同 Node 不能看不同版本
-
-OCC
-= 不同请求之间不能让旧请求覆盖新请求
+expectedVersion != latestVersion
+→ VersionConflictException
 ```
 
-面试一句话：
+一句话：
 
 > 同一 Turn 看同一个世界；并发 Turn 不允许旧世界覆盖新世界。
 
 ---
 
-# 六、演进循环 4：OCC 还不够，慢 Tool 为什么仍可能写旧状态
+# 六、演进循环 4：OCC → stale runtime result guard
 
-## 真实现象
+## 场景
 
 ```text
-Turn A 在 v20 启动 Tool
-Turn B 很快把 WM 更新到 v21
+Turn A 在 WM v20 启动慢 Tool
+Turn B 把状态更新到 v21
 Turn A 5 秒后返回
 ```
 
-如果 A 直接把 Tool Result 应用回去，会基于旧世界污染 v21。
-
-## 第一版方案
-
-只在 Working Memory append 时做 `expectedVersion` 检查。
-
-## 为什么不够
-
-Tool 调用期间状态已经变化，旧 runtime result 即使最终写入过程有控制，也可能在业务层先被当成有效结果。
+即使持久化层有 OCC，A 的 Tool Result 仍然是基于旧世界算出来的。
 
 ## 最终方案
 
@@ -376,7 +352,7 @@ Tool 调用期间状态已经变化，旧 runtime result 即使最终写入过�
 baseWorkingMemoryVersion
 ```
 
-回写时重新读取 latest version：
+回写前读取 latest：
 
 ```text
 base != latest
@@ -384,35 +360,28 @@ base != latest
 → reject
 ```
 
-## 持久化为什么是 Full Snapshot
+## 为什么用 Full Snapshot，不做 Event Sourcing
 
-当前状态规模可控，Full Snapshot 带来：
+当前状态规模可控，Full Snapshot 的优势是读、恢复、debug 都简单。事件用于审计，不靠 event replay 重建所有业务状态。
 
-```text
-读取简单
-恢复简单
-debug 简单
-历史版本直接查看
-```
-
-代价是长会话存储增长。未来才考虑 periodic full + delta / compaction，不提前做 Event Sourcing。
+长期代价是长会话存储增长，未来才考虑 periodic full + delta / compaction。
 
 ---
 
-# 七、演进循环 5：Reference 和 TurnPlan 为什么要拆
+# 七、演进循环 5：Reference + TurnPlan
 
-## 真实现象 1：ordinal reference 漂移
+## 问题 A：ordinal reference
 
 ```text
 第一家
 第二家
-刚才那个
 最开始第二家
+刚才那家
 ```
 
-如果每个 Handler 自己解析“第一家”，就会出现多套 ordinal 语义。
+如果每个 Handler 自己理解，会出现多套 ordinal 语义。
 
-## 方案
+最终：
 
 ```text
 Natural Language
@@ -421,33 +390,21 @@ Natural Language
 → ResolvedShopReference
 ```
 
-Reference 只有一个 authority。
-
-## 真实现象 2：一句话同时修改状态和问事实
+## 问题 B：一句话有两个动作
 
 ```text
 第一家太贵了，第二家有插座吗？
 ```
 
-如果一个 Turn 只有一个 Action：
+单 Action 无法同时表达：
 
 ```text
-START_DECISION
+Criteria Mutation
++
+Business Follow-up
 ```
 
-会吞掉商户事实查询；如果只选：
-
-```text
-BUSINESS_FOLLOW_UP
-```
-
-又会吞掉“太贵”的 criteria mutation。
-
-## 根因
-
-Criteria Mutation 和 Execution Action 是正交维度，却被塞进一个单标签 route。
-
-## 最终方案
+所以：
 
 ```text
 TurnPlan
@@ -455,11 +412,9 @@ TurnPlan
 └─ ExecutionAction
 ```
 
-## 为什么 Reference 必须 pre-mutation resolve
+## 为什么 reference 必须 pre-mutation resolve
 
-用户说“第二家”时看到的是 mutation 前的 batch。若先修改 criteria 导致 candidate invalidation，再解析“第二家”，引用会漂移。
-
-因此：
+“第二家”属于用户发话时看到的 batch。如果先 mutation 导致 candidate invalidation，再解析 ordinal，reference 会漂移。
 
 ```text
 Reference belongs to pre-mutation snapshot
@@ -467,47 +422,28 @@ Reference belongs to pre-mutation snapshot
 
 ---
 
-# 八、演进循环 6：Location 不是一个字符串
+# 八、演进循环 6：Location Contract 一步步长出来
 
-这条线最值得面试讲，因为它连续暴露了不同层级的“语义混用”。
+## 1. Named Location 和 Browser GPS 混用
 
-## 第一轮：设备 GPS 和命名目的地混用
+用户明确说“重庆”，系统不能继续拿福州 GPS。
 
-用户明确说“重庆”，系统却可能继续复用之前福州 GPS。
-
-根因：
-
-```text
-Location Value
-和
-Location Intent / Provenance
-```
-
-混在一起。
-
-于是区分：
+因此区分：
 
 ```text
 CURRENT_DEVICE
 EXPLICIT_TARGET
 ```
 
-并明确：只有相对当前位置表达才需要 GPS。
+设备 GPS 只有在用户表达“我附近/当前位置”时才是 search anchor。
 
 ---
 
-## 第二轮：行政层级丢失
+## 2. Province / City / District / Area 混用
 
-`福建省` 被当成 city，SQL projection 错。
+`福建省` 不能放 targetCity；“师大”也不能放 targetDistrict。
 
-根因：
-
-```text
-Location Value
-≠ Administrative Level
-```
-
-于是 canonical criteria 增加：
+最终：
 
 ```text
 targetProvince
@@ -516,125 +452,99 @@ targetDistrict
 targetArea
 ```
 
-`targetArea` 保留给 POI/商圈/地标，不再拿来装区县。
+`targetArea` 用于 POI/商圈/地标。
 
 ---
 
-## 第三轮：LLM fallback 丢行政实体
+## 3. 行政实体不能完全交给 LLM
 
-真实场景：
+真实问题：
 
 ```text
-鼓楼有什么东西吃
+鼓楼有什么吃的
 ```
 
-模型可能 `tool_calls=[]`，行政信息没进入 canonical state。
+模型可能不稳定抽出行政身份。
 
-第一反应如果继续加 prompt 不够稳，因为行政区本质是 closed-world entity。
-
-最终引入：
+行政区是 closed-world identity，所以引入：
 
 ```text
 AdministrativeRegionResolver
 → local registry
-→ AMap District WebService fallback
+→ provider fallback
 ```
 
-模型可以给 candidate hint，但 Resolver 才拥有 administrative identity authority。
+模型只提供 hint，Resolver 才拥有 identity authority。
 
 ---
 
-## 第四轮：partial registry false uniqueness
+## 4. Partial Dataset ≠ Complete World
 
-本地只有一个“鼓楼区”不代表全国只有一个鼓楼区。
+本地 registry 只有一个“鼓楼区”，不代表全国只有一个。
 
-核心结论：
-
-```text
-Partial Dataset ≠ Complete World
-```
-
-裸区县没有 parent 时，不能因为本地唯一就直接执行；要么有 parent context，要么 provider 给可信 hierarchy，否则澄清。
+因此裸区县无 parent 时，不能因为本地唯一就直接执行；可信 parent/provider 不足时应澄清。
 
 ---
 
-## 第五轮：Administrative Authority Leak
+## 5. Administrative Authority Leak
 
-即使已经有 Resolver，旧流程仍可能：
+真实“连江”问题：
 
 ```text
-Resolver(raw query) = NOT_FOUND
-Model targetDistrict=连江县
-merge NOT_FOUND 什么都不做
-→ model field 偷渡进 canonical state
+Resolver = NOT_FOUND
+LLM targetDistrict=连江县
+旧 merge 对 NOT_FOUND 什么都不做
+→ LLM 字段仍偷渡进 canonical state
 ```
 
-这说明：
-
-> “有一个 Resolver 类”不等于它真的拥有 authority；所有旁路都必须不能绕过它。
-
-于是模型行政字段降级为 untrusted hint：
+最终改成：
 
 ```text
-LLM candidate hint
+LLM admin hint
 → raw-query grounding
-→ Administrative Resolver validation
+→ resolver/provider validate
 → verified identity
 → canonical state
 ```
 
+失败则清除未验证 admin field。
+
+结论：
+
+> 有 Resolver 类不代表它真的拥有 authority；旧旁路必须全部失去写权。
+
 ---
 
-## 第六轮：Substring Grounding 也会错
+## 6. String Mention ≠ Entity Mention
 
 ```text
 福州大学附近
 ```
 
-包含“福州”，但不代表用户明确设置 `targetCity=福州市`。
+包含“福州”，不等于用户显式设置“福州市”。Substring grounding 会把 POI 错洗成行政区。
 
-因此：
-
-```text
-String Mention ≠ Entity Mention
-```
-
-最终 `resolveHint()` 统一处理 raw-query grounding，并复用 POI boundary；显式“福州市福州大学附近”允许 city + POI 共存。
+所以 admin hint 必须经过 raw-query grounding 和 POI boundary。
 
 ---
 
-## 第七轮：POI Mention ≠ Executable Search Anchor
+## 7. POI Mention ≠ Executable Search Anchor
 
 真实问题：
 
 ```text
-师大附近有没有啥好吃的
+师大附近有没有啥好吃的？
 ```
 
-旧系统会写：
+旧系统写了 `targetArea=师大`，但没有真正 resolve POI；后面又复用旧 GPS 搜索。
 
-```text
-targetArea=师大
-```
-
-但 POI 没 resolve，后面又偷偷复用旧 Browser GPS 搜索。
-
-根因：
-
-```text
-Location Mention
-≠ Resolved Location Identity
-≠ Executable Search Anchor
-```
-
-最终 contract：
+最终：
 
 ```text
 Administrative scope
 → AdministrativeRegionResolver
 
 POI / Landmark / Business Area
-→ maps_geo / LocationResolutionProvider
+→ LocationResolutionProvider
 
 CURRENT_DEVICE
 → Browser GPS
@@ -644,38 +554,137 @@ POI 未解析成功必须 clarification，不能 silent fallback 到旧 GPS。
 
 ---
 
-# 九、演进循环 7：为什么“我说过安静吗”不能靠 History 回答
+# 九、演进循环 7：地点简称和校区——“农大附近”
+
+这是前端真实使用暴露的新问题。
+
+## 真实对话
+
+```text
+我想去农大附近吃饭
+```
+
+用户不可能每次都输入完整正式名，更不会每次写：
+
+```text
+福建农林大学某某校区
+```
+
+现实里会大量出现：
+
+```text
+农大
+福大
+师大
+万达
+大学城
+```
+
+甚至同一学校有不同校区。
+
+## 为什么之前的安全 Contract 仍不够
+
+以前我们做到的是：
+
+```text
+POI 未 resolve
+→ 不偷用 GPS
+→ clarification
+```
+
+安全了，但用户体验过于保守。
+
+## 根因
+
+原接口只有：
+
+```text
+resolve(String placeText)
+```
+
+没有上下文：
+
+```text
+设备坐标
+当前 city/district
+当前 named location
+```
+
+所以“农大”只能孤立解析。
+
+## 当前方案
+
+新增：
+
+```text
+LocationResolutionRequest
+LocationResolutionContext
+```
+
+携带：
+
+```text
+rawText
+device lat/lng
+active province/city/district
+currentNamedLocation
+```
+
+当前实际 MCP 只确认有 `maps_geo`，因此没有臆造 `maps_text_search/maps_around_search`。实现会把 active city 作为 query context，并在 provider 返回多个候选时用 device distance 排序。
+
+同时 `ResolvedLocationCandidate` / `ConversationLocationSlot` 增加轻量：
+
+```text
+poiId
+canonicalName
+```
+
+避免最后只剩一组坐标，不知道解析的是哪个具体 POI/校区。
+
+## GPS 的职责边界
+
+```text
+GPS 可以做 Named POI 的 disambiguation prior
+≠
+GPS 可以替代 Named POI 成为最终 search anchor
+```
+
+如果 provider 无法权威解析简称，仍然澄清，不能因为“用户大概在福州”就直接把“农大”硬编码成某所大学。
+
+## 当前限制必须诚实说
+
+当前环境 provider 不可用时，“农大/福大”只能安全进入 `LOCATION_RESOLUTION`，还不能宣称“已经自动解析成具体学校/校区”。如果后续 provider 增加 POI keyword/around search，当前 Request/Context contract 已经能接入，不需要再改 Working Memory 主模型。
+
+---
+
+# 十、演进循环 8：Decision Context / Provenance
 
 ## 真实问题
 
-用户问：
-
 ```text
 为什么推荐第一家？
-我前面有说过安静吗？
+我什么时候说过安静？
 你的过滤条件是什么？
 你刚才查的是哪里？
 ```
 
-这些不是新推荐，也不是外部商户事实查询，而是在读“已有决策状态”。
+这不是新推荐，而是在读取已有决策事实。
 
-## 第一版思路
+## 第一版
 
-让 GENERAL_CHAT 读 History 自由回答。
+让 GENERAL_CHAT 从 History 自由回答。
 
 ## 为什么失败
 
-模型会重新解释历史，形成第二套真相。例如当前 criteria 有 `安静`，并不证明用户明确说过安静；它可能是从“适合聊天”派生出的。
+History 只能告诉“说过什么”，不能告诉当前来源。例如 `安静` 可能来自用户显式，也可能从“适合聊天”派生。
 
 ## 最终方案
-
-顶层统一：
 
 ```text
 DECISION_CONTEXT_QUERY
 ```
 
-内部 QueryType：
+QueryType：
 
 ```text
 WHY_RECOMMENDED
@@ -686,9 +695,7 @@ EXECUTED_SEARCH_SCOPE
 
 严格 read-only，不 reduce、不切 Task、不 invalidate、不改 focus、不增加 WM version。
 
----
-
-## Provenance 为什么要 element-level
+## element-level provenance
 
 不能写：
 
@@ -696,79 +703,50 @@ EXECUTED_SEARCH_SCOPE
 preferences → USER_EXPLICIT
 ```
 
-因为同一个 list 里：
+因为一个 list 内不同元素来源不同。
+
+使用：
 
 ```text
-安静 → DERIVED
-约会 → USER_EXPLICIT
-不排队 → USER_EXPLICIT
+preference:安静 → DERIVED
+preference:约会 → USER_EXPLICIT
 ```
 
-因此使用：
+## 历史解释为什么读 DecisionSession
+
+历史第一批推荐是在旧 budget/location 下产生的。问“为什么最开始第一家被推荐”时必须：
 
 ```text
-preference:安静
-preference:约会
-```
-
-当前来源：
-
-```text
-USER_EXPLICIT
-DERIVED
-SYSTEM_DEFAULT
-```
-
-来源在 Extractor / Merger 阶段确定，StateService 不重新做 NLU。
-
----
-
-## 为什么历史推荐解释必须读历史 DecisionSession
-
-如果第一轮预算150，后来改成80，再问：
-
-```text
-为什么最开始第一家被推荐？
-```
-
-不能拿当前 budget=80 重新解释历史结果。
-
-正确：
-
-```text
-ResolvedShopReference
+Resolved Reference
 → RecommendationBatch.decisionSessionId
 → AiDecisionSession.resultJson
-→ 当时 matchedReasons/evidence
 ```
 
-这避免 Temporal Leakage。
+不能拿当前 WM 重解释历史，否则发生 Temporal Leakage。
 
 ---
 
-# 十、演进循环 8：有 Canonical Working Memory，为什么系统还是会胡说
-
-这是当前项目最重要的新阶段。
+# 十一、演进循环 9：Canonical Turn Semantics——Mention ≠ Mutation
 
 ## 真实 Bad Case
 
 ```text
-这个日料咋样
+这个日料咋样？
 ```
 
-用户只是问当前推荐商户，但旧 Extractor 抽到：
+用户只是在问店，但旧 Extractor 抽到：
 
 ```text
 cuisine=日料
 ```
 
-随后旧逻辑：
+旧逻辑再用：
 
 ```text
-hasMutation(criteriaDelta)=true
-→ APPLY_DELTA
-→ 日料被写入 canonical criteria
+hasMutation(criteriaDelta)
 ```
+
+于是把“日料”写成搜索条件。
 
 另一个 Case：
 
@@ -776,60 +754,22 @@ hasMutation(criteriaDelta)=true
 我附近呢？除了东北菜应该都OK
 ```
 
-Context Rewrite 看到“我附近”提前 return：
+旧 Context Rewrite 看到“我附近”提前返回，后半句排除条件直接丢失。
+
+## 第一反应为什么不够
+
+如果只补 cuisine provenance 或再加几个 contains，本质仍是多个组件各自重新解释同一句话。
+
+## 根因
 
 ```text
-在当前设备附近搜索餐饮商户
+Canonical State 有了
+Canonical Turn Semantics 没有
 ```
-
-“除了东北菜”被完全丢掉。
-
-## 第一版误判
-
-一开始看起来像：
-
-```text
-cuisine provenance 不完整
-Context Rewrite 少处理一个 compound phrase
-```
-
-如果按这个方向继续修，会不断加 contains/regex。
-
-## 真正根因
-
-虽然已经有 canonical state，但没有 canonical turn semantics。
-
-同一句话被：
-
-```text
-Rewrite
-Routing
-ConstraintExtractor
-Reference
-DecisionContextQuery
-```
-
-多次独立理解。
-
-于是形成：
-
-```text
-Mention 被当成 Mutation
-Rewritten Query 被当成 Whole-turn Truth
-```
-
-## 业内对照
-
-Rasa CALM 当前就是“用户消息 → 一组高层 commands → deterministic Dialogue Manager”。它特别强调一条消息可以同时产生多个 command，比如既回答当前问题又提出新请求。这比“一个 intent label”更适合 compound turn。
-
-参考：
-
-- https://rasa.com/docs/pro/customize/command-generator/
-- https://rasa.com/docs/learn/concepts/calm/
 
 ## 最终方案
 
-新增 request-scoped：
+request-scoped：
 
 ```text
 TurnCommandSet
@@ -837,39 +777,22 @@ TurnCommand
 TurnUnderstandingService
 ```
 
-它不保存业务事实，只回答：
+它不保存长期业务事实，只统一：
 
 ```text
-这一轮用户允许系统做什么？
+用户这一轮允许系统做什么？
 ```
 
-当前 command 只覆盖真实需求：
-
-```text
-SET_CONSTRAINT
-CLEAR_CONSTRAINT
-EXCLUDE_CONSTRAINT
-SET_LOCATION_INTENT
-ASK_DECISION_CONTEXT
-ASK_SHOP_FACT
-REFERENCE
-BROADEN_FOOD_SCOPE
-```
-
-不要把它说成通用 DSL。
-
----
-
-## 最关键职责拆分
+## 最关键职责
 
 ```text
 TurnUnderstanding
 → 决定“能不能改”
 
 ConstraintExtractor
-→ 在允许修改后决定“具体改什么”
+→ 允许后决定“具体改什么”
 
-CriteriaMerger / ConversationStateService
+Merger / ConversationStateService
 → 决定“怎么落状态”
 ```
 
@@ -881,60 +804,15 @@ Fact Question ≠ State Update
 Original Turn ≠ Rewritten Query
 ```
 
----
-
-## 为什么 Context Rewrite 要降级
-
-现在：
-
-```text
-Original Message
-= Turn Semantics Source
-
-Context Rewrite
-= reference / ellipsis enrichment
-
-Retrieval Query Rewrite
-= consumer-specific derived representation
-```
-
-Rewrite 不再有资格覆盖整轮业务语义。
+Context Rewrite 因此降级为 reference/ellipsis enrichment，不再替代 original message 成为整轮业务真相。
 
 ---
 
-## 为什么新增 excludedCuisines
+# 十二、演进循环 10：第一版 Turn Semantics 又为什么返工
 
-```text
-除了东北菜都可以
-```
+## full regression 暴露
 
-旧 schema 只有一个正向 cuisine，无法表达：
-
-```text
-ANY cuisine EXCEPT 东北菜
-```
-
-所以增加 durable hard constraint：
-
-```text
-excludedCuisines[]
-```
-
-它进入 hard filter，并被纳入 candidate-universe invalidation。
-
----
-
-# 十一、演进循环 9：Turn Semantics 第一版为什么还没真正收口
-
-## full regression 暴露的问题
-
-第一版已经让 `selectAction()` 使用：
-
-```text
-TurnUnderstandingService.shouldApplyReferenceMutation()
-```
-
-但 `route()` 里还有旧旁路：
+`selectAction()` 已经使用新的 TurnUnderstanding，但 `route()` 仍然：
 
 ```text
 isCompoundMutationFollowUp()
@@ -942,7 +820,7 @@ isCompoundMutationFollowUp()
 → hasMutation(criteriaDelta)
 ```
 
-于是出现两个 Mutation Authority。
+形成双 Mutation Authority。
 
 真实结果：
 
@@ -950,15 +828,9 @@ isCompoundMutationFollowUp()
 第一家那个日本料理环境怎么样？
 ```
 
-仍可能因为 Extractor 抽到 cuisine=日料，被当成 mutation。
-
-## 根因
-
-> 新增一个 authority class 不代表 authority boundary 已经成立；旧旁路必须全部失去决定权。
+仍可能因为抽到 cuisine=日料而 mutation。
 
 ## 最终修复
-
-`5a03adf`：
 
 ```text
 route()
@@ -966,106 +838,107 @@ route()
 → TurnUnderstandingService
 
 selectAction()
-→ 同一个 helper
-→ YES 后才 ensureCriteriaDelta()
+→ 同一个 authority
+→ 只有 YES 才 ensureCriteriaDelta()
 ```
 
 旧 `hasMutation(DecisionConstraints)` 删除。
 
 缺少 TurnUnderstandingService 时 reference mutation fail-closed。
 
-## 面试一句话
+面试一句话：
 
-> Extractor 提供 Delta 内容，但不拥有 State Write Permission。
+> Extractor 可以提供 Delta，但不能因为“抽到了字段”就获得 State Write Permission。
 
 ---
 
-# 十二、演进循环 10：WAITING_RELAXATION 为什么用户会觉得系统“在吹牛”
+# 十三、演进循环 11：negative cuisine 为什么要改 schema
+
+```text
+除了东北菜都可以
+```
+
+不是：
+
+```text
+cuisine = 某个正向值
+```
+
+而是：
+
+```text
+ANY cuisine EXCEPT 东北菜
+```
+
+所以新增：
+
+```text
+excludedCuisines[]
+```
+
+它是 durable hard constraint，进入 MySQL hard filter，同时属于 candidate universe；增删排除菜系会 invalidate 当前 candidate/focus，但不删除历史 RecommendationBatch。
+
+负向菜系 fallback 复用 `CuisineCanonicalizer`，而不是分别给日料、火锅、烧烤写平行规则。
+
+---
+
+# 十四、演进循环 12：WAITING_RELAXATION——状态有了，为什么用户还是觉得系统在“吹牛”
 
 ## 真实对话
 
-用户：
-
 ```text
 附近兰州拉面
-→ 提供 GPS
-→ 3/5km 都没有结果
-→ “没有兰州拉面吗”
-→ “什么意思”
-→ “我就要吃兰州拉面”
+→ GPS
+→ 3/5km 都 0 结果
+→ 没有兰州拉面吗
+→ 什么意思
+→ 我就要吃兰州拉面
 → 仍然 0
-→ “无敌了，那附近有啥”
+→ 无敌了，那附近有啥
 ```
 
-旧系统最后把：
+旧系统最后把“那附近有啥”判成 GENERAL_CHAT。
+
+同时首次无结果只说“当前条件没有商户，可以扩大范围”，用户根本不知道：
 
 ```text
-无敌了，那附近有啥
-```
-
-路由成 GENERAL_CHAT。
-
-并且无结果卡片只说：
-
-```text
-当前条件下没有找到匹配商户，可以扩大范围……
-```
-
-用户不知道：
-
-```text
-到底搜了哪里？
-多大半径？
-保留了兰州拉面吗？
+搜了哪里？
+多远？
+还保留兰州拉面吗？
 预算还在吗？
-为什么一直让我放宽？
 ```
 
-## 第一版判断
+## 为什么只修 Route 不够
 
-看起来像“附近有啥没有命中餐饮 route”。
-
-如果只加：
-
-```text
-contains("附近有啥") → START_DECISION
-```
-
-还是不够，因为旧 canonical state 里仍然保留：
+就算把“附近有啥”强行 START_DECISION，旧 WM 里仍有：
 
 ```text
 keyword=兰州拉面
 cuisine=面食
 ```
 
-重新搜索仍可能继续是 0。
+重新搜仍然可能是 0。
 
 ## 根因
 
-这里缺的不是 Route，而是两个 contract：
+缺的是两个 Contract：
 
 ```text
-No-result Recovery Command Contract
+Recovery Command Contract
 +
 Failure Explanation Contract
 ```
 
-## 最终恢复命令
-
-新增：
-
-```text
-BROADEN_FOOD_SCOPE
-```
+## BROADEN_FOOD_SCOPE
 
 只在：
 
 ```text
 WAITING_RELAXATION
 +
-当前仍有具体 keyword/cuisine
+已有具体 food target
 +
-用户表达泛化搜索
+用户表达泛化
 ```
 
 时合法。
@@ -1073,44 +946,35 @@ WAITING_RELAXATION
 语义：
 
 ```text
-clear keyword
-clear cuisine
-保留 location / GPS
+clear keyword/cuisine
+保留 location/GPS
 保留 radius
 保留 budget
-保留其他明确 preferences
+保留其他显式 preferences
 保留历史 RecommendationBatch
-→ retry search
+→ retry
 ```
 
-普通非暂停态“附近有啥”不会触发这个 recovery command。
+普通非暂停态“附近有啥”不会误触发该 recovery command。
 
----
-
-## 为什么“附近有什么兰州拉面”不能触发 BROADEN
-
-用户仍然坚持具体 target。
-
-因此 TurnUnderstanding 区分：
+## 强/弱泛化
 
 ```text
-强放弃信号：随便 / 都行 / 不一定 / 不限 / 其他……
-弱泛化信号：啥 / 什么
+强放弃：随便 / 都行 / 不一定 / 不限 / 其他……
+弱泛化：啥 / 什么
 ```
 
-弱泛化只有在用户没有再次提及当前 keyword/cuisine 时才 broadening。
+弱泛化只有在用户没有再次提到当前 food target 时才 broadening。
 
-随后还发现一个典型代码边界：空字符串 target 会让 `text.contains("")` 恒 true，于是新增 `containsNonBlankTarget()`，只检查非 blank 的 paused target。
-
-这个小 Bug 很适合面试讲“为什么 targeted test 需要覆盖 schema 组合，而不是只覆盖一条真实句子”。
+还因此补了 `containsNonBlankTarget()`，避免空字符串导致 `text.contains("") == true` 把恢复错误拦住。
 
 ---
 
-# 十三、演进循环 11：No-result Recovery 又暴露 DecisionSession / WM 双真相
+# 十五、演进循环 13：Relaxation 又暴露 DecisionSession / WM 双真相
 
-## 新问题
+## 问题
 
-`continueDecision()` 在 `DecisionSession.constraints` 里执行：
+`continueDecision()` 直接修改 `DecisionSession.constraints`：
 
 ```text
 EXPAND_RADIUS
@@ -1122,63 +986,42 @@ BROADEN_FOOD_SCOPE
 
 但 `snapshotDecision()` 按设计不覆盖 `activeTask.criteria`。
 
-所以可能出现：
+于是可能：
 
 ```text
-DecisionSession：keyword/cuisine 已清空，正在泛搜
-Working Memory：仍然是 兰州拉面/面食
+DecisionSession：已经泛搜
+WM：仍然兰州拉面/面食
 ```
 
-## 为什么不能简单让 snapshotDecision 覆盖 WM
+## 为什么不能让 snapshotDecision 全量反写
 
-因为我们之前已经建立不变量：
+因为已经建立过不变量：
 
-> Execution result 不是 canonical state writer。
+```text
+Execution Result ≠ Canonical State Writer
+```
 
-如果把整份 execution constraints 覆盖回 WM，会重新打开很多旁路：模型/执行层产生的临时值也可能偷渡进 canonical state。
+全量覆盖会把执行层临时值重新偷渡进 WM。
 
 ## 最终方案
-
-新增：
 
 ```text
 ConversationStateService.applyDecisionRelaxationCommand()
 ```
 
-只有已经被 FSM 验证过的 relaxation command，按白名单字段投影回 canonical criteria。
-
-例如：
+只把已经被 FSM 验证的 command 按白名单投影到 canonical criteria：
 
 ```text
-BROADEN_FOOD_SCOPE
-→ clear keyword/cuisine
-
-RELAX_CUISINE
-→ clear cuisine
-
-EXPAND_RADIUS
-→ sync successful radius
-
-INCREASE_BUDGET
-→ sync successful budget
-
-RELAX_QUIET / ALLOW_QUEUE / RELAX_LIGHT_TASTE
-→ remove 对应 preference + provenance
+BROADEN_FOOD_SCOPE → clear keyword/cuisine
+RELAX_CUISINE → clear cuisine
+EXPAND_RADIUS → sync radius
+INCREASE_BUDGET → sync budget
+RELAX_QUIET / ALLOW_QUEUE / RELAX_LIGHT_TASTE → remove 对应 preference/source
 ```
 
-每次放宽会 invalidate 当前 candidate/focus projection，但历史 RecommendationBatch 不删除。
+每次放宽 invalidate 当前 candidate/focus，历史 batch 保留。
 
-`snapshotDecision()` 继续只负责：
-
-```text
-phase
-batch
-focus
-```
-
-不覆盖 criteria。
-
-## 最终职责
+最终职责：
 
 ```text
 Turn Semantics
@@ -1187,86 +1030,250 @@ Turn Semantics
 Decision FSM
 → command 现在是否合法
 
-Canonical WM Reducer / Command Projection
+Canonical WM Command Projection
 → command 如何改变当前业务事实
 
 DecisionSession
-→ 记录这次执行事实
+→ 记录本次 execution fact
 ```
-
-这四层是当前最值得背熟的架构关系。
 
 ---
 
-# 十四、演进循环 12：失败解释为什么也要有单一事实源
+# 十六、演进循环 14：Failure Explanation 也要单一事实源
 
-## 旧问题
-
-首次进入 WAITING_RELAXATION 的卡片是一套 generic 文案；用户再问“什么意思”时，`EXPLAIN_SUSPENDED_DECISION` 又由另一套代码拼文案。
-
-风险：
+首次 WAITING 和后续“什么意思？”如果各自拼一套文案，会出现：
 
 ```text
-首次说 5km
-后续解释说 7km
-
-首次只提 budget
-后续又提 cuisine
+第一次说 5km
+第二次说 7km
 ```
 
-## 根因
+或者条件列表漂移。
 
-Failure Explanation 也出现双 truth。
-
-## 最终方案
-
-新增：
+因此新增：
 
 ```text
 DecisionFailureExplanationFormatter
 ```
 
-输入 DecisionResponse 的持久化事实：
+首次进入 WAITING 和后续 `EXPLAIN_SUSPENDED_DECISION` 共用同一 formatter，从 DecisionResponse / constraints / RelaxationInfo / options 生成：
 
 ```text
-constraints
-RelaxationInfo
-options
-recommendations
-```
-
-首次 WAITING 和后续 EXPLAIN 共用同一个 formatter。
-
-当前输出至少包括：
-
-```text
-搜索范围/半径
+搜索范围与半径
 keyword/cuisine/budget/preferences
-结果数量
-是否自动扩大过默认半径
-当前可以执行的下一步
+0 结果
+自动扩大历史
+当前可执行下一步
 ```
 
-这不是“美化文案”，而是 Failure Explainability：
-
-> 系统失败后，用户必须知道失败发生在什么条件下，以及接下来哪些 recovery action 是真实可执行的。
+这不是纯 UX 美化，而是 Failure Explainability。
 
 ---
 
-# 十五、当前数据结构与职责地图
+# 十七、演进循环 15：“这个日本料理重口吗？”——描述性引用为什么会绑错店
+
+这是前端真实聊天暴露的关键问题。
+
+## 场景
+
+推荐三家：
+
+```text
+A：东北菜（focused）
+B：日本料理
+C：烧烤
+```
+
+用户问：
+
+```text
+这个日本料理重口吗？
+```
+
+旧系统解析：
+
+```text
+“这个” → FOCUSED
+→ A 东北菜
+```
+
+然后回答：“东北菜不是日本料理”。
+
+## RecommendationBatch 有没有坏
+
+没有。B 仍在正确 Batch 中，用户下一轮“我问的是那个日本料理”就能解析到 B。
+
+所以这不是 candidate 丢失，而是 Reference Contract 不够。
+
+## 旧架构为什么必错
+
+旧 fast path：
+
+```text
+这个 / 这家 / 那个
+→ FOCUSED
+```
+
+`BatchAwareReferenceResolver` 一旦收到 FOCUSED，就只看 focusedShopId，不再利用“日本料理”这个限定词。
+
+## 根因
+
+```text
+Deictic Reference
+和
+Descriptive Qualifier
+```
+
+被压成了一个 FOCUSED 标签。
+
+## 最终方案
+
+`ReferenceIntent` 增加：
+
+```text
+qualifier
+deictic
+```
+
+规则和模型重叠时，不再只保留 mutationAnchor，而会用模型更完整 surface/qualifier enrich rule intent。
+
+解析优先级：
+
+```text
+Explicit Ordinal
+>
+Unique Descriptive Qualifier
+>
+Pure Deictic Focused Fallback
+```
+
+例如：
+
+```text
+“这个”
+→ qualifier=null
+→ focused
+
+“这个日本料理”
+→ qualifier=日本料理
+→ latest batch 内匹配
+
+“那个烧烤”
+→ qualifier=烧烤
+→ batch 内匹配
+```
+
+唯一匹配才 resolve；多个匹配 → AMBIGUOUS；有 qualifier 但无匹配 → BLOCKED/clarify，绝不能回退 focused。
+
+## Working Memory 为什么需要补 reference metadata
+
+`RecommendationCandidateRef` 原本只有 id/name/price/distance，不足以解释“日本料理那个”。因此只增加：
+
+```text
+cuisine
+referenceTags[]
+```
+
+这些是轻量、稳定、用户可见的 reference descriptor，不复制 evidence 长文本。
+
+## 当前进一步边界
+
+qualifier matching 当前仍是轻量 deterministic matching。像“日本料理”与 canonical “日料”如果店名本身不含 qualifier，未来可以进一步复用 `CuisineCanonicalizer` 做 descriptor canonicalization；今晚归档版本不把它包装成通用实体链接系统。
+
+---
+
+# 十八、演进循环 16：“重口吗？”为什么不能只查 get_shop_detail
+
+即使 Reference 正确绑定 B，日本料理“重口吗”仍有独立问题。
+
+## 旧问题
+
+Planner 可能：
+
+```text
+get_shop_detail
+```
+
+或者：
+
+```text
+NO_TOOL_CALL
+```
+
+但 detail 只能回答地址、人均、营业等静态事实，不能证明“重口/清淡/辣/油不油”。
+
+## 根因
+
+缺少：
+
+```text
+Shop Fact Semantics
+→ Tool Contract
+```
+
+## 最终方案
+
+新增 request-scoped：
+
+```text
+ShopFactQueryType
+├─ STATIC_DETAIL
+├─ EVIDENCE
+└─ VOUCHER
+```
+
+主观体验统一归 EVIDENCE：
+
+```text
+口味强弱
+辣/咸/油腻/清淡
+环境
+服务
+排队
+场景适配
+评价/口碑
+```
+
+Planner prompt 和 deterministic fallback 两侧都约束：
+
+```text
+EVIDENCE → search_shop_evidence
+```
+
+不能只相信 Planner 偶然选对。
+
+## Evidence no-match
+
+`SearchShopEvidenceTool` 先找 topic-specific evidence；若没有明确主题证据：
+
+```text
+topicMatched=false
+→ 返回有限 general evidence
+→ 明确说“现有评价没有明确提到该主题，暂时不能确定”
+```
+
+不能拿一般评价伪装成“重口/不重口”的结论。
+
+## 当前边界
+
+Fact taxonomy 目前仍是小型业务分类器，不是通用 QA ontology；但它比“Planner 自由猜工具”稳定，因为主观事实查询已经有确定性 fallback contract。
+
+---
+
+# 十九、当前数据模型和 Authority Map
 
 ## ConversationWorkingMemory
 
 ```text
 schemaVersion
-activeDecisionSessionId
-lastDecisionSessionId
+activeDecisionSessionId / lastDecisionSessionId
 deviceLocation
 pendingLocationCandidates
 activeTaskId
 tasks[]
 focusedShopId / focusedShopName
 dialogPhase
+lastPolicyAction / lastPolicyReason
 ```
 
 ## DecisionTaskState
@@ -1280,28 +1287,27 @@ searchLocation
 recommendationBatches[]
 ```
 
-## DecisionConstraints
-
-当前主要包含：
+## ConversationLocationSlot
 
 ```text
-targetProvince / targetCity / targetDistrict / targetArea
-locationIntent
-nearby / radiusKm
-budgetPerPerson
-cuisine
-excludedCuisines
-keyword
-preferences
-arrivalTime
-...
+status
+poiId
+canonicalName
+latitude / longitude
+province / city / district
+source
+capturedAt / expiresAt
 ```
 
-## RecommendationBatch
+## RecommendationCandidateRef
 
 ```text
-decisionSessionId
-candidate refs
+shopId
+shopName
+pricePerPerson
+distanceKm
+cuisine
+referenceTags[]
 ```
 
 ## TurnCommandSet
@@ -1309,110 +1315,56 @@ candidate refs
 request-scoped，不 durable：
 
 ```text
-本轮允许做什么
+本轮语义权限
+mutationRequested
+referenceOnly
+factQueryType
+commands[]
 ```
 
-## DecisionSession
-
-历史执行事实：
+## Authority Map
 
 ```text
-constraintsJson
-requestContextJson
-resultJson
-status
+当前 criteria
+→ ConversationWorkingMemory
+
+Task identity
+→ ConversationStateService / transitionTask
+
+reference identity
+→ ReferenceIntent + BatchAwareReferenceResolver
+
+行政 identity
+→ AdministrativeRegionResolver
+
+POI identity
+→ LocationResolutionProvider
+
+mutation permission
+→ TurnUnderstandingService
+
+command legality
+→ DecisionTransitionService / FSM
+
+历史执行事实
+→ DecisionSession
+
+历史推荐顺序
+→ RecommendationBatch
+
+主观商户事实
+→ search_shop_evidence
 ```
 
 ---
 
-# 十六、业内方案怎么对照，不要乱吹
+# 二十、Evaluation：为什么测试数据漂亮但前端还会出问题
 
-## OpenAI Agents SDK
+这是这轮真实聊天最值得讲的复盘。
 
-官方 Session 主要负责跨 run 持久化 conversation items；Context 又区分 runtime/local context 和 LLM-visible context。
+## 1. Evaluation 能发现什么
 
-这支持我们的一个核心判断：
-
-```text
-Session History
-≠
-Business Canonical State
-```
-
-参考：
-
-- https://openai.github.io/openai-agents-js/guides/sessions/
-- https://openai.github.io/openai-agents-js/guides/context/
-
-## LangGraph
-
-LangGraph 的 thread/checkpoint 适合通用 graph state persistence、resume、time-travel、human-in-the-loop。
-
-可以类比：
-
-```text
-thread_id ≈ chatId
-checkpoint ≈ versioned state snapshot
-```
-
-但本项目没有恢复任意 graph node 执行位置，所以不要说“等价 LangGraph”。
-
-## Rasa CALM
-
-对 Turn Semantics 最有参考价值：
-
-```text
-User Message
-→ Command Generator
-→ high-level commands
-→ deterministic Dialogue Manager
-```
-
-它允许一条用户消息生成多个 commands，比 single-intent label 更适合 compound turns。
-
-参考：
-
-- https://rasa.com/docs/pro/customize/command-generator/
-- https://rasa.com/docs/learn/concepts/dialogue-management/
-
----
-
-# 十七、Evaluation：项目为什么不是靠“感觉修 Bug”
-
-## 当前最新 full regression 口径
-
-注意：以下是 `709c615`，不是当前 `c45c71b`。
-
-### Robustness Run139
-
-```text
-Cases: 48
-Complete: 20/48
-Route: 44/48
-Tool: 47/48
-Final Status: 37/48
-Locality: 47/48
-Context Rewrite: 7/7
-```
-
-### Conversation-v1 Run140
-
-```text
-Cases: 40
-Complete: 28/40
-Route: 37/40
-Tool: 32/40
-Final Status: 40/40
-Locality: 40/40
-```
-
-之后最新代码只跑了定向 tests，Holdout 尚未重新执行。
-
----
-
-## 为什么不能只看 Complete
-
-Agent 评测要拆：
+结构化 Dataset 很适合稳定验证：
 
 ```text
 Route
@@ -1420,200 +1372,213 @@ Tool
 Final Status
 Locality
 Working Memory projection
-session relation
 Context Rewrite
+历史引用
+Task 切换
 ```
 
-Run139 中就存在旧 Dataset Contract 与当前安全语义不一致，例如裸区县旧 Ground Truth 希望直接执行，但当前 partial registry 安全 contract 要求 clarification。
+它成功推动了 Task、Batch、OCC、Location、Turn Semantics 等多轮演进。
 
-同时也不能反过来说“Complete 低全是 Dataset 错”，因为 Compound Intent、Task 恢复、Location Clarification 等仍有真实债务。
+## 2. 为什么仍会漏掉真实前端问题
 
-正确表达：
+Dataset 通常写得比真实用户“规范”：
 
-> 聚合 Complete 是多 contract 的结果，要看失败聚类；我不会为了提升一个数字去把生产代码迁就旧 Ground Truth。
+```text
+第一家评价如何
+福州大学附近
+推荐附近日料
+```
+
+真实用户更常说：
+
+```text
+农大那边
+这个日本料理重口吗
+那附近有啥
+搞什么
+这家呢
+```
+
+这些问题往往不是 Route 单点，而是：
+
+```text
+ellipsis
+简称
+deictic + qualifier
+paused-state recovery
+fact-type ambiguity
+```
+
+所以不能只看 Complete 数字。
+
+## 3. 最终测试层次
+
+```text
+Unit / targeted
+→ 验证局部不变量
+
+HTTP directed E2E
+→ 验证真实主链 wiring
+
+Robustness / conversation-v1
+→ 回归稳定 Contract
+
+Holdout
+→ 检查对固定 Dataset 的过拟合
+
+人工自然语言 smoke
+→ 专门覆盖口语、省略、简称、前端真实表达
+```
+
+本轮第一次把 `holdout + 人工 HTTP smoke` 一起作为归档验收，而不是只看测试用例。
 
 ---
 
-## 为什么 targeted + full + holdout 分层
+# 二十一、当前归档评测
+
+## Run141 — conversation-robustness-v1
 
 ```text
-小修
-→ Unit + 3~8 targeted
-
-3~5 个相关小修 / 阶段闭环
-→ full robustness
-
-WM 阶段闭环
-→ robustness + conversation-v1
-
-最终归档
-→ robustness + v1 + holdout
+Cases: 48
+Complete: 20/48
+Route: 43/48
+Tool: 47/48
+Final Status: 36/48
+Locality: 48/48
 ```
 
-原因：
+## Run142 — conversation-v1
 
 ```text
-反馈速度
-成本
-模型波动
-防止围着 Dataset 过拟合
+Cases: 40
+Complete: 29/40
+Route: 38/40
+Tool: 33/40
+Final Status: 40/40
+Locality: 40/40
 ```
 
-牛客近期 Agent 评测面经也常追：Outcome vs Trajectory、工具选择、最终状态、线上失败样本回流和冻结回归集。
+## Run143 — conversation-holdout-v1
 
-参考：
+```text
+Cases: 16
+Complete: 7/16
+Route: 13/16
+Tool: 14/16
+Final Status: 12/16
+Locality: 16/16
+```
 
-- https://www.nowcoder.com/discuss/916878230575906816
+不要说“Complete 只有 20，所以系统只有 20 条能用”。Complete 是多个 contract 的 AND；必须拆 Route / Tool / Final / WM / Locality 看失败聚类。
+
+同样不能把所有失败都推给旧 Ground Truth。当前仍有真实债务：行政区澄清、部分 Route/Tool 语义差异、Context Rewrite、通用 compound semantics。
 
 ---
 
-# 十八、牛客高频追问：按这个项目怎么答
+# 二十二、和业内方案怎么对照
 
-## Q1：State、Context、Memory 区别？
+## OpenAI Agents SDK
 
-State 是当前应用事实；Context 是本次调用真正提供给模型/工具的信息；Memory 是为了未来 Turn 或未来会话保留的信息。数据库里“有”不代表本轮模型“看见”。
+Session 更接近 conversation items 的持久化；runtime context 和 LLM-visible context 也不是一回事。
 
-项目对应：
+本项目对应结论：
 
 ```text
-WM = State
-ChatProcessingContext = Runtime Context
-History / retained facts = Memory evidence
+Conversation Session
+≠
+Canonical Business State
 ```
 
-牛客相关：
+## LangGraph
 
-- https://www.nowcoder.com/discuss/916877706187276288
+```text
+thread_id ≈ chatId
+checkpoint ≈ versioned state snapshot
+```
+
+但本项目没有 graph execution resume/time-travel，所以不能说“等价 LangGraph”。我们主要自己实现餐饮业务特化的 reducer、Task、Reference、OCC。
+
+## Rasa CALM
+
+对 Turn Semantics 最有参考意义：
+
+```text
+User Message
+→ high-level Commands
+→ deterministic Dialogue Manager
+```
+
+一条消息可以产生多个 command，比 single-intent label 更适合 compound turn。
 
 ---
+
+# 二十三、牛客/面试高频追问
+
+## Q1：为什么不用 History 直接做 Memory？
+
+History 是语言证据，不是当前业务真值。取消、覆盖、Task 切换、ordinal reference、并发 version 都需要结构化状态。
 
 ## Q2：为什么不用 LangGraph？
 
-当前 Java/Spring Boot 主流程高度确定，真正复杂的是业务 state invariants，而不是 graph 编排。自己持有 reducer、OCC、Task、Reference 更直接。若未来变成长时任务、人工审批、跨小时中断恢复，再考虑通用 durable workflow runtime。
+当前 Java/Spring Boot 主流程高度确定，复杂的是业务 invariant，不是 graph 编排。若未来变成长时任务、跨小时中断、人工审批，再考虑 durable workflow runtime。
 
----
+## Q3：为什么 Full Snapshot？
 
-## Q3：为什么不是把整个 History 给模型？
+当前状态规模小，Full Snapshot 读/恢复/debug 简单。代价是长期增长，未来再 compaction，不提前引入 Event Sourcing。
 
-因为 History 是证据，不是当前 truth；同时会增加 token、延迟和注意力污染。真正当前状态应结构化，历史事实按需回查。
+## Q4：OCC 和 stale result guard 有什么区别？
 
----
+OCC 防并发写覆盖；stale guard 防慢 Tool 基于旧世界产生的结果被继续当作有效事实。
 
-## Q4：Working Memory 会不会越来越大？
+## Q5：为什么 Mention 不能直接写 slot？
 
-会。当前 Full Snapshot 是小规模场景的 trade-off。已经避免把 evidence 大文本复制进 RecommendationBatch；未来才考虑 archive / periodic full + delta / compaction。
+“这个日本料理怎么样”里的“日本料理”是 reference qualifier，不是 `SET cuisine`。Entity Mention 和 Dialogue Act 必须分离。
 
----
+## Q6：为什么行政区不能全交 LLM？
 
-## Q5：Memory 冲突怎么处理？
+行政 identity 是 closed-world fact，模型可以给 hint，但最终 identity 必须 resolver/provider 校验。
 
-当前有来源：
+## Q7：为什么 GPS 不能直接兜底 Named POI？
 
-```text
-USER_EXPLICIT > DERIVED / SYSTEM_DEFAULT
-```
+GPS 是设备位置，不是用户命名目标。“农大附近”没解析成功时偷用 GPS，会把“我要去农大”变成“我附近”。
 
-但还没有完整 timestamp/confidence/expiry 冲突模型，这是当前边界。
+## Q8：那为什么现在 GPS 又能参与“农大”解析？
 
----
+它只做 disambiguation prior：帮助候选排序，不直接替代 POI identity。
 
-## Q6：Agent 怎么避免状态幻觉？
+## Q9：为什么 RecommendationBatch 还要存 cuisine/referenceTags？
 
-不是靠 prompt 写“不要胡说”，而是把 authority 拆开：
+历史引用不仅有 ordinal，还会有“日本料理那个”。需要轻量 grounding metadata，但不能复制完整 evidence。
 
-```text
-行政 identity → Resolver
-reference → ReferenceResolver
-当前 criteria → WM
-历史推荐事实 → DecisionSession.resultJson
-mutation permission → TurnUnderstanding
-```
+## Q10：为什么“重口吗”不能查 detail？
 
-LLM 可以提出 candidate，但不能直接成为业务真相。
+detail 是静态商户事实；口味属于 evidence-backed subjective fact，需要评论/笔记证据。
 
----
+## Q11：Evidence 没提重口怎么办？
 
-## Q7：为什么一个大模型不能把 Routing、Memory、Tool 都做了？
+返回 `topicMatched=false`，明确证据不足；可以展示一般评价，但不能据此下“重口/不重口”结论。
 
-开放语言理解适合模型；OCC、candidate invalidation、行政 identity、historical reference、command legality 都有确定性不变量，交给代码更稳定。
+## Q12：为什么 DecisionSession 不能覆盖 WM？
 
----
+DecisionSession 是 execution snapshot，不是 canonical current-state writer。合法 command 必须通过 reducer/projection 改 WM。
 
-## Q8：Workflow 和 Agent 怎么区分？
+## Q13：为什么无结果不能自动把用户硬条件全放宽？
 
-本项目是 hybrid：
+这是未经用户授权的状态 mutation。系统可以提出 options；用户明确恢复后再执行 command。
+
+## Q14：怎么防止只对评测集过拟合？
 
 ```text
-固定业务阶段 → Pipeline / Workflow
-开放语义 → LLM
-外部事实 → Tool
-状态安全 → deterministic reducer / FSM
+不写 CaseCode/shopId/具体商户 hardcode
+真实 Bad Case 提炼成 invariant
+targeted 后跑 full
+最终跑 holdout
+再做自然语言 HTTP smoke
 ```
 
-不是为了“Agent”这个名字把所有步骤交给模型。
-
 ---
 
-## Q9：如果 Tool 超时后状态已经变化怎么办？
-
-用 baseWorkingMemoryVersion 检查 stale runtime result；旧结果不能覆盖新状态。
-
----
-
-## Q10：为什么 Reference 要提前解析？
-
-因为 mutation 后 candidate universe 可能变化。“第二家”属于用户发话时刻的 pre-mutation snapshot。
-
----
-
-## Q11：为什么“这个日料咋样”不能写 cuisine？
-
-这是 Mention 与 Dialogue Act 的区别。出现 entity 不代表执行 SET slot；只有 Turn Semantics 给 mutation permission 后，Extractor 的字段才有资格进入 reducer。
-
----
-
-## Q12：为什么“福州大学”不能识别成福州市？
-
-Substring grounding 不等于 entity grounding。行政 identity 要通过 Resolver 校验；POI 中包含行政 alias 不能偷渡成 admin scope。
-
----
-
-## Q13：为什么用户问“你刚才查哪”要看 DecisionSession，不看当前 WM？
-
-用户问的是历史 execution fact，当前 WM 可能已经变化。读当前 WM 会发生 Temporal Leakage。
-
----
-
-## Q14：系统没搜到时怎么恢复？
-
-不能只返回“没结果”。需要：
-
-```text
-Failure Explanation
-+
-Legal Recovery Commands
-```
-
-例如 `BROADEN_FOOD_SCOPE` 清具体 food target，但保留 location/radius/budget，再 retry。
-
----
-
-## Q15：怎么防过拟合？
-
-生产代码禁止：
-
-```text
-CaseCode 特判
-shopId 特判
-具体地名/商户 hardcode
-围着单句不断 contains
-```
-
-优先把 Bad Case 提升成不变量，再用 targeted + full + holdout 验证。
-
----
-
-# 十九、现在最值得背的 16 个不变量
+# 二十四、最值得背的 20 个不变量
 
 ```text
 1. Chat History ≠ Canonical Business State
@@ -1628,35 +1593,38 @@ shopId 特判
 10. Administrative Level ≠ Administrative Identity
 11. String Mention ≠ Entity Mention
 12. Partial Dataset ≠ Complete World
-13. Location Mention ≠ Executable Search Anchor
-14. Mention ≠ Mutation
-15. DecisionSession Execution Fact ≠ Canonical Current Criteria
-16. Failure State 必须有可解释事实 + 可执行 Recovery Command
+13. Location Mention ≠ Resolved Identity ≠ Executable Search Anchor
+14. GPS prior ≠ Named POI identity
+15. Mention ≠ Mutation
+16. Extracted Delta ≠ State Write Permission
+17. DecisionSession Execution Fact ≠ Canonical Current Criteria
+18. Pure Deictic Reference ≠ Qualified Reference
+19. Static Shop Detail ≠ Evidence-backed Subjective Fact
+20. Failure State 必须有可解释事实 + 可执行 Recovery Command
 ```
 
 ---
 
-# 二十、当前明确不能吹的地方
+# 二十五、当前明确不能吹的地方
 
 ```text
 Task Identity 仍是业务启发式
-Compound Intent 还不是任意多动作 planner
-部分历史 Task Reference 仍有 NLP 下沉债务
+TurnCommandSet 不是通用 Agent DSL
+Compound Intent 还不是任意多动作 Planner
 Full Snapshot 长期会增长
-不是 Durable Workflow Runtime
-Provenance 暂无完整 sourceTurn/sourceEvent/timestamp/confidence/expiry
+Provenance 还没有完整 sourceTurn/sourceEvent/timestamp/confidence/expiry
 行政 registry 是 partial，需要 provider fallback
-最新 c45c71b 尚未跑 full robustness/v1
-Holdout 尚未跑
+当前 POI provider 只有已确认的 maps_geo，简称/校区自动解析能力受 provider 能力限制
+描述性 qualifier matching 仍是轻量 deterministic grounding，不是通用 entity linker
+ShopFactQueryType 是业务 taxonomy，不是开放域 QA ontology
+Run141/142/143 仍有真实失败，不应包装成生产级通用 Agent
 ```
-
-面试里主动说边界比硬包装更可信。
 
 ---
 
-# 二十一、面试官连续追问链
+# 二十六、面试官连续追问链
 
-## 链 1：为什么做 Working Memory
+## 链 1：Working Memory
 
 ```text
 为什么不用 History？
@@ -1665,69 +1633,79 @@ Holdout 尚未跑
 为什么 Flat WM 不够？
 → 多 Task Ghost Inheritance
 
-为什么 Task 后还要 Snapshot？
-→ same-turn stale reload
+为什么 Task 后还要 same-turn snapshot？
+→ 一个请求出现两个世界
 
 为什么还要 OCC？
 → 跨请求并发
 
-Tool 慢返回怎么办？
+慢 Tool 呢？
 → stale runtime result guard
 ```
 
-## 链 2：为什么做 Turn Semantics
+## 链 2：Turn Semantics
 
 ```text
-有 WM 为什么还会错？
-→ 写入前语义 authority 仍多头
-
-“日料”为什么不能直接写 cuisine？
-→ Mention ≠ Mutation
+有 WM 为什么“这个日料咋样”还会错？
+→ 写状态前没有 canonical turn semantics
 
 Extractor 不就是理解用户的吗？
-→ 它负责 Delta 内容，不负责写权限
+→ 它提供 Delta 内容，不拥有写权限
 
-为什么还要 TurnPlan？
-→ mutation / execution 正交
-
-业内有类似设计吗？
-→ Rasa CALM command generator + dialogue manager
+第一版 Turn Semantics 为什么还返工？
+→ route 里残留第二 Mutation Authority
 ```
 
 ## 链 3：Location
 
 ```text
-为什么不用 LLM 直接抽地点？
-→ admin closed-world identity
+为什么 Named Location 不能用 GPS 兜底？
+→ intent 不同
 
-本地唯一为什么不能直接用？
-→ partial dataset ≠ complete world
+为什么“鼓楼”不能模型说了就算？
+→ administrative identity authority
 
-为什么连江不自动 GPS？
-→ named destination ≠ CURRENT_DEVICE
+为什么“福州大学”不能 substring 成福州市？
+→ string mention ≠ entity mention
 
-师大为什么不能直接搜？
-→ mention ≠ resolved anchor
+为什么“农大”又要看 GPS？
+→ GPS 只做 POI disambiguation prior
 ```
 
-## 链 4：No-result
+## 链 4：Reference / Fact
 
 ```text
-没结果为什么不自动放宽？
-→ 系统不能静默修改用户硬条件
+为什么“这个日本料理”不等于 focused？
+→ deictic + qualifier
 
-那用户说“附近随便看看”怎么办？
-→ explicit recovery command
+Batch 为什么补 cuisine/referenceTags？
+→ historical descriptive grounding
 
-为什么不直接改 DecisionSession 就完了？
+为什么“重口吗”不能 detail？
+→ evidence-backed subjective fact
+
+没证据怎么办？
+→ topicMatched=false + uncertainty
+```
+
+## 链 5：No-result
+
+```text
+为什么不自动放宽？
+→ 未经授权不能改硬条件
+
+“那附近有啥”怎么办？
+→ BROADEN_FOOD_SCOPE
+
+为什么不只改 DecisionSession？
 → WM 才是 canonical current state
 
-为什么第一次就要解释范围？
-→ Failure Explanation 必须基于事实，可恢复而不是让用户猜
+为什么第一次失败就要解释范围？
+→ Failure Explanation 是恢复协议的一部分
 ```
 
 ---
 
-# 二十二、最后用一句话收口
+# 二十七、最终收口
 
-> **这个项目真正的主线不是“做了一个餐饮 Agent”，而是把一个最初依赖聊天历史和模型重解释的多轮系统，逐步收敛成“Turn Command → Grounding/Authority → Deterministic Reducer/FSM → Canonical Working Memory → Tool/DecisionSession → Evaluation”的状态系统。每次架构变化都不是为了加组件，而是因为真实对话暴露了一个新的双真相或 authority 泄漏。**
+> **这个项目真正的主线，不是“做了一个餐饮聊天机器人”，而是把一个最初依赖 History 和模型重解释的多轮系统，逐步收敛成 `Turn Semantics → Entity/Reference Grounding → Policy/FSM → Deterministic Reducer → Canonical Working Memory → Tool/DecisionSession → Evaluation`。每次重构都来自一个真实的“双真相、authority leak 或 representation gap”，而不是为了堆 Agent 组件。**
