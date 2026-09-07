@@ -12,6 +12,7 @@ import com.hmdp.ai.dto.ChatStreamEventData;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionContextFacts;
 import com.hmdp.ai.dto.DecisionContextQuery;
 import com.hmdp.ai.dto.ConversationLocationSlot;
@@ -379,6 +380,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             if (extracted == null) extracted = constraintExtractor.extract(context.getEffectiveMessage());
         }
         context.setCriteriaDelta(extracted);
+        enrichExplicitPoiAdministrativePrefix(context.getOriginalMessage(), extracted);
         com.hmdp.ai.dto.DecisionTaskState activeBefore = conversationStateService.activeTask(context.getWorkingMemory());
         com.hmdp.ai.service.ConversationStateService.TaskTransition transition = conversationStateService.transitionTask(
                 context.getWorkingMemory(), extracted, context.getOriginalMessage());
@@ -471,6 +473,43 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return commands != null
                 && commands.isMutationRequested()
                 && turnUnderstandingService.shouldApplyReferenceMutation(commands);
+    }
+
+    /**
+     * A city written before a short POI is execution context, not a second POI.
+     * Resolve that bounded prefix through the administrative authority before the
+     * policy gate sees the extractor's conservative missing-region hint. The
+     * resolver's raw-query grounding also rejects prefixes embedded in names such
+     * as "福州大学".
+     */
+    private void enrichExplicitPoiAdministrativePrefix(String rawMessage,
+                                                        com.hmdp.ai.dto.DecisionConstraints extracted) {
+        if (administrativeRegionResolver == null || extracted == null
+                || !hasText(extracted.getTargetArea()) || !hasText(rawMessage)
+                || hasText(extracted.getTargetCity()) || hasText(extracted.getTargetProvince())) return;
+        String query = normalizeLocationQuery(rawMessage).replaceAll("\\s+", "");
+        String poi = extracted.getTargetArea().replaceAll("\\s+", "");
+        if (query.isEmpty() || poi.isEmpty() || !query.endsWith(poi) || query.length() <= poi.length()) return;
+        String prefix = query.substring(0, query.length() - poi.length());
+        AdministrativeResolution prefixResolution = administrativeRegionResolver.resolveGeographicContextPrefix(prefix);
+        if (prefixResolution.status() != AdministrativeResolution.Status.RESOLVED
+                || prefixResolution.candidates().size() != 1) return;
+        AdministrativeRegion candidate = prefixResolution.candidates().get(0);
+        DecisionConstraints hint = new DecisionConstraints();
+        hint.setTargetCity(candidate.getName());
+        AdministrativeResolution grounded = administrativeRegionResolver.resolveHint(rawMessage, hint, null);
+        if (grounded.status() != AdministrativeResolution.Status.RESOLVED) return;
+        extracted.setTargetCity(candidate.getName());
+        if (!hasText(extracted.getTargetProvince()) && hasText(candidate.getProvince())) {
+            extracted.setTargetProvince(candidate.getProvince());
+        }
+        if (extracted.getMissingInformation() != null) {
+            extracted.getMissingInformation().remove("administrativeRegion");
+        }
+        if (extracted.getClearedFields() != null) {
+            extracted.getClearedFields().remove("targetCity");
+            extracted.getClearedFields().remove("targetProvince");
+        }
     }
 
     private void ensureCriteriaDelta(ChatProcessingContext context) {
@@ -583,8 +622,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                             ? null : conversationEventService.currentTrace().getTraceId());
             conversationStateService.activateDecision(context.getChatSession(), pending.getSessionId());
             conversationStateService.snapshotDecision(context.getChatSession(), pending);
-            String place = context.getMergedConstraints() == null ? context.getOriginalMessage()
-                    : context.getMergedConstraints().getTargetArea();
+            // Keep the raw turn here so a city prefix (for example “北京农大”)
+            // remains available to administrative-context enrichment. The
+            // extracted targetArea is still used as the POI fallback after the
+            // prefix has been resolved; passing it alone would silently drop
+            // the explicit city and let device GPS win.
+            String place = context.getOriginalMessage();
             ChatMessageResponse locationResponse = buildLocationResolutionResponse(context.getChatId(),
                     context.getOriginalMessage(), context.getChatSession(), pending.getSessionId(), pending, place);
             if (locationResponse != null) return locationResponse;
@@ -1437,7 +1480,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             // campus nickname). Probe only bounded leading spans through the
             // administrative resolver; no POI alias table is introduced here.
             for (int end = Math.min(query.length(), 8); end >= 2; end--) {
-                AdministrativeResolution prefix = administrativeRegionResolver.resolve(query.substring(0, end), null);
+                AdministrativeResolution prefix = administrativeRegionResolver.resolveGeographicContextPrefix(query.substring(0, end));
                 if (prefix.status() == AdministrativeResolution.Status.RESOLVED && prefix.candidates().size() == 1) {
                     resolution = prefix;
                     break;
@@ -1519,7 +1562,9 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                                                     AiChatSession state, Long activeSessionId,
                                                     ChatMessageResponse response) {
         String optionId = request.getSelectedOptionId();
-        if ("USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION".equals(optionId)) {
+        boolean useDeviceLocationForPoiDisambiguation =
+                "USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION".equals(optionId);
+        if (useDeviceLocationForPoiDisambiguation) {
             optionId = "PROVIDE_LOCATION";
         }
         DecisionResponse suspendedDecision = activeSessionId == null ? null : decisionService.getDecision(activeSessionId);
@@ -1559,12 +1604,24 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             decisionService.validateSelectedOption(activeSessionId, optionId);
             conversationStateService.declineLocation(state);
         }
+        if (useDeviceLocationForPoiDisambiguation
+                && conversationStateService.usableLocation(state) == null) {
+            response.setRoute("LOCATION_RESOLUTION");
+            response.setDecision(suspendedDecision);
+            response.setDecisionSessionId(activeSessionId);
+            response.setDecisionStatus("CLARIFYING");
+            response.setAnswer("我还没有拿到你的当前位置。你可以允许浏览器定位后重试，或者直接告诉我城市。");
+            recordTurn(chatId, message, response);
+            return response;
+        }
         DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();
         followUp.setSelectedOptionId(optionId);
         followUp.setMessage(message);
         followUp.setLocationName(confirmedLocationName);
         if ("PROVIDE_LOCATION".equals(optionId)) {
-            ConversationLocationSlot location = conversationStateService.usableSearchLocation(state);
+            ConversationLocationSlot location = useDeviceLocationForPoiDisambiguation
+                    ? conversationStateService.usableLocation(state)
+                    : conversationStateService.usableSearchLocation(state);
             if (location == null) location = conversationStateService.usableLocation(state);
             if (location == null) throw new IllegalArgumentException("当前没有有效位置，请重新授权定位后继续");
             followUp.setLatitude(location.getLatitude());

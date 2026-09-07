@@ -50,6 +50,47 @@ public class AdministrativeRegionResolver {
     }
 
     /**
+     * Resolves only a geographic prefix supplied alongside a POI nickname.
+     * This deliberately has narrower semantics than {@link #resolve}: a local
+     * miss may consult the freshness provider, but only one exact province/city
+     * identity is accepted. It must never turn an arbitrary POI substring into
+     * an administrative context.
+     */
+    public AdministrativeResolution resolveGeographicContextPrefix(String prefix) {
+        String query = normalize(prefix);
+        if (query.isEmpty()) return AdministrativeResolution.notFound();
+        List<AdministrativeRegion> candidates = repository.findCandidates(query).stream()
+                .filter(this::isProvinceOrCity)
+                .filter(region -> exactAlias(query, region.getName()))
+                .toList();
+        if (candidates.isEmpty() && provider != null) {
+            try {
+                candidates = provider.resolve(prefix.trim(), null).stream()
+                        .filter(this::isProvinceOrCity)
+                        .filter(region -> exactAlias(query, region.getName()))
+                        .toList();
+            } catch (RuntimeException ignored) {
+                candidates = List.of();
+            }
+        }
+        return candidates.size() == 1
+                ? new AdministrativeResolution(AdministrativeResolution.Status.RESOLVED, candidates)
+                : candidates.size() > 1
+                ? new AdministrativeResolution(AdministrativeResolution.Status.AMBIGUOUS, candidates)
+                : AdministrativeResolution.notFound();
+    }
+
+    private boolean isProvinceOrCity(AdministrativeRegion region) {
+        return region != null && (region.getLevel() == AdministrativeLevel.PROVINCE
+                || region.getLevel() == AdministrativeLevel.CITY);
+    }
+
+    private boolean exactAlias(String query, String name) {
+        String canonical = normalize(name);
+        return query.equals(canonical) || query.equals(stripSuffix(canonical));
+    }
+
+    /**
      * Validates an administrative candidate produced by an untrusted extractor.
      *
      * The extractor may know the canonical name (for example, "福州市") while

@@ -1,5 +1,11 @@
 # AI 消费决策 Agent 开发记录
 
+### Short POI 地理前缀与设备定位交互边界（2026-09-07）
+
+短 POI 的行政前缀解析新增了独立的 `resolveGeographicContextPrefix`：本地 Registry 未命中时可请求行政 Provider，但只接受唯一、别名精确对应的省/市结果；普通行政 Resolver 的安全规则不放宽，也不把“福州大学”拆成“福州 + 大学”。显式城市优先于设备 GPS，因此“北京农大”会保留北京前缀并进入城市限定的 POI Text Search，而单独“农大”在有福州设备位置时仍使用 GPS 做 Around 消歧。
+
+`USE_DEVICE_LOCATION_FOR_POI_DISAMBIGUATION` 继续保持 UI 语义，后端只读取 deviceLocation，不被已命名的 searchLocation 抢占；缺少本轮坐标且 Working Memory 没有有效设备位置时返回可恢复的 CLARIFYING，而不是抛出异常或清理原始 POI。定向 Resolver、POI、Location Resolution 与 Orchestration 测试通过；完整评测按本轮指令未执行：`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
 ### DECISION_CONTEXT_QUERY 与可解释状态（2026-09-07）
 
 本轮在不改变 Task、Working Memory、RecommendationBatch 主模型和 Pipeline 节点的前提下，增加单一顶层路由 `DECISION_CONTEXT_QUERY`，内部仅支持 `WHY_RECOMMENDED`、`CONSTRAINT_PROVENANCE`、`CURRENT_CRITERIA` 三类只读查询。选择单路由是为了把“为什么这样推荐”“条件来源是什么”“当前生效条件”统一视为决策上下文查询，同时与商户事实追问 `BUSINESS_FOLLOW_UP`、条件变更 `START_DECISION` 保持边界；现有 `CriteriaIntent.NONE` 使其自然绕过 Criteria Reduction，不新增解释或审计节点。
