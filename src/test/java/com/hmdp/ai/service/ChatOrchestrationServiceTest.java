@@ -1368,6 +1368,54 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    void clarificationTextExtractsNewPoiInsteadOfReusingAlias() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+
+        assertEquals("福建师范大学", ReflectionTestUtils.invokeMethod(service,
+                "extractClarificationPoiQuery", "我说的是福建师范大学"));
+        assertEquals("福建师范大学旗山校区", ReflectionTestUtils.invokeMethod(service,
+                "extractClarificationPoiQuery", "是福建师范大学旗山校区"));
+    }
+
+    @Test
+    void clarificationPoiOverrideUsesCurrentTextAsProviderQuery() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        LocationResolutionProvider locationService = mock(LocationResolutionProvider.class);
+        ChatMemoryService memoryService = mock(ChatMemoryService.class);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        ReflectionTestUtils.setField(service, "locationResolutionService", locationService);
+        ReflectionTestUtils.setField(service, "chatMemoryService", memoryService);
+
+        AiChatSession state = new AiChatSession();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        DecisionConstraints criteria = new DecisionConstraints();
+        criteria.setTargetArea("师大");
+        when(stateService.workingMemory(state)).thenReturn(memory);
+        when(stateService.activeCriteria(memory)).thenReturn(criteria);
+        when(locationService.isAvailable()).thenReturn(true);
+        ResolvedLocationCandidate candidate = new ResolvedLocationCandidate();
+        candidate.setLabel("福建师范大学旗山校区");
+        candidate.setCanonicalName("福建师范大学旗山校区");
+        candidate.setLatitude(26.05D);
+        candidate.setLongitude(119.2D);
+        when(locationService.resolve(any(com.hmdp.ai.dto.LocationResolutionRequest.class)))
+                .thenReturn(List.of(candidate));
+
+        DecisionResponse decision = new DecisionResponse();
+        decision.setStatus("CLARIFYING");
+        ReflectionTestUtils.invokeMethod(service, "buildLocationResolutionResponse",
+                "chat", "我说的是福建师范大学", state, 1L, decision,
+                "我说的是福建师范大学", "UNIVERSITY");
+
+        ArgumentCaptor<com.hmdp.ai.dto.LocationResolutionRequest> request =
+                ArgumentCaptor.forClass(com.hmdp.ai.dto.LocationResolutionRequest.class);
+        verify(locationService).resolve(request.capture());
+        assertEquals("福建师范大学", request.getValue().getRawText());
+        assertEquals("UNIVERSITY", request.getValue().getEntityTypeHint());
+    }
+
+    @Test
     void completedStateDemandSwitchStartsNewDecision() {
         // #34 端到端：已有推荐（COMPLETED）后「看看有没有别的吃的」→ START_DECISION 重决策，
         // 而非落入 LLM 被误判 BUSINESS_FOLLOW_UP 追问候选池。

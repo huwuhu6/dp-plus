@@ -8,6 +8,9 @@ public class ResolvedLocationCandidate {
     private String label;
     private String canonicalName;
     private String campusLabel;
+    /** Provider category metadata used for entity resolution, never as identity. */
+    private String poiType;
+    private String poiTypeCode;
     private String province;
     private String city;
     private String district;

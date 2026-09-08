@@ -226,6 +226,29 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             assessment.setRequiredContextMissing(reference && !assessment.isContextResolved());
             return;
         }
+        if (isLocationClarification(activeDecision) && request.getLocation() == null) {
+            int pendingIndex = uniquePendingCandidateIndex(message, context.getChatSession());
+            if (pendingIndex >= 0) {
+                request.setSelectedOptionId("CONFIRM_RESOLVED_LOCATION_" + pendingIndex);
+                selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT,
+                        "natural_language_location_confirmation");
+                assessment.setSource("RULE");
+                return;
+            }
+            String poiOverride = extractClarificationPoiQuery(message);
+            if (hasText(poiOverride)) {
+                selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.LOCATION_RESOLUTION,
+                        "named_location_override_for_clarification");
+                assessment.setSource("RULE");
+                ChatMessageResponse locationResponse = buildLocationResolutionResponse(context.getChatId(), message,
+                        context.getChatSession(), context.getActiveDecisionSessionId(), activeDecision, poiOverride,
+                        inferEntityTypeHint(poiOverride));
+                if (locationResponse != null) {
+                    context.setResponse(locationResponse);
+                    return;
+                }
+            }
+        }
         if (isLocationClarification(activeDecision) && request.getLocation() == null && isPotentialNamedLocation(message)) {
             selectAction(context, com.hmdp.ai.service.pipeline.ChatProcessingAction.LOCATION_RESOLUTION, "named_location_for_clarification");
             assessment.setSource("RULE");
@@ -629,7 +652,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             // the explicit city and let device GPS win.
             String place = context.getOriginalMessage();
             ChatMessageResponse locationResponse = buildLocationResolutionResponse(context.getChatId(),
-                    context.getOriginalMessage(), context.getChatSession(), pending.getSessionId(), pending, place);
+                    context.getOriginalMessage(), context.getChatSession(), pending.getSessionId(), pending, place,
+                    context.getCriteriaDelta() == null ? null : context.getCriteriaDelta().getEntityTypeHint());
             if (locationResponse != null) return locationResponse;
             return buildDecisionResponse(context.getChatId(), context.getOriginalMessage(), context.getChatSession(),
                     context.isUsedModel(), context.getContextRewrite(), pending, context.getPolicyDecision());
@@ -1250,6 +1274,55 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return normalized.matches("^(?:我在|去|到)?[\\p{IsHan}]{2,16}(?:省|市|区|县|镇|乡|街道|大学城|商圈)?$");
     }
 
+    /** Extracts a user-provided POI name only in an active location clarification turn. */
+    private String extractClarificationPoiQuery(String message) {
+        if (!hasText(message)) return null;
+        String value = message.trim().replaceAll("\\s+", "");
+        boolean explicitPrefix = false;
+        String[] prefixes = {"我说的是", "我指的是", "指的是", "就是", "是"};
+        for (String prefix : prefixes) {
+            if (value.startsWith(prefix) && value.length() > prefix.length()) {
+                value = value.substring(prefix.length());
+                explicitPrefix = true;
+                break;
+            }
+        }
+        value = value.replaceAll("[，。！？,.!?]+$", "");
+        if (value.length() < 2 || value.length() > 24 || value.contains("附近") || value.contains("周边")) return null;
+        if (value.matches(".*(什么|哪里|怎么|有没有|吃的|餐厅|餐馆|推荐).*") || value.matches(".*[?？].*")) return null;
+        if (!explicitPrefix && !isPotentialNamedLocation(value)) return null;
+        if (!explicitPrefix && value.matches(".*(换一家|换个|再来一家|结束|算了|不找了).*")) return null;
+        return value.matches("^[\\p{IsHan}A-Za-z0-9·()（）-]{2,24}$") ? value : null;
+    }
+
+    /** A free-text confirmation may select a pending canonical candidate without a new provider call. */
+    private int uniquePendingCandidateIndex(String message, AiChatSession state) {
+        if (state == null || conversationStateService == null || !hasText(message)) return -1;
+        ConversationSlots pendingSlots = conversationStateService.slots(state);
+        if (pendingSlots == null) return -1;
+        List<ResolvedLocationCandidate> candidates = pendingSlots.getPendingLocationCandidates();
+        if (candidates == null || candidates.isEmpty()) return -1;
+        String text = message.replaceAll("\\s+", "");
+        List<Integer> matches = new ArrayList<>();
+        for (int index = 0; index < candidates.size(); index++) {
+            ResolvedLocationCandidate candidate = candidates.get(index);
+            if (candidate == null) continue;
+            String canonical = normalizeCandidateText(candidate.getCanonicalName());
+            String campus = normalizeCandidateText(candidate.getCampusLabel());
+            String label = normalizeCandidateText(candidate.getLabel());
+            if ((hasText(canonical) && text.contains(canonical))
+                    || (hasText(campus) && text.contains(campus))
+                    || (hasText(label) && text.contains(label))) {
+                matches.add(index);
+            }
+        }
+        return matches.size() == 1 ? matches.get(0) : -1;
+    }
+
+    private String normalizeCandidateText(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", "").trim();
+    }
+
     private ChatMessageResponse resolveNamedLocation(String chatId, String message, AiChatSession state,
                                                      Long activeSessionId, DecisionResponse activeDecision) {
         return buildLocationResolutionResponse(chatId, message, state, activeSessionId, activeDecision, message);
@@ -1258,6 +1331,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private ChatMessageResponse buildLocationResolutionResponse(String chatId, String message, AiChatSession state,
                                                                 Long activeSessionId, DecisionResponse activeDecision,
                                                                 String locationQuery) {
+        return buildLocationResolutionResponse(chatId, message, state, activeSessionId, activeDecision, locationQuery, null);
+    }
+
+    private ChatMessageResponse buildLocationResolutionResponse(String chatId, String message, AiChatSession state,
+                                                                Long activeSessionId, DecisionResponse activeDecision,
+                                                                String locationQuery, String requestedEntityTypeHint) {
         if (!locationServiceAvailable()) {
             activeDecision.setQuestion("已识别到你指定的地点“" + locationQuery
                     + "”，但当前地图解析服务不可用，无法安全将它替换为坐标。请提供该地点附近的经纬度后继续搜索。"
@@ -1280,6 +1359,10 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             return response;
         }
         String normalizedLocationQuery = normalizeLocationQuery(locationQuery);
+        String clarificationPoi = extractClarificationPoiQuery(locationQuery);
+        if (isLocationClarification(activeDecision) && hasText(clarificationPoi)) {
+            normalizedLocationQuery = clarificationPoi;
+        }
         LocationResolutionContext resolutionContext = locationResolutionContext(state);
         enrichAdministrativeContext(normalizedLocationQuery, resolutionContext, state);
         com.hmdp.ai.dto.DecisionConstraints activeCriteria = conversationStateService.activeCriteria(
@@ -1287,8 +1370,14 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         // The structured targetArea is the POI authority. The raw turn is only
         // used above to discover an explicit administrative prefix such as
         // “北京农大”; polite wording must never become a POI keyword.
-        String poiQuery = activeCriteria != null && hasText(activeCriteria.getTargetArea())
+        boolean explicitClarificationOverride = isLocationClarification(activeDecision)
+                && hasText(clarificationPoi);
+        String poiQuery = !explicitClarificationOverride && activeCriteria != null && hasText(activeCriteria.getTargetArea())
                 ? activeCriteria.getTargetArea() : normalizedLocationQuery;
+        String persistedHint = activeCriteria == null ? null : activeCriteria.getEntityTypeHint();
+        String entityTypeHint = hasText(requestedEntityTypeHint) ? requestedEntityTypeHint
+                : hasText(persistedHint) && !"UNKNOWN".equalsIgnoreCase(persistedHint)
+                ? persistedHint : inferEntityTypeHint(poiQuery);
         if (hasText(resolutionContext.getActiveCity())) {
             String city = resolutionContext.getActiveCity();
             String cityAlias = city.endsWith("市") ? city.substring(0, city.length() - 1) : city;
@@ -1299,7 +1388,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             }
         }
         List<ResolvedLocationCandidate> candidates = locationResolutionService.resolve(
-                new LocationResolutionRequest(poiQuery, resolutionContext));
+                new LocationResolutionRequest(poiQuery, resolutionContext, entityTypeHint));
         if (candidates.isEmpty()) {
             log.info("[AI][chat] event=LOCATION_RESOLUTION_EMPTY chatId={} sessionId={} query={}",
                     chatId, activeSessionId, compact(poiQuery));
@@ -1465,6 +1554,17 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         return value != null && !value.trim().isEmpty();
     }
 
+    private String inferEntityTypeHint(String query) {
+        String text = query == null ? "" : query.replaceAll("\\s+", "");
+        if (text.contains("大学") || text.contains("学院") || text.contains("学校") || text.contains("校园")
+                || text.matches(".*[\\p{IsHan}]{1,3}大(?:附近|周边|那边|一带|校区|旁边|附近有什么).*$")
+                || text.matches("^[\\p{IsHan}]{1,3}大$")) return "UNIVERSITY";
+        if (text.contains("医院") || text.contains("诊所")) return "HOSPITAL";
+        if (text.contains("商场") || text.contains("购物中心")) return "MALL";
+        if (text.contains("地铁") || text.contains("火车站") || text.contains("车站")) return "TRANSIT";
+        return "UNKNOWN";
+    }
+
     /** A city supplied while resolving a paused short POI becomes search context,
      * never a named POI itself. */
     private void enrichAdministrativeContext(String query, LocationResolutionContext context, AiChatSession state) {
@@ -1618,6 +1718,19 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 ChatMessageResponse poiResponse = buildLocationResolutionResponse(
                         chatId, message, state, activeSessionId, suspendedDecision, criteria.getTargetArea());
                 if (poiResponse != null) return poiResponse;
+                // A short POI with no compatible canonical candidate must remain in
+                // clarification. Never silently promote the browser GPS to the
+                // final search anchor when entity resolution failed.
+                response.setRoute("LOCATION_RESOLUTION");
+                response.setDecision(suspendedDecision);
+                response.setDecisionSessionId(activeSessionId);
+                response.setDecisionStatus("CLARIFYING");
+                response.setAnswer("暂时无法根据当前位置确认“" + criteria.getTargetArea()
+                        + "”对应的具体地点，请补充完整名称或校区。");
+                suspendedDecision.getOptions().clear();
+                suspendedDecision.getOptions().add(new com.hmdp.ai.dto.DecisionOption("END_DECISION", "结束本次推荐"));
+                recordTurn(chatId, message, response);
+                return response;
             }
         }
         DecisionFollowUpRequest followUp = new DecisionFollowUpRequest();

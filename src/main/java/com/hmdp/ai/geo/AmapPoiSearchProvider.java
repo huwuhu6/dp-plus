@@ -65,6 +65,7 @@ public class AmapPoiSearchProvider {
                     .append("?key=").append(encode(apiKey))
                     .append("&keywords=").append(encode(keywords))
                     .append("&page_size=20&show_fields=business");
+            String entityTypeHint = request.getEntityTypeHint();
             if (hasText(region)) {
                 uri.append("&region=").append(encode(region)).append("&city_limit=true");
             }
@@ -76,7 +77,7 @@ public class AmapPoiSearchProvider {
                     .timeout(Duration.ofMillis(timeoutMs)).GET().build();
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) return List.of();
-            List<ResolvedLocationCandidate> candidates = parseResponse(response.body(), keywords);
+            List<ResolvedLocationCandidate> candidates = parseResponse(response.body(), keywords, entityTypeHint);
             rankByDeviceDistance(candidates, context);
             log.info("[AI][location] event=AMAP_POI_SUCCESS keywords={} region={} mode={} candidates={}",
                     compact(keywords), region, around ? "AROUND" : "TEXT", candidates.size());
@@ -89,13 +90,17 @@ public class AmapPoiSearchProvider {
     }
 
     List<ResolvedLocationCandidate> parseResponse(String body, String query) {
+        return parseResponse(body, query, null);
+    }
+
+    List<ResolvedLocationCandidate> parseResponse(String body, String query, String entityTypeHint) {
         try {
             JsonNode root = objectMapper.readTree(body);
             if (!"1".equals(root.path("status").asText())) return List.of();
             List<ResolvedLocationCandidate> result = new ArrayList<>();
             for (JsonNode poi : root.path("pois")) {
                 ResolvedLocationCandidate candidate = parseCandidate(poi);
-                if (candidate != null) result.add(candidate);
+                if (candidate != null && isCompatible(candidate, query, entityTypeHint)) result.add(candidate);
             }
             return result;
         } catch (Exception ignored) {
@@ -115,6 +120,8 @@ public class AmapPoiSearchProvider {
             candidate.setCanonicalName(name);
             candidate.setLabel(name);
             candidate.setCampusLabel(campusLabel(poi));
+            candidate.setPoiType(firstText(poi, "type", "type_name"));
+            candidate.setPoiTypeCode(firstText(poi, "typecode", "type_code"));
             candidate.setLongitude(Double.valueOf(coordinates[0].trim()));
             candidate.setLatitude(Double.valueOf(coordinates[1].trim()));
             candidate.setProvince(firstText(poi, "pname", "province"));
@@ -125,6 +132,35 @@ public class AmapPoiSearchProvider {
         } catch (NumberFormatException ignored) {
             return null;
         }
+    }
+
+    private boolean isCompatible(ResolvedLocationCandidate candidate, String query, String entityTypeHint) {
+        if (!hasText(entityTypeHint) || "UNKNOWN".equalsIgnoreCase(entityTypeHint)) return true;
+        if ("UNIVERSITY".equalsIgnoreCase(entityTypeHint)) {
+            String type = candidate.getPoiType() == null ? "" : candidate.getPoiType();
+            String code = candidate.getPoiTypeCode() == null ? "" : candidate.getPoiTypeCode();
+            // 141201/141202 are higher-education categories. Do not accept
+            // an affiliated primary/middle school merely because its name
+            // contains the institution alias.
+            boolean university = code.startsWith("141201") || code.startsWith("141202")
+                    || type.contains("大学") || type.contains("学院");
+            return university && relevantToQuery(candidate.getCanonicalName(), query);
+        }
+        return true;
+    }
+
+    /** Prevents a type-compatible but semantically unrelated institution from becoming a candidate. */
+    private boolean relevantToQuery(String name, String query) {
+        if (!hasText(name) || !hasText(query)) return true;
+        String normalizedName = name.replaceAll("\\s+", "");
+        String normalizedQuery = query.replaceAll("\\s+", "");
+        if (normalizedName.contains(normalizedQuery)) return true;
+        if (normalizedQuery.length() > 6) return false;
+        int cursor = 0;
+        for (int i = 0; i < normalizedName.length() && cursor < normalizedQuery.length(); i++) {
+            if (normalizedName.charAt(i) == normalizedQuery.charAt(cursor)) cursor++;
+        }
+        return cursor == normalizedQuery.length();
     }
 
     private String campusLabel(JsonNode poi) {

@@ -29,6 +29,7 @@ class AmapPoiSearchProviderTest {
                 + "\"id\":\"B0FFFAKE\",\"name\":\"福建理工大学旗山校区\","
                 + "\"location\":\"119.205,26.052\",\"pname\":\"福建省\","
                 + "\"cityname\":\"福州市\",\"adname\":\"闽侯县\","
+                + "\"type\":\"教育学校\",\"typecode\":\"141201\","
                 + "\"business\":{\"business_area\":\"旗山校区\"}}]}";
 
         List<ResolvedLocationCandidate> result = provider.parseResponse(body, "理工大学");
@@ -38,11 +39,27 @@ class AmapPoiSearchProviderTest {
         assertEquals("B0FFFAKE", candidate.getPoiId());
         assertEquals("福建理工大学旗山校区", candidate.getCanonicalName());
         assertEquals("旗山校区", candidate.getCampusLabel());
+        assertEquals("教育学校", candidate.getPoiType());
+        assertEquals("141201", candidate.getPoiTypeCode());
         assertEquals("福建省", candidate.getProvince());
         assertEquals("福州市", candidate.getCity());
         assertEquals("闽侯县", candidate.getDistrict());
         assertNotNull(candidate.getLatitude());
         assertEquals("AMAP_POI", candidate.getSource());
+    }
+
+    @Test
+    void universityHintRejectsNearbyMerchantCandidates() {
+        AmapPoiSearchProvider provider = new AmapPoiSearchProvider();
+        String body = "{\"status\":\"1\",\"pois\":["
+                + "{\"id\":\"restaurant\",\"name\":\"师大分店\",\"type\":\"餐饮服务\",\"typecode\":\"050000\",\"location\":\"119.2,26.0\"},"
+                + "{\"id\":\"primary-school\",\"name\":\"福建师范大学附属小学\",\"type\":\"教育学校\",\"typecode\":\"141204\",\"location\":\"119.205,26.005\"},"
+                + "{\"id\":\"school\",\"name\":\"福建师范大学\",\"type\":\"教育学校\",\"typecode\":\"141201\",\"location\":\"119.21,26.01\"}]}";
+
+        List<ResolvedLocationCandidate> result = provider.parseResponse(body, "师大", "UNIVERSITY");
+
+        assertEquals(1, result.size());
+        assertEquals("school", result.get(0).getPoiId());
     }
 
     @Test

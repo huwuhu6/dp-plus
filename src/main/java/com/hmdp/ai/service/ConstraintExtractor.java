@@ -63,6 +63,9 @@ public class ConstraintExtractor {
         mergeAdministrativeResolution(constraints, regionResolution);
         constraints = enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
                 applySemanticLocationFallback(constraints, query), query), query), query);
+        if (!hasText(constraints.getEntityTypeHint()) || "UNKNOWN".equalsIgnoreCase(constraints.getEntityTypeHint())) {
+            constraints.setEntityTypeHint(inferEntityTypeHint(query));
+        }
         applyExcludedCuisine(constraints, query);
         assignPreferenceSourceHints(constraints, query);
         return constraints;
@@ -237,12 +240,16 @@ public class ConstraintExtractor {
         if (arguments.trim().isEmpty()) {
             throw new IllegalStateException("模型没有返回结构化约束");
         }
-        return objectMapper.readValue(arguments, DecisionConstraints.class);
+        JsonNode argumentsNode = objectMapper.readTree(arguments);
+        DecisionConstraints constraints = objectMapper.treeToValue(argumentsNode, DecisionConstraints.class);
+        constraints.setEntityTypeHint(argumentsNode.path("entityTypeHint").asText("UNKNOWN"));
+        return constraints;
     }
 
     private DecisionConstraints extractByRule(String query) {
         DecisionConstraints constraints = new DecisionConstraints();
         if (containsCurrentDeviceReference(query)) constraints.setLocationIntent("CURRENT_DEVICE");
+        constraints.setEntityTypeHint(inferEntityTypeHint(query));
         if (query.contains("日料") || query.contains("寿司")) {
             constraints.setCuisine("日料");
         } else if (query.contains("火锅")) {
@@ -284,6 +291,18 @@ public class ConstraintExtractor {
             constraints.setArrivalTime(time.group(1) == null ? "19:00" : normalizeTime(time.group(1)));
         }
         return constraints;
+    }
+
+    /** Generic entity vocabulary only; institution aliases remain model/provider concerns. */
+    private String inferEntityTypeHint(String query) {
+        String text = query == null ? "" : query.replaceAll("\\s+", "");
+        if (text.contains("大学") || text.contains("学院") || text.contains("学校") || text.contains("校园")
+                || text.matches(".*[\\p{IsHan}]{1,3}大(?:附近|周边|那边|一带|校区|旁边|附近有什么).*$")
+                || text.matches("^[\\p{IsHan}]{1,3}大$")) return "UNIVERSITY";
+        if (text.contains("医院") || text.contains("诊所")) return "HOSPITAL";
+        if (text.contains("商场") || text.contains("购物中心")) return "MALL";
+        if (text.contains("地铁") || text.contains("火车站") || text.contains("车站")) return "TRANSIT";
+        return "UNKNOWN";
     }
 
     private DecisionConstraints normalize(DecisionConstraints constraints) {
@@ -363,6 +382,7 @@ public class ConstraintExtractor {
         properties.put("targetCity", property("string", "Explicit target city requested by the user, for example 重庆 or 福州. Empty string if absent."));
         properties.put("targetDistrict", property("string", "Explicit administrative district or county requested by the user, for example 闽侯县 or 鼓楼区. Empty string if absent. Do not put landmarks or business areas here."));
         properties.put("targetArea", property("string", "Explicit business area or landmark/POI, for example 解放碑 or 福州大学. Empty string if absent; do not put administrative districts here."));
+        properties.put("entityTypeHint", property("string", "Request-scoped POI type hint: UNIVERSITY, MALL, TRANSIT, HOSPITAL, LANDMARK, or UNKNOWN. Infer only from the user's location mention; do not map aliases to named institutions."));
         properties.put("locationIntent", property("string", "EXPLICIT_TARGET for a named destination, CURRENT_DEVICE for the user's current location, or UNSPECIFIED."));
         properties.put("keyword", property("string", "Specific entity the user explicitly names: a restaurant name or signature dish (e.g. 闽师东北菜, 锅包肉). Do NOT put a cuisine here — cuisines go to the cuisine field. Do not include targetCity or targetArea."));
         properties.put("cuisine", property("string", "Cuisine category (e.g. 川菜, 火锅, 日料, 快餐简餐, 面食, 小吃). Empty string if unknown."));

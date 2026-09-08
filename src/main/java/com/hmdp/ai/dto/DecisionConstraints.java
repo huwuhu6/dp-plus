@@ -20,6 +20,9 @@ public class DecisionConstraints {
     /** Explicit district/county administrative scope; non-administrative POIs stay in targetArea. */
     private String targetDistrict = "";
     private String targetArea = "";
+    /** Request-scoped POI entity hint; intentionally excluded from durable snapshots. */
+    @JsonIgnore
+    private String entityTypeHint = "UNKNOWN";
     /** Explicit destination, current device, or unspecified location intent. */
     private String locationIntent = "UNSPECIFIED";
     /** Named entity the user explicitly asks for (shop name / signature dish / specific food), after cuisine & geographic slots are consumed. Free text; not hard-filtered today (see #33 for deterministic exact-match path). */
