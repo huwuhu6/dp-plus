@@ -4,187 +4,755 @@
 
 建议简历 bullet：
 
-> 设计多轮消费决策 Working Memory，将 Chat History 与当前业务状态解耦，维护预算、菜系、地点等约束及当前任务上下文；支持多轮条件增量更新、历史方案切换，并通过版本化状态与 OCC 避免并发请求覆盖。
+> 设计多轮消费决策 Working Memory，将 Chat History 与当前业务状态解耦，维护预算、菜系、地点、候选商户及任务上下文；支持条件增量修改、显式清除、历史方案切换与推荐引用，并通过版本化状态、OCC 与运行时版本校验避免旧状态和慢工具结果污染当前会话。
 
-这句话主动暴露的关键词只有：`Working Memory`、多轮条件更新、历史方案切换、OCC。它没有主动写 TurnPlan、RecommendationBatch、Location Contract 等内部名词，这些应该留到被追问时再拿出来。
-
----
-
-## 1. 面试官第一问：为什么需要 Working Memory？直接把 Chat History 给模型不行吗？
-
-### 面试官为什么会问
-
-因为如果 Working Memory 只是“把聊天内容再存一份”，那就是重复设计。你需要先证明：History 和当前业务状态不是一种东西。
-
-### 你真正要证明的点
-
-Chat History 记录“发生过什么”，Working Memory 记录“系统现在认可什么”。多轮对话中存在覆盖、清除、恢复和任务切换，如果每轮都让 LLM 从整段 History 重推当前状态，就把本来应该确定的问题变成概率问题。
-
-### 40 秒回答
-
-> Chat History 是语言证据，它能告诉系统用户以前说过什么，但不能稳定表达哪些条件现在仍然生效。比如用户先说“福州火锅人均100”，后来把预算改到150，又切到杭州日料，再说“还是最开始那套”。如果每轮都让 LLM 从整段历史重新推断当前状态，同一段历史可能得到不同结果，而且覆盖、清除、恢复和并发版本都不好做。所以我把 History 和当前业务状态分开：History 保留语言上下文，Working Memory 保存当前 Task、criteria、searchLocation、focus 等 canonical business state。
-
-### 面试官可能继续
-
-- 那摘要 Memory 行不行？
-- Working Memory 具体存什么？
-- 为什么 Tool Result 不全塞进去？
-- 这份状态放内存、Redis 还是数据库？
+这句话主动暴露的关键词是：`Working Memory`、多轮状态、条件修改/清除、历史方案、OCC。不要在简历上继续把 TurnCommandSet、RecommendationBatch、Location Contract、Provenance 等内部名词全部倒出来，它们应该作为被追问后的深挖证据。
 
 ---
 
-## 2. Working Memory 里面到底存什么？为什么不是越多越好？
+# 一、先看这一条线到底是怎么长出来的：开发演进速览
 
-### 面试官可能这样问
+这条线不是一开始就“设计了一个 Working Memory”。相反，项目早期根本没有清晰的 Working Memory 抽象，后面几乎整个开发周期都在围绕“当前状态到底是什么、谁有权改、怎么避免旧状态污染”不断收口。
 
-> 你说 Working Memory 是当前状态，那里面具体有哪些字段？
-
-### 核心回答
-
-应该存“当前业务决策需要且必须确定”的状态，例如当前 Task、预算/菜系/偏好等 criteria、searchLocation、focused shop、历史推荐批次的轻量引用、版本信息等。
-
-不应该复制完整评论、所有 Tool Response、全部模型输出。那些是执行事实或证据，生命周期和 authority 不一样。历史执行事实更适合放 DecisionSession，历史推荐 identity/ordinal 由 RecommendationBatch 保存。
-
-### 反驳题
-
-> 都放一起不是更简单吗？
-
-回答重点：短期代码可能更简单，但同一事实会在多个地方重复，后面很容易出现“当前状态已经变了，历史结果也跟着被错误解释”的 Temporal Leakage 或双真相。
-
----
-
-## 3. 用户说“预算可以高一点”，Working Memory 怎么更新？
-
-这是面试官听到“槽位/slot”后最自然的一层。
-
-### 面试官可能问
-
-> 这些预算、菜系、地点是谁提取的？大模型直接输出 JSON 吗？
-
-可以回答：模型负责结构化语义提取，输出 criteria delta / slot 候选；但抽取不是最终状态写入，后面还有 mutation permission、merge/clear/inherit 等确定性逻辑。
-
-### 面试官继续举例
+先把整条演进链记住：
 
 ```text
-上一轮：人均100
-这一轮：150也可以
+没有明确 Working Memory
+↓
+状态散落在 Chat History / 当前 Context / 候选列表 / 会话字段
+↓
+先解决 candidatePool 与 shownShopIds 混淆
+↓
+引入 RecommendationBatch 保存历史批次和 ordinal
+↓
+形成 Flat Working Memory
+↓
+A → B → A 暴露 Ghost Inheritance
+↓
+Working Memory V2：Task-scoped State
+↓
+Task V2 初版仍失败：同一 Turn 里重新 load 旧 snapshot
+↓
+统一 request-scoped authoritative snapshot
+↓
+继续暴露 Slot Mutation 问题：未提及 ≠ 显式清除，Mention ≠ Mutation
+↓
+增加 clearedFields / removedPreferences / Turn Understanding
+↓
+继续暴露 Location State 问题：Value、Intent、Provenance、Projection 混淆
+↓
+locationIntent / searchLocation / 行政层级 / POI Grounding 收口
+↓
+并发问题：version / OCC 防 Lost Update
+↓
+慢 Tool 问题：baseWorkingMemoryVersion 防 stale runtime result
+↓
+可解释性问题：当前 Value、来源 Provenance、Historical Decision Fact 分离
 ```
 
-预算更新到 150。
-
-但真正难的是下面这些：
-
-```text
-“别太贵”
-“换成日料”
-“不要日料”
-“还是最开始那套”
-“这个日料怎么样”
-```
-
-这说明 Slot Extraction 本身并不是主要难点，难的是 Slot Mutation Semantics：这个字段是在修改当前状态、排除条件、切换任务，还是只是在描述某个实体。
+如果面试官问“你这个 Working Memory 是怎么设计出来的”，不要从最终类结构倒背。应该从这条时间线往下讲。
 
 ---
 
-## 4. 模型抽到字段以后，是不是直接写 Working Memory？
+## 阶段 1：最开始其实没有 Working Memory
 
-### 最重要的 Bad Case
-
-```text
-用户：这个日料怎么样？
-模型：识别到 cuisine = 日料
-```
-
-如果“抽到字段 = 写状态”，当前搜索条件就被偷偷改成日料，但用户实际上只是问某家店。
-
-### 核心结论
-
-> 提到了一个槽位，不等于要求修改这个槽位。Mention ≠ Mutation。
-
-当前职责应拆成三层：
+早期系统更接近：
 
 ```text
-Turn Understanding
-→ 这一轮有没有修改状态的意图
-
-Constraint / Slot Extraction
-→ 如果允许修改，具体改什么
-
-Reducer / Merger
-→ 怎么合并并写入 canonical state
+Chat History
++ 当前请求 ChatProcessingContext
++ 当前 candidate list
++ focused shop
++ 若干 session 字段
 ```
 
-### 30 秒回答
+简单对话还能工作：
 
-> 我们早期确实踩过这个坑。“这个日料怎么样”会被 Extractor 抽出 cuisine=日料，如果直接按 Delta 非空判断 mutation，就会污染当前条件。后来把语义识别和状态写权限拆开：Extractor 可以告诉系统文本里出现了“日料”，但只有 Turn Understanding 确认本轮存在条件修改意图，Delta 才有资格进入 Reducer。
+```text
+福州火锅，人均100
+→ 预算改成80
+```
 
-### 面试官可能反驳
+但一进入“换一批”“之前那家”“切到另一套需求”“再切回来”，状态开始散落，谁是当前真值并不清楚。
 
-> Prompt 里告诉模型别乱改不就行了吗？
+这一阶段最重要的认识不是“要不要存 Memory”，而是：
 
-回答：Prompt 可以降低概率，但不能提供确定的状态写权限。业务 invariant 必须由代码兜底。
+> Chat History 是语言证据，不应该同时承担当前业务真值。
 
 ---
 
-## 5. 为什么一份 Working Memory 后来还不够，要有 Task？
+## 阶段 2：先从候选集合开始拆语义
 
-### 真实问题
+最早比较直接的问题是：
 
 ```text
-A：福州 / 火锅 / 100
-B：杭州 / 日料 / 300
+第一批：A B C
+用户：换一批
+第二批：D E F
+```
+
+如果只有一个 candidatePool，第二批会覆盖第一批；但如果只保存“所有看过的店”，又无法知道当前哪些候选仍然有效。
+
+于是先区分：
+
+```text
+candidatePool
+= 当前条件下仍可继续决策的候选
+
+shownShopIds
+= 用户历史上已经看过的商户
+```
+
+但随后又发现：
+
+```text
+shownShopIds = [A,B,C,D,E,F]
+```
+
+仍然回答不了：
+
+```text
+“最开始第二家”是哪家？
+```
+
+因为 flat shown list 没有 batch boundary 和 ordinal。
+
+所以继续引入：
+
+```text
+RecommendationBatch 1 = [A,B,C]
+RecommendationBatch 2 = [D,E,F]
+```
+
+并把 batch 绑定当时的 `decisionSessionId`。这一步解决的是：
+
+```text
+当前 Candidate Projection
+≠
+历史展示事实
+≠
+历史批次顺序
+```
+
+---
+
+## 阶段 3：有了 Flat Working Memory，但 A→B→A 还是会串
+
+后来状态开始被收拢进 Working Memory，但最初仍是一份扁平状态：
+
+```text
+WorkingMemory
+├─ activeCriteria
+├─ searchLocation
+├─ candidatePool
+├─ focusedShop
+└─ dialogPhase
+```
+
+简单 refinement 没问题：
+
+```text
+福州火锅100
+→ 预算改80
+```
+
+但 robustness 很快暴露：
+
+```text
+Task A：福州 / 火锅 / 100
+Task B：杭州 / 日料 / 300
 用户：还是最开始那套
 ```
 
-Flat Working Memory 很容易把 B 的预算/地点和 A 的菜系重新拼在一起。继续补 merge rule 只能缓解，不能解决 representation 错误。
+如果只有一份 flat criteria，就很容易得到：
 
-### 核心结论
+```text
+福州 + 火锅 + 300
+```
 
-用户可能同时维护多套独立决策需求。恢复历史方案不是重新拼字段，而是重新激活对应 Task。
+甚至残留杭州/西湖字段。
 
-### 面试官反驳
+这就是开发记录里反复出现的 Ghost Inheritance：旧任务里的预算、地点、菜系像“幽灵”一样渗入当前任务。
 
-> 保存 Working Memory 历史版本不就行了吗？
-
-回答：历史版本回答“过去某个时刻系统是什么状态”；Task 表示“当前会话里有哪些仍有业务身份的独立方案”。两者语义不同。
-
-### 面试官继续追
-
-- “换成日料”是新 Task 还是改当前 Task？
-- 预算从100改150为什么不是新 Task？
-- Task identity 谁判断？规则还是模型？
-
-这里要诚实：当前 Task Identity 是餐饮业务 heuristic，不是通用任务管理框架。预算通常是 refinement，地点/主要 food target 的大幅切换更可能触发新 Task。
+这时已经不是再补几条 merge rule 能解决的，因为 representation 本身错了。
 
 ---
 
-## 6. 用户说“最开始第二家”怎么知道是哪家？
+## 阶段 4：Working Memory V2——引入 Task Scope
 
-这条通常不是简历主动写，而是 Task/历史恢复被追深后自然出现。
-
-### 面试官会先问
-
-> 当前 candidatePool 里不是有列表吗？直接 index=1 不行？
-
-换一批后：
+于是 V2 不再把所有条件都放在全局 Working Memory，而是：
 
 ```text
-第一批 A / B / C
-第二批 D / E / F
-用户：最开始第二家怎么样？
+ConversationWorkingMemory
+├─ activeTaskId
+└─ tasks[]
+    ├─ criteria
+    ├─ constraintSources
+    ├─ searchLocation
+    └─ recommendationBatches[]
 ```
 
-当前 candidatePool 已经只能看到 D/E/F。shownShopIds 也只知道“看过谁”，不知道 batch boundary 和 ordinal。
+于是：
 
-所以需要 RecommendationBatch 保存每轮候选顺序及当时的 decisionSessionId。
+```text
+Task A
+= 福州 / 火锅 / 100
 
-### 再追一层
+Task B
+= 杭州 / 日料 / 300
+```
 
-> “这个日本料理怎么样”呢？
+用户说“回到最开始那套”时，不是拿 B 的当前字段重新拼一个 A，而是重新激活 A。
 
-如果当前 focused 是东北菜，但历史候选里有唯一日本料理，不能因为“这个”就盲目 fallback focused。描述性 qualifier 应优先于纯 deictic fallback。
+这里要记住一句：
 
-这里不用背 Resolver 名字，先把这几个 Case 讲通：
+> 历史 Working Memory Version 表示“过去某个时刻是什么状态”；Task 表示“当前会话里仍然具有业务身份的独立方案”。
+
+这两者不是一回事。
+
+---
+
+## 阶段 5：Task V2 写完了，为什么 Scope 还是没变好？——同轮双快照 Bug
+
+这是这条线最值得面试讲的真实事故之一。
+
+V2 第一版后，Task transition 的单测可以通过，但完整 Conversation Evaluation 里 Scope 仍然只有部分通过。逐轮看发现：
+
+```text
+taskCount 一直是 1
+activeTaskId 也没真正切换
+```
+
+最后发现不是 Task 判断错，而是一个请求内部存在两个 Working Memory 世界：
+
+```text
+transitionTask()
+→ 修改 request-scoped Working Memory
+
+后面 reduceCriteria()
+→ 又从数据库 reload Working Memory
+→ 拿到 transition 之前的旧 snapshot
+→ 新 Task 被旧状态覆盖
+```
+
+最后确定不变量：
+
+> 一个 Turn 内只能有一份 authoritative Working Memory snapshot。
+
+正确链路：
+
+```text
+Bootstrap load
+→ task transition
+→ criteria merge
+→ reduce
+→ persist
+```
+
+全部围绕 `context.getWorkingMemory()` 这一份 request-scoped snapshot 工作，中间不重新 load 一个“同版本但更旧的世界”。
+
+这一步非常重要，因为它说明：
+
+```text
+Task Model 对
+≠
+Pipeline State View 一定对
+```
+
+数据模型和执行时序都要一致。
+
+---
+
+## 阶段 6：有了状态，还得定义“这一轮到底是在改，还是只是在提到”
+
+Working Memory 稳定后又出现另一类错误：
+
+```text
+用户：这个日料怎么样？
+Extractor：cuisine = 日料
+```
+
+如果系统采用：
+
+```text
+Delta 非空
+→ 认为用户要修改状态
+```
+
+就会把事实追问误写成搜索条件。
+
+于是形成一个核心不变量：
+
+> Mention ≠ Mutation。
+
+最终职责开始拆成：
+
+```text
+Turn Understanding
+→ 决定“这一轮有没有修改状态的权限”
+
+Constraint Extractor
+→ 如果允许修改，具体改什么
+
+Criteria Merger / State Service
+→ 怎么合并并持久化
+```
+
+也就是说，Extractor 不再既当“语义解析器”又当“状态写权限裁判”。
+
+---
+
+## 阶段 7：未提及、清除、删除偏好，不能都用 null 表达
+
+随后又遇到更细的状态生命周期问题。
+
+比如上一轮：
+
+```text
+budget = 100
+preference = 安静
+```
+
+这一轮用户什么都没说预算：
+
+```text
+budget 未提及
+→ 应该继承100
+```
+
+但用户说：
+
+```text
+“不限预算”
+→ 应该主动清除 budget
+```
+
+两者如果都表示成 `null`，Reducer 根本不知道：
+
+```text
+这是模型没抽到？
+还是用户明确要求删掉？
+```
+
+所以协议增加：
+
+```text
+clearedFields[]
+removedPreferences[]
+```
+
+例如：
+
+```text
+“不限预算”
+→ clearedFields += budget
+
+“不要安静了”
+→ removedPreferences += 安静
+```
+
+这条可以概括成：
+
+> Value 和 Mutation Operation 必须分开建模。
+
+`null` 不能同时代表“absent”和“clear”。
+
+---
+
+## 阶段 8：Location 把 Working Memory 的状态边界继续逼深
+
+Location 是 Working Memory 主线非常好的深挖案例，因为它连续暴露了多层状态语义问题。
+
+最早会出现：
+
+```text
+设备 GPS 在福州
+用户明确说：北京有啥好吃的
+```
+
+如果代码只看 request.city / 经纬度，很容易把“用户设备在哪”和“这套 Task 想去哪搜”混在一起。
+
+后面又出现：
+
+```text
+重庆 / EXPLICIT_TARGET
+→ 用户：我附近
+```
+
+如果只设置 nearby=true，却不清掉 targetCity=重庆，就形成：
+
+```text
+重庆 + 当前设备附近
+```
+
+这种不可能状态。
+
+因此进一步形成：
+
+```text
+Value
+≠ Intent
+≠ Provenance
+≠ Projection
+```
+
+并增加 `locationIntent`：
+
+```text
+EXPLICIT_TARGET
+CURRENT_DEVICE
+UNSPECIFIED
+```
+
+后来“福建”又暴露行政层级缺失：如果只有 targetCity，`福建` 会被错误投影成 city='福建'。于是 province/city/district/area 逐步进入 Canonical State。
+
+“师大附近”又暴露：
+
+```text
+Location Mention
+≠ Verified Geographic Identity
+```
+
+地图搜索只是 candidate retrieval，不应该把第一条结果直接持久化成 searchLocation。
+
+所以 Location 最终变成一个很好的总结：
+
+> Working Memory 不是“把自然语言变成 JSON”，而是要保存后续业务决策真正依赖的语义维度、来源与执行含义。
+
+---
+
+## 阶段 9：单请求一致了，还要处理跨请求并发——OCC
+
+同一 Turn 一份 snapshot，只解决单请求内部一致性。
+
+如果：
+
+```text
+请求 A 基于 version=20
+请求 B 也基于 version=20
+B 先提交 version=21
+A 再提交
+```
+
+A 不能静默覆盖 B。
+
+因此 Working Memory append 使用 version / expectedVersion 做乐观并发控制：旧版本写入直接失败，而不是覆盖较新的 state。
+
+这里别简单讲成“完全不用锁”。真正应该讲的是：
+
+```text
+单 Turn
+→ request-scoped snapshot
+
+跨请求 Durable Mutation
+→ version / OCC
+```
+
+如果上层还有 session-level 串行化，也不要回避；OCC 仍然是底层最后一道 Lost Update 防线。
+
+---
+
+## 阶段 10：OCC 还不够——慢 Tool 的 stale runtime result
+
+更隐蔽的是：
+
+```text
+A 基于 WM V20 开始调用 Tool
+Tool 执行 8 秒
+期间用户新消息把 WM 推进到 V21
+Tool 返回
+```
+
+即使最终持久化时 OCC 能阻止 V20 覆盖 V21，A 的 Tool Result 本身已经是基于旧世界算出来的。
+
+所以 runtime context 保存：
+
+```text
+baseWorkingMemoryVersion
+```
+
+Tool / Agent 执行完后重新看最新版本。如果：
+
+```text
+base=20
+latest=21
+```
+
+则标记 stale runtime result，不允许它再回写 candidatePool、focusedShop、criteria 等 canonical state。
+
+可以记成三层：
+
+```text
+same-turn snapshot
+→ 防一个请求里看到两个世界
+
+OCC
+→ 防两个请求互相覆盖
+
+stale runtime guard
+→ 防慢 Tool 用旧世界污染新状态
+```
+
+---
+
+## 阶段 11：最后连“为什么当时推荐这家”也不能拿当前 WM 重解释
+
+Working Memory 做到后面，还出现用户内省：
+
+```text
+“我之前说过安静吗？”
+“这个预算是我说的吗？”
+“为什么当时推荐第一家？”
+```
+
+此时只有当前 Value 不够。
+
+所以逐步拆成：
+
+```text
+Value
+→ 当前生效什么
+
+Provenance
+→ 这个值来自 USER_EXPLICIT / DERIVED / SYSTEM_DEFAULT
+
+Historical Decision Fact
+→ 当时推荐结果与理由是什么
+```
+
+历史推荐解释不能拿当前 criteria 重跑一遍，而是通过：
+
+```text
+Resolved Reference
+→ RecommendationBatch.decisionSessionId
+→ historical DecisionSession.resultJson
+→ 当时的 Recommendation / matchedReasons / evidence
+```
+
+这样避免 Temporal Leakage：
+
+```text
+今天的条件
+不能穿越回去解释昨天的推荐
+```
+
+---
+
+# 二、面试追问链
+
+## 1. 为什么不直接把 Chat History 全交给大模型？
+
+### 40 秒回答
+
+> Chat History 记录的是“发生过什么”，Working Memory 记录的是“当前哪些业务事实仍然成立”。多轮里会有覆盖、清除、任务切换和恢复，例如福州火锅100，后来切到杭州日料300，再说回到最开始那套。如果每轮都让模型从 History 重推当前状态，本来应该确定的状态合并会变成概率问题。所以 History 保留语言证据，Working Memory 保存当前 Task、criteria、searchLocation、candidate projection、focus 等 canonical business state。
+
+### 继续追
+
+- 摘要 Memory 不行吗？
+- 为什么不是把所有 Tool Result 一起放进去？
+- Working Memory 为什么要持久化？
+
+---
+
+## 2. Working Memory 里到底存什么？
+
+重点答“当前业务真值”，不要背字段表。
+
+可以说：
+
+```text
+当前 active Task
+Task-local criteria
+constraintSources
+searchLocation
+当前 candidate projection / focused shop
+RecommendationBatch 的历史轻量索引
+version / active decision reference
+```
+
+不存完整评论、完整 Tool payload、全部历史 evidence，因为那些属于执行事实或历史决策事实，不应该不断复制进 versioned full snapshot。
+
+---
+
+## 3. Slot / Constraint 是怎么更新的？
+
+面试官常从最简单的问：
+
+```text
+“人均100” → “150也可以”
+```
+
+这里本质是：
+
+```text
+Extract Delta
+→ Merge with Previous
+→ Persist Canonical State
+```
+
+但真正难的是后面的 operator：
+
+```text
+SET
+CLEAR
+REMOVE
+EXCLUDE
+RELATIVE CHANGE
+NO MUTATION
+```
+
+所以不要把这一块讲成普通 Slot Filling。
+
+---
+
+## 4. “没说预算”和“不限预算”怎么区分？
+
+这是应该重点准备的一题。
+
+```text
+未提及 budget
+→ inherit previous
+
+“不限预算”
+→ clearedFields += budget
+→ clear previous budget
+```
+
+同理：
+
+```text
+“不要安静了”
+→ removedPreferences += 安静
+```
+
+### 为什么不能 null？
+
+因为 null 无法同时表达：
+
+```text
+模型没抽到
+vs
+用户明确清除
+```
+
+一句话：
+
+> absent 是“没有操作”，clear 是一种明确操作。
+
+---
+
+## 5. “这个日料怎么样”为什么不能把 cuisine 改成日料？
+
+因为：
+
+```text
+Entity Mention
+≠ State Mutation
+```
+
+Extractor 能识别“日料”只是说明文本里有这个语义材料，不代表用户允许修改搜索条件。
+
+所以现在分三层：
+
+```text
+Turn Understanding：能不能改
+Extractor：具体改什么
+Merger / Reducer：怎么落
+```
+
+### 为什么 Prompt 里约束模型还不够？
+
+Prompt 只能降低错误概率，不能成为 canonical state mutation 的最终 authority。
+
+---
+
+## 6. 为什么条件变化以后还要清 candidatePool / focusedShop？
+
+因为 candidatePool 是某一组 retrieval domain 产生的派生投影。
+
+例如：
+
+```text
+原条件：川菜
+候选：A/B/C
+
+用户：换粤菜
+```
+
+即使 A/B/C 这些 Shop 仍然存在，它们也不再是“当前条件下有效的候选”。
+
+所以 Search Domain 关键字段变化后：
+
+```text
+invalidate current candidate projection
+clear focused shop
+```
+
+但历史 RecommendationBatch 要保留，因为“用户过去看过 A/B/C”仍然是历史事实。
+
+一句话：
+
+> Current Projection 可以失效，Historical Fact 不能被抹掉。
+
+---
+
+## 7. 为什么 Flat Working Memory 不够？
+
+拿 A→B→A 讲。
+
+```text
+A：福州火锅100
+B：杭州日料300
+回到 A
+```
+
+Flat WM 只有一份 active criteria，很容易出现 budget=300 或西湖位置残留。
+
+所以 V2 引入 Task Scope，每个 Task 自己保存 criteria / searchLocation / batches。
+
+### 为什么不用历史 version 直接恢复？
+
+历史 version 表示过去时刻；Task 表示当前会话中仍然有身份的方案。版本是时间维，Task 是业务身份维。
+
+---
+
+## 8. Task 怎么决定 UPDATE / CREATE / ACTIVATE？
+
+当前不是通用任务管理框架，而是餐饮领域 heuristic。
+
+可以讲：
+
+```text
+预算100 → 150
+通常 UPDATE 当前 Task
+
+显式“回到最开始/之前那套”
+→ ACTIVATE historical task
+
+目标地点 + 主菜系同时明显切换
+→ 更倾向 CREATE 新 Task
+```
+
+不要吹成通用 Task Planner。
+
+---
+
+## 9. “最开始第二家”怎么解析？
+
+不能只靠 current candidatePool，也不能只靠 flat shown list。
+
+```text
+第一批 A/B/C
+第二批 D/E/F
+“最开始第二家”
+→ earliest RecommendationBatch
+→ ordinal 2
+→ B
+```
+
+RecommendationBatch 保存 batch boundary、顺序和 decisionSessionId。
+
+继续追可能会问：
 
 ```text
 第一家
@@ -194,152 +762,173 @@ Flat Working Memory 很容易把 B 的预算/地点和 A 的菜系重新拼在�
 这个
 ```
 
----
-
-## 7. 同一个请求里为什么还会出现旧状态覆盖新状态？
-
-### 真实 Bad Case
-
-一个请求前半段已经修改 request-scoped Working Memory，后半段某个阶段又从数据库 reload 同 version 的旧 snapshot，最终旧状态反向覆盖新状态。
-
-### 不变量
-
-> 一个 Turn 只能有一份 authoritative Working Memory snapshot。
-
-Bootstrap load 一次，transition、merge、reduce、persist 都围绕同一份 request-scoped snapshot 工作。
-
-这解决的是“单请求内部两个世界”的问题。
+这里重点讲 resolution contract，不要一上来背 Resolver 类名。
 
 ---
 
-## 8. 两个请求同时改同一个会话怎么办？
+## 10. 为什么 Task V2 写完还会失败？
 
-### 面试官自然追问
-
-> 同一 Turn 一份 snapshot 只能保证单请求，那两个并发请求呢？
-
-例子：
+讲 same-turn snapshot Bug。
 
 ```text
-A 基于 version=20
-B 基于 version=20
-B 先提交 version=21
-A 再提交
+前面 transition 修改 WM
+后面又 reload DB 旧 snapshot
+新状态被旧状态覆盖
 ```
 
-使用 OCC，append 时检查 expectedVersion；版本不匹配则拒绝旧写，不能静默覆盖新状态。
+所以一个 Turn 只能有一份 authoritative snapshot。
 
-### 为什么不用悲观锁？
-
-当前主要冲突是低频会话级状态写，OCC 可以避免长时间持锁，并且冲突可以显式失败；代价是冲突后需要决定是否重试/重新计算，不能盲目 rebase。
+这是这条线最能证明“你真的调过系统”的问题之一。
 
 ---
 
-## 9. 已经有 OCC，为什么还要防慢 Tool 的旧结果？
+## 11. 两个并发请求怎么防 Lost Update？
 
-### 面试官很可能问
-
-> A 调 Tool 五秒，期间 B 已经把条件改了，A 的 Tool 回来怎么办？
-
-OCC 只能阻止旧状态最终写库，但 Tool Result 本身已经是基于旧条件计算出来的。如果继续拿它更新候选池、focus 或状态，仍然会污染当前世界。
-
-所以 runtime context 记录 baseWorkingMemoryVersion。Tool 返回后再检查当前 latestVersion；如果已经变化，则把结果标记为 stale，禁止旧 Delta 写回 canonical state。
-
-记忆方式：
+用 OCC：
 
 ```text
-same-turn snapshot
-→ 单请求世界一致
-
-OCC
-→ 并发写一致
-
-stale-result guard
-→ 慢 Tool 结果一致
+A base v20
+B base v20
+B → v21 成功
+A 再写 → expectedVersion mismatch → reject
 ```
+
+为什么不用只靠悲观锁：OCC 让冲突显式暴露，不需要把长耗时模型/工具执行全程包在数据库锁里。但不要否认上层可能仍有 session serialization；两者解决的层次不同。
 
 ---
 
-## 10. Location 怎么作为这条主线的深挖案例？
+## 12. Tool 很慢，回来时状态已经变了怎么办？
 
-不要主动在简历再开一条“Location Contract”。被问到“状态更新还有什么复杂 Case”时，用下面这个就够：
+用 `baseWorkingMemoryVersion`。
 
 ```text
-设备 GPS 在福州
-用户明确说：北京农大附近
+Tool 基于 v20
+返回时 latest=v21
+→ stale runtime result
+→ 禁止旧结果回写 canonical state
 ```
 
-设备位置只表示用户现在在哪；显式命名地点表示用户想搜哪里。两者冲突时，Explicit Named Location 必须优先于 GPS Bias。
+只读结果如果对当前回复仍安全，可以用于回复；但不能继续更新候选池、focus、criteria。
 
-再进一步：
+---
+
+## 13. Location 为什么是 Working Memory，而不只是地图问题？
+
+因为它暴露的是状态建模：
 
 ```text
-用户：师大附近
+设备位置
+≠ 搜索目的地
+
+city value
+≠ 来源 provenance
+
+出现“师大”
+≠ 已解析 geographic identity
+
+有经纬度
+≠ 当前一定按附近搜索
 ```
 
-地图搜索返回第一条并不意味着实体已经解析成功。Search 只是 Candidate Retrieval，必须经过 Candidate Resolution；未确认的 POI 不能直接成为 durable searchLocation。
-
-这条 Case 能证明一个更一般的原则：
-
-> Mention ≠ Verified Identity，Verified Identity 才有资格进入可执行状态。
-
----
-
-## 11. 这条线最后怎么收口
-
-面试官如果让你总结，控制在这一段：
-
-> 这条线最开始只是想解决“多轮聊天怎么记住预算、菜系和地点”，后来真正遇到的问题是状态真值、状态写权限和并发一致性。History 只保留语言证据，Working Memory 保存 canonical state；Task 解决多套需求切换；Turn Understanding 控制谁能修改状态；同一 Turn 只保留一份 snapshot，跨请求用 OCC，慢 Tool 再用 version guard 防旧结果污染。我没有把所有语义都交给 LLM，开放语义由模型提议，最终状态 authority 保留在 Java 侧。
-
----
-
-## 12. 当前不能吹什么
-
-- Task Identity 仍是餐饮领域 heuristic，不是通用 Task Manager；
-- 不能说所有状态问题都被消灭，Context Rewrite、复杂 compound semantics 等仍有边界；
-- 不要把 Working Memory 讲成完整 Event Sourcing；当前主要是 versioned full snapshot；
-- 不要把 Location 说成完全通用 NER/POI disambiguation 系统；当前仍依赖 Provider、名称相关度和业务规则。
-
----
-
-## 13. 开发记录里最值得拿来证明“这条线不是设计出来背的”三次事故
-
-### 事故一：命名目的地和设备位置混在一起
-
-真实会话里，用户先明确搜北京，后面说“看看我附近有什么好吃的”。早期只把 `nearby=true` 当新增条件，旧 `targetCity=北京` 和 `searchLocation.city=北京` 仍保留，导致系统实际上没有完成 Scope Switch。
-
-后来不是补一个“北京”特判，而是给地点增加 `locationIntent`，把 `EXPLICIT_TARGET`、`CURRENT_DEVICE`、`UNSPECIFIED` 建模成互斥状态；切到 CURRENT_DEVICE 时确定性清理旧 targetCity/targetArea/searchLocation，缺 GPS 才进入 CLARIFYING。这个改动当时配套全量回归达到 91 个测试、0 failure、0 error、3 skipped。
-
-面试官如果问“Working Memory 为什么不只是几个字段”，就用这个 Case：真正困难的是字段之间存在 scope / invalidation semantics，而不是把文本转成 JSON。
-
-### 事故二：零结果后的“我附近呢”被当成闲聊
-
-当候选池为空时，旧 Context Rewrite 因 `NO_WORKING_MEMORY_CANDIDATES` 直接跳过；用户在零结果后说“我附近呢”，路由模型就可能误判为 GENERAL_CHAT。后来把当前位置 continuation 提升成确定性状态转换：即使候选池为空，只要已有消费决策上下文，“我附近/当前位置”也能进入 CURRENT_DEVICE continuation，而不是依赖候选商户做 reference rewrite。
-
-这次回归后全量测试达到 93 个用例、0 failure、0 error、3 skipped。它说明 Context Rewrite 不是简单“补全一句话”，它必须受当前业务状态约束。
-
-### 事故三：历史推荐为什么不能靠当前状态重新解释
-
-后续增加决策上下文查询时，“为什么推荐第一家”没有重新执行推荐，也没有让 LLM 根据当前 criteria 重猜。Grounding 链固定为：
+最适合讲的 Case：
 
 ```text
-ReferenceIntent
-→ ResolvedShopReference
-→ RecommendationBatch.decisionSessionId
-→ AiDecisionSession.resultJson
-→ 当时的 Recommendation.matchedReasons / evidence
+GPS 在福州
+用户说北京农大附近
 ```
 
-这样用户后来修改预算，也不会拿新预算去解释旧推荐，避免 Temporal Leakage。RecommendationBatch 继续只保存历史 identity / pointer，不复制完整 evidence 到版本化 WM。
+和：
+
+```text
+重庆无数据
+用户说“那我附近呢”
+```
+
+前者显式目的地压过设备上下文；后者最新用户意图又必须允许从 EXPLICIT_TARGET 切到 CURRENT_DEVICE。
 
 ---
 
-## 14. 面试官如果质疑：这些是不是你后来为了写资料才总结出来的？
+## 14. 搜不到候选为什么不能统一“放宽条件”？
 
-可以直接说开发顺序不是“一开始就设计好 Working Memory 全家桶”。开发记录能看到它是逐步被 Bad Case 推出来的：先有 location scope 泄漏、零结果恢复、candidate/history 语义问题，再逐渐形成 `locationIntent`、Task、RecommendationBatch、same-turn snapshot、OCC 等约束。
+因为零结果也有不同语义：
 
-回答时不要把自己包装成一开始就知道最终架构，更可信的说法是：
+```text
+有预算/菜系/半径等可松弛约束
+→ WAITING_RELAXATION
 
-> 第一版主要靠 Chat History 和当前上下文，能跑简单流程；后来 robustness Case 和真实聊天不断暴露状态串扰。我每次先定位哪个 authority/representation 出问题，再把修复提升成状态不变量，最后加 targeted/full regression 防回归。
+只指定了合法城市，但业务库里没数据
+→ ZERO_RESULT_NO_DATA
+```
 
-这比“我设计了一个先进的 Working Memory 架构”更像真实工程经历。
+如果没有任何可松弛项，却告诉用户“放宽条件”，状态机语义就是错的。
+
+而且放宽 hard constraint 必须来自用户显式同意，不能系统偷偷扩大范围。
+
+---
+
+## 15. “为什么推荐这家”“这个预算是我说的吗”怎么回答？
+
+当前 Value 不够，还需要：
+
+```text
+constraintSources
+→ USER_EXPLICIT / DERIVED / SYSTEM_DEFAULT
+```
+
+历史推荐理由则走 historical Decision Fact，不拿当前 WM 重解释：
+
+```text
+RecommendationBatch.decisionSessionId
+→ historical DecisionResponse
+→ matchedReasons / evidence
+```
+
+这解决 Temporal Leakage。
+
+---
+
+# 三、最值得背熟的真实事故
+
+如果只能准备 5 个，优先这几个：
+
+### 事故 1：A→B→A Ghost Inheritance
+
+证明为什么 Flat WM 不够，为什么需要 Task Scope。
+
+### 事故 2：Task V2 仍失败，因为同一 Turn reload 旧 snapshot
+
+证明你理解 Pipeline state consistency，而不只是会设计 DTO。
+
+### 事故 3：“这个日料怎么样”污染 cuisine
+
+证明 Mention ≠ Mutation，Extractor ≠ Mutation Authority。
+
+### 事故 4：重庆 → “我附近”仍残留 EXPLICIT_TARGET
+
+证明 Value / Intent / Provenance / Projection 要分离。
+
+### 事故 5：Tool 基于 V20，返回时 WM 已 V21
+
+证明 OCC 与 stale runtime result 是两层问题。
+
+---
+
+# 四、这条线怎么在面试里收口
+
+1 分钟版本：
+
+> 这个 Working Memory 不是一开始设计出来的。最早系统主要依赖 Chat History、当前 Context 和一些候选字段，简单多轮可以跑，但换一批、历史引用和多方案切换后状态开始串。我们先拆 candidatePool 和 shown history，再加 RecommendationBatch 保存批次和 ordinal；后来 Flat Working Memory 在 A→B→A 场景出现 Ghost Inheritance，所以引入 Task-scoped State。Task V2 第一版又暴露一个很隐蔽的问题：同一请求前半段修改了 Working Memory，后半段重新从数据库读旧 snapshot，把新 Task 覆盖掉，于是又收敛成一个 Turn 只有一份 authoritative snapshot。后面继续补了 clearedFields/removedPreferences 区分未提及和主动清除，Turn Understanding 解决 Mention ≠ Mutation，Location 又逼着我们把 Value、Intent、Provenance、Projection 分开。并发层用 version/OCC 防 Lost Update，慢 Tool 再用 baseWorkingMemoryVersion 防 stale result 回写。最后 Working Memory 也不再承担所有历史事实，历史推荐理由通过 RecommendationBatch 指向当时的 DecisionSession 回查。
+
+这段讲完以后，面试官无论往 Task、Slot、Location、OCC、Reference 还是 Evaluation 追，你都有下一层。
+
+---
+
+# 五、当前不能吹什么
+
+- Working Memory 当前是 versioned full snapshot，不是完整 Event Sourcing；
+- Task Identity 是餐饮业务 heuristic，不是通用 Task Planner；
+- Turn Semantics 仍是当前业务所需的轻量 command boundary，不是完整 Dialogue Act/DSL；
+- Location 仍依赖行政 Resolver、Provider 和 POI resolution，不是通用地理知识平台；
+- 不能说所有并发都只靠 OCC，也不能说 session-level serialization 完全不存在；
+- 复杂 compound turn、部分自然语言恢复和某些 Context Rewrite 边界仍然存在；
+- Provenance 当前主要记录来源类型，不要夸成完整 source-turn / causal tracing 系统。
