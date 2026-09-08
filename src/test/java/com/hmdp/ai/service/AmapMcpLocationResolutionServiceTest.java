@@ -79,4 +79,27 @@ class AmapMcpLocationResolutionServiceTest {
 
         assertEquals("福建理工大学旗山校区", result.get(0).getCanonicalName());
     }
+
+    @Test
+    void typeHintDoesNotBlockGenericFallbackWhenPoiRecallIsEmpty() {
+        AmapPoiSearchProvider poiProvider = mock(AmapPoiSearchProvider.class);
+        when(poiProvider.isAvailable()).thenReturn(true);
+        when(poiProvider.resolve(any(LocationResolutionRequest.class))).thenReturn(List.of());
+
+        McpSyncClient client = mock(McpSyncClient.class);
+        when(client.callTool(any())).thenReturn(new McpSchema.CallToolResult(
+                List.of(new McpSchema.TextContent("{\"geocodes\":[{\"name\":\"福建师范大学附属小学\",\"location\":\"119.2,26.0\"}]}")), false));
+
+        AmapMcpLocationResolutionService service = new AmapMcpLocationResolutionService();
+        ReflectionTestUtils.setField(service, "poiSearchProvider", poiProvider);
+        ReflectionTestUtils.setField(service, "mcpClients", List.of(client));
+        ReflectionTestUtils.setField(service, "enabled", true);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+
+        List<ResolvedLocationCandidate> result = service.resolve(
+                new LocationResolutionRequest("福建师范大学附属小学", null, "UNIVERSITY"));
+
+        assertEquals(1, result.size());
+        assertEquals("福建师范大学附属小学", result.get(0).getCanonicalName());
+    }
 }

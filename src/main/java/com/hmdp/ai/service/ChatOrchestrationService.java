@@ -242,7 +242,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 assessment.setSource("RULE");
                 ChatMessageResponse locationResponse = buildLocationResolutionResponse(context.getChatId(), message,
                         context.getChatSession(), context.getActiveDecisionSessionId(), activeDecision, poiOverride,
-                        inferEntityTypeHint(poiOverride));
+                        context.getCriteriaDelta() == null ? null : context.getCriteriaDelta().getEntityTypeHint());
                 if (locationResponse != null) {
                     context.setResponse(locationResponse);
                     return;
@@ -1377,7 +1377,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         String persistedHint = activeCriteria == null ? null : activeCriteria.getEntityTypeHint();
         String entityTypeHint = hasText(requestedEntityTypeHint) ? requestedEntityTypeHint
                 : hasText(persistedHint) && !"UNKNOWN".equalsIgnoreCase(persistedHint)
-                ? persistedHint : inferEntityTypeHint(poiQuery);
+                ? persistedHint : "UNKNOWN";
         if (hasText(resolutionContext.getActiveCity())) {
             String city = resolutionContext.getActiveCity();
             String cityAlias = city.endsWith("市") ? city.substring(0, city.length() - 1) : city;
@@ -1552,17 +1552,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
-    }
-
-    private String inferEntityTypeHint(String query) {
-        String text = query == null ? "" : query.replaceAll("\\s+", "");
-        if (text.contains("大学") || text.contains("学院") || text.contains("学校") || text.contains("校园")
-                || text.matches(".*[\\p{IsHan}]{1,3}大(?:附近|周边|那边|一带|校区|旁边|附近有什么).*$")
-                || text.matches("^[\\p{IsHan}]{1,3}大$")) return "UNIVERSITY";
-        if (text.contains("医院") || text.contains("诊所")) return "HOSPITAL";
-        if (text.contains("商场") || text.contains("购物中心")) return "MALL";
-        if (text.contains("地铁") || text.contains("火车站") || text.contains("车站")) return "TRANSIT";
-        return "UNKNOWN";
     }
 
     /** A city supplied while resolving a paused short POI becomes search context,

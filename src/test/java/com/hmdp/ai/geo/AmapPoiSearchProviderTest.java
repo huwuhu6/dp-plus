@@ -14,6 +14,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doReturn;
@@ -49,7 +50,7 @@ class AmapPoiSearchProviderTest {
     }
 
     @Test
-    void universityHintRejectsNearbyMerchantCandidates() {
+    void universityHintRanksTypeCompatibleCandidatesWithoutFilteringByType() {
         AmapPoiSearchProvider provider = new AmapPoiSearchProvider();
         String body = "{\"status\":\"1\",\"pois\":["
                 + "{\"id\":\"restaurant\",\"name\":\"师大分店\",\"type\":\"餐饮服务\",\"typecode\":\"050000\",\"location\":\"119.2,26.0\"},"
@@ -58,8 +59,23 @@ class AmapPoiSearchProviderTest {
 
         List<ResolvedLocationCandidate> result = provider.parseResponse(body, "师大", "UNIVERSITY");
 
+        assertEquals(3, result.size());
+        assertTrue(result.stream().anyMatch(item -> "school".equals(item.getPoiId())));
+        assertTrue(result.stream().anyMatch(item -> "primary-school".equals(item.getPoiId())));
+        assertTrue(result.stream().anyMatch(item -> "restaurant".equals(item.getPoiId())));
+    }
+
+    @Test
+    void explicitAffiliatedPrimarySchoolNameIsNotRejectedByUniversityHint() {
+        AmapPoiSearchProvider provider = new AmapPoiSearchProvider();
+        String body = "{\"status\":\"1\",\"pois\":["
+                + "{\"id\":\"primary-school\",\"name\":\"福建师范大学附属小学\","
+                + "\"type\":\"教育学校\",\"typecode\":\"141204\",\"location\":\"119.205,26.005\"}]}";
+
+        List<ResolvedLocationCandidate> result = provider.parseResponse(body, "福建师范大学附属小学", "UNIVERSITY");
+
         assertEquals(1, result.size());
-        assertEquals("school", result.get(0).getPoiId());
+        assertEquals("福建师范大学附属小学", result.get(0).getCanonicalName());
     }
 
     @Test

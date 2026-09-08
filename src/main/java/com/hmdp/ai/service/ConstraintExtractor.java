@@ -63,9 +63,6 @@ public class ConstraintExtractor {
         mergeAdministrativeResolution(constraints, regionResolution);
         constraints = enforceCurrentDeviceIntent(applyMutations(applyDirectionFallback(
                 applySemanticLocationFallback(constraints, query), query), query), query);
-        if (!hasText(constraints.getEntityTypeHint()) || "UNKNOWN".equalsIgnoreCase(constraints.getEntityTypeHint())) {
-            constraints.setEntityTypeHint(inferEntityTypeHint(query));
-        }
         applyExcludedCuisine(constraints, query);
         assignPreferenceSourceHints(constraints, query);
         return constraints;
@@ -249,7 +246,6 @@ public class ConstraintExtractor {
     private DecisionConstraints extractByRule(String query) {
         DecisionConstraints constraints = new DecisionConstraints();
         if (containsCurrentDeviceReference(query)) constraints.setLocationIntent("CURRENT_DEVICE");
-        constraints.setEntityTypeHint(inferEntityTypeHint(query));
         if (query.contains("日料") || query.contains("寿司")) {
             constraints.setCuisine("日料");
         } else if (query.contains("火锅")) {
@@ -291,18 +287,6 @@ public class ConstraintExtractor {
             constraints.setArrivalTime(time.group(1) == null ? "19:00" : normalizeTime(time.group(1)));
         }
         return constraints;
-    }
-
-    /** Generic entity vocabulary only; institution aliases remain model/provider concerns. */
-    private String inferEntityTypeHint(String query) {
-        String text = query == null ? "" : query.replaceAll("\\s+", "");
-        if (text.contains("大学") || text.contains("学院") || text.contains("学校") || text.contains("校园")
-                || text.matches(".*[\\p{IsHan}]{1,3}大(?:附近|周边|那边|一带|校区|旁边|附近有什么).*$")
-                || text.matches("^[\\p{IsHan}]{1,3}大$")) return "UNIVERSITY";
-        if (text.contains("医院") || text.contains("诊所")) return "HOSPITAL";
-        if (text.contains("商场") || text.contains("购物中心")) return "MALL";
-        if (text.contains("地铁") || text.contains("火车站") || text.contains("车站")) return "TRANSIT";
-        return "UNKNOWN";
     }
 
     private DecisionConstraints normalize(DecisionConstraints constraints) {

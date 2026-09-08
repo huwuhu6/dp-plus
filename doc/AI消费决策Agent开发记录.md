@@ -2355,6 +2355,6 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 
 ### POI Entity Resolution 与澄清确认（2026-09-08）
 
-高德 POI Search 结果只是候选召回，不能直接视为 canonical entity。本轮在不改变 Task/Working Memory 主模型的前提下，为候选保留 `poiType/typecode`，并增加 request-scoped `entityTypeHint`；高置信 UNIVERSITY 候选在 provider 层做严格类型兼容过滤，避免“师大”结果混入餐馆、民宿等周边商户，不维护“师大→某所大学”等名称别名。澄清文本优先匹配 pending candidate 的唯一 canonicalName/campus，再以当前明确的新 POI 作为 query override，避免旧 `targetArea=师大` 覆盖“我说的是福建师范大学”；按钮确认和自然语言确认最终仍汇入同一 canonical location contract。
+高德 POI Search 结果只是候选召回，不能直接视为 canonical entity。本轮在不改变 Task/Working Memory 主模型的前提下，为候选保留 `poiType/typecode`，并增加 request-scoped `entityTypeHint`；类型和名称相关度只作为排序信号，不再用“大学/学校/医院”等手写词表硬过滤，也不因类型提示无结果而禁止通用地理 fallback，避免“福建师范大学附属小学”这类完整名称被误杀。不维护“师大→某所大学”等名称别名。澄清文本优先匹配 pending candidate 的唯一 canonicalName/campus，再以当前明确的新 POI 作为 query override，避免旧 `targetArea=师大` 覆盖“我说的是福建师范大学”；按钮确认和自然语言确认最终仍汇入同一 canonical location contract。
 
-定向单测覆盖 provider 类型元数据/过滤、澄清文本提取和 query override；UNIVERSITY hint 只接受大学/学院及对应高等教育 typecode，排除餐馆、民宿和附属小学等同名周边 POI。8081 HTTP smoke 验证无可靠高校候选时安全保持澄清，明确输入“福建师范大学”会重新检索，完整 canonical 候选文本可直接确认并继续餐饮搜索。本轮未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+定向单测覆盖 provider 类型元数据、弱排序、完整附属小学名称不被过滤、通用 fallback、澄清文本提取和 query override。本轮未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。

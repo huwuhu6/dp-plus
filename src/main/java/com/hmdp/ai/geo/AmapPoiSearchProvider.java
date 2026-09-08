@@ -78,7 +78,7 @@ public class AmapPoiSearchProvider {
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) return List.of();
             List<ResolvedLocationCandidate> candidates = parseResponse(response.body(), keywords, entityTypeHint);
-            rankByDeviceDistance(candidates, context);
+            rankCandidates(candidates, keywords, entityTypeHint, context);
             log.info("[AI][location] event=AMAP_POI_SUCCESS keywords={} region={} mode={} candidates={}",
                     compact(keywords), region, around ? "AROUND" : "TEXT", candidates.size());
             return candidates;
@@ -100,7 +100,7 @@ public class AmapPoiSearchProvider {
             List<ResolvedLocationCandidate> result = new ArrayList<>();
             for (JsonNode poi : root.path("pois")) {
                 ResolvedLocationCandidate candidate = parseCandidate(poi);
-                if (candidate != null && isCompatible(candidate, query, entityTypeHint)) result.add(candidate);
+                if (candidate != null) result.add(candidate);
             }
             return result;
         } catch (Exception ignored) {
@@ -134,33 +134,43 @@ public class AmapPoiSearchProvider {
         }
     }
 
-    private boolean isCompatible(ResolvedLocationCandidate candidate, String query, String entityTypeHint) {
-        if (!hasText(entityTypeHint) || "UNKNOWN".equalsIgnoreCase(entityTypeHint)) return true;
-        if ("UNIVERSITY".equalsIgnoreCase(entityTypeHint)) {
-            String type = candidate.getPoiType() == null ? "" : candidate.getPoiType();
-            String code = candidate.getPoiTypeCode() == null ? "" : candidate.getPoiTypeCode();
-            // 141201/141202 are higher-education categories. Do not accept
-            // an affiliated primary/middle school merely because its name
-            // contains the institution alias.
-            boolean university = code.startsWith("141201") || code.startsWith("141202")
-                    || type.contains("大学") || type.contains("学院");
-            return university && relevantToQuery(candidate.getCanonicalName(), query);
-        }
-        return true;
-    }
-
-    /** Prevents a type-compatible but semantically unrelated institution from becoming a candidate. */
-    private boolean relevantToQuery(String name, String query) {
-        if (!hasText(name) || !hasText(query)) return true;
+    /** Name relevance is a ranking signal, never an eligibility gate. */
+    private int nameRelevance(String name, String query) {
+        if (!hasText(name) || !hasText(query)) return 0;
         String normalizedName = name.replaceAll("\\s+", "");
         String normalizedQuery = query.replaceAll("\\s+", "");
-        if (normalizedName.contains(normalizedQuery)) return true;
-        if (normalizedQuery.length() > 6) return false;
+        if (normalizedName.equals(normalizedQuery)) return 3;
+        if (normalizedName.contains(normalizedQuery)) return 2;
+        if (normalizedQuery.length() > 6) return 0;
         int cursor = 0;
         for (int i = 0; i < normalizedName.length() && cursor < normalizedQuery.length(); i++) {
             if (normalizedName.charAt(i) == normalizedQuery.charAt(cursor)) cursor++;
         }
-        return cursor == normalizedQuery.length();
+        return cursor == normalizedQuery.length() ? 1 : 0;
+    }
+
+    private void rankCandidates(List<ResolvedLocationCandidate> candidates, String query,
+                                String entityTypeHint, LocationResolutionContext context) {
+        candidates.sort((left, right) -> {
+            int type = Integer.compare(typeRelevance(right, entityTypeHint), typeRelevance(left, entityTypeHint));
+            if (type != 0) return type;
+            int name = Integer.compare(nameRelevance(right.getCanonicalName(), query),
+                    nameRelevance(left.getCanonicalName(), query));
+            if (name != 0) return name;
+            if (context == null || context.getDeviceLatitude() == null || context.getDeviceLongitude() == null) return 0;
+            return Double.compare(distanceSquared(left, context.getDeviceLatitude(), context.getDeviceLongitude()),
+                    distanceSquared(right, context.getDeviceLatitude(), context.getDeviceLongitude()));
+        });
+    }
+
+    /** Type metadata boosts likely matches but never removes a name-matching candidate. */
+    private int typeRelevance(ResolvedLocationCandidate candidate, String entityTypeHint) {
+        if (!"UNIVERSITY".equalsIgnoreCase(entityTypeHint)) return 0;
+        String type = candidate.getPoiType() == null ? "" : candidate.getPoiType();
+        String code = candidate.getPoiTypeCode() == null ? "" : candidate.getPoiTypeCode();
+        if (code.startsWith("141201") || code.startsWith("141202") || type.contains("大学") || type.contains("学院")) return 2;
+        if (code.startsWith("1412") || type.contains("学校") || type.contains("校园")) return 1;
+        return 0;
     }
 
     private String campusLabel(JsonNode poi) {

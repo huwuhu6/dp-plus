@@ -60,12 +60,6 @@ public class AmapMcpLocationResolutionService implements LocationResolutionProvi
                         new LocationResolutionRequest(placeText.trim(), request == null ? null : request.getContext(),
                                 request == null ? null : request.getEntityTypeHint()));
                 if (!poiCandidates.isEmpty()) return poiCandidates;
-                // A high-confidence entity hint must not fall through to the generic
-                // geocoder, which can return nearby merchants instead of the requested
-                // institution. Keep the ambiguity unresolved rather than downgrading
-                // the entity contract.
-                if (request != null && hasText(request.getEntityTypeHint())
-                        && !"UNKNOWN".equalsIgnoreCase(request.getEntityTypeHint())) return Collections.emptyList();
             }
             if (!enabled || mcpClients.isEmpty()) return Collections.emptyList();
             Map<String, Object> arguments = new LinkedHashMap<>();
