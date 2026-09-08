@@ -2358,3 +2358,5 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 高德 POI Search 结果只是候选召回，不能直接视为 canonical entity。本轮在不改变 Task/Working Memory 主模型的前提下，为候选保留 `poiType/typecode`，并增加 request-scoped `entityTypeHint`；类型和名称相关度只作为排序信号，不再用“大学/学校/医院”等手写词表硬过滤，也不因类型提示无结果而禁止通用地理 fallback，避免“福建师范大学附属小学”这类完整名称被误杀。不维护“师大→某所大学”等名称别名。澄清文本优先匹配 pending candidate 的唯一 canonicalName/campus，再以当前明确的新 POI 作为 query override，避免旧 `targetArea=师大` 覆盖“我说的是福建师范大学”；按钮确认和自然语言确认最终仍汇入同一 canonical location contract。
 
 定向单测覆盖 provider 类型元数据、弱排序、完整附属小学名称不被过滤、通用 fallback、澄清文本提取和 query override。本轮未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
+随后校正候选排序优先级：名称精确/相关度优先于类型提示，类型仅作为辅助排序，最后才使用设备距离；因此完整的“福建师范大学附属小学”不会被误标的 UNIVERSITY hint 挤到后面。

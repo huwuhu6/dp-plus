@@ -152,11 +152,11 @@ public class AmapPoiSearchProvider {
     private void rankCandidates(List<ResolvedLocationCandidate> candidates, String query,
                                 String entityTypeHint, LocationResolutionContext context) {
         candidates.sort((left, right) -> {
-            int type = Integer.compare(typeRelevance(right, entityTypeHint), typeRelevance(left, entityTypeHint));
-            if (type != 0) return type;
             int name = Integer.compare(nameRelevance(right.getCanonicalName(), query),
                     nameRelevance(left.getCanonicalName(), query));
             if (name != 0) return name;
+            int type = Integer.compare(typeRelevance(right, entityTypeHint), typeRelevance(left, entityTypeHint));
+            if (type != 0) return type;
             if (context == null || context.getDeviceLatitude() == null || context.getDeviceLongitude() == null) return 0;
             return Double.compare(distanceSquared(left, context.getDeviceLatitude(), context.getDeviceLongitude()),
                     distanceSquared(right, context.getDeviceLatitude(), context.getDeviceLongitude()));

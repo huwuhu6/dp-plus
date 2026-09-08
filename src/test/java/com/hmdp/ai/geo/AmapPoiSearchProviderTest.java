@@ -79,6 +79,25 @@ class AmapPoiSearchProviderTest {
     }
 
     @Test
+    void exactNameRanksAheadOfTypeOnlyMatch() throws Exception {
+        HttpClient client = mock(HttpClient.class);
+        HttpResponse response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn("{\"status\":\"1\",\"pois\":["
+                + "{\"id\":\"university\",\"name\":\"福建师范大学\",\"type\":\"教育学校\",\"typecode\":\"141201\",\"location\":\"119.20,26.00\"},"
+                + "{\"id\":\"primary-school\",\"name\":\"福建师范大学附属小学\",\"type\":\"教育学校\",\"typecode\":\"141204\",\"location\":\"119.21,26.01\"}]}" );
+        doReturn(response).when(client).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        AmapPoiSearchProvider provider = new AmapPoiSearchProvider(client, new ObjectMapper());
+        ReflectionTestUtils.setField(provider, "enabled", true);
+        ReflectionTestUtils.setField(provider, "apiKey", "test-key");
+
+        List<ResolvedLocationCandidate> result = provider.resolve(
+                new LocationResolutionRequest("福建师范大学附属小学", null, "UNIVERSITY"));
+
+        assertEquals("primary-school", result.get(0).getPoiId());
+    }
+
+    @Test
     void usesActiveCityAndDeviceOnlyAsRankingPrior() throws Exception {
         HttpClient client = mock(HttpClient.class);
         HttpResponse response = mock(HttpResponse.class);
