@@ -291,3 +291,120 @@ Final 文本错但前面都对
 - 不能说 Holdout 能证明“泛化能力已经充分解决”，它只是降低已知 Dataset 过拟合风险；
 - 不能说 deterministic grader 能评所有开放生成质量；开放文本仍需要人工或模型评审补充；
 - 评测集规模仍有限，当前价值主要在回归、定位和工程约束，不是学术 benchmark。
+
+---
+
+## 14. 开发记录里最值得讲的一次评测系统升级：从“最终断言”变成“按轮状态断言”
+
+早期 Conversation Evaluation 已经能检查最终 Route、最终 Working Memory、Tool 聚合和推荐去重，但对“哪一轮开始错”仍然不够敏感。后来 JSONL Case 增加：
+
+```text
+expectedTurnStates
+expectedToolsByTurn
+expectedRelations
+```
+
+每轮请求结束后只读采集 Working Memory projection、version、candidatePool、focusedShop、sourceTask、response recommendations 和本轮 Tool Call，再做结构化断言。
+
+第一阶段支持的状态断言包括：
+
+```text
+equals / null / absent / empty / contains / size
+```
+
+跨轮关系则可以检查：
+
+```text
+candidate pool 是否失效/保留
+recommendation 是否不重叠
+focused shop 是否变化/保留
+task 是否相同/变化
+```
+
+这让 Diagnostics 不再只说“Case 失败”，而是能给出失败 turn、JSON path、operator、expected 和 actual。
+
+### 面试官问：为什么这比最终 WM 断言更重要？
+
+因为最终状态正确也可能是中间错过又被后续轮次碰巧修回来。Trajectory Evaluation 要检查状态演进过程，而不只是终点。
+
+---
+
+## 15. 为什么从 MySQL Case 迁到 Git 版本化 JSONL？开发记录里的真实原因
+
+旧评测用例通过 V23～V51 多个 Migration 持续 INSERT/UPDATE，主要问题不是“SQL 难写”，而是 Dataset 本身无法很好参与软件工程流程：
+
+```text
+变更不易 Code Review
+不同环境数据库可能漂移
+分支难以绑定同一 Ground Truth
+新增 Case 需要再写 Migration
+```
+
+迁移后 `ConversationEvaluationDatasetLoader` 优先读取：
+
+```text
+src/main/resources/eval/datasets/{datasetVersion}.jsonl
+```
+
+文件不存在时仍 fallback MySQL，避免一次性破坏旧环境。最初迁移了 conversation-v1 40 条，后续补齐 holdout 16 条和 robustness 数据集。
+
+这次迁移还真实踩过两个集成问题：混合数组 DTO 类型声明不匹配导致 Jackson 反序列化失败；JSONL 使用虚拟 ID 后，Diagnostics 仍按数据库 ID 查询导致 caseCode 对错用例。两个问题最终都通过让 Loader 成为 Dataset authority 收口。
+
+这类细节很适合回答“你这套评测是不是只写了几个脚本”。
+
+---
+
+## 16. Robustness Case 是怎么从真实 Bug 长出来的？
+
+开发记录里有一组很典型的深水 Case：
+
+```text
+CASE_ROBUST_GHOST_INHERITANCE_BUDGET
+→ 多次跨类目/区域/预算切换后，检查旧预算是否泄漏
+
+CASE_ROBUST_COMPOUND_ORDINAL_CRITERIA
+→ 同一 Turn 同时“第一家太贵” + “第二家有插座吗”
+→ 检查 mutation 与 reference 是否互相破坏
+
+CASE_ROBUST_LOCATION_REFUSAL_ESCAPE
+→ CLARIFYING 后用户自然语言拒绝定位并要求全城
+→ 检查能否正确逃离澄清态
+```
+
+它们第一次进入 robustness 时并没有全部通过，Run82 的 9 条里 Route 7/9、Final Status 5/9。这个数据反而有价值：Dataset 是先作为回归锚点记录真实缺陷，再推动生产 invariant 修复，而不是先把代码写到绿色才补“漂亮测试”。
+
+### 面试官问：为什么把失败 Case 留在数据集里？
+
+因为评测集的职责之一就是持久化系统已知边界。删除红 Case 会让后续回归失去锚点，也容易制造虚假的高通过率。
+
+---
+
+## 17. 面试官如果问最终数字，应该怎么回答
+
+不要只报 Complete。当前归档阶段应该先说明：
+
+```text
+Complete = 多个 trajectory contract 的 AND
+```
+
+再按子指标讲 Route / Tool / Final / Locality，并说明 Holdout 是防 case chasing 的阶段验证，不是“证明系统已经泛化”。
+
+如果被继续追问具体 Run，可以引用当前归档资料中的 Run144 / Run145 / Run146；但面试重点应该放在两件事：
+
+1. 修改后 Robustness 是否出现系统性改善或退化；
+2. Holdout 是否保持不退化。
+
+不要把低 Complete 隐藏，也不要把它解释成“系统准确率只有这么多”。
+
+---
+
+## 18. 这条线真正应该背熟的四个问题
+
+```text
+1. 为什么最终回答正确还不够？
+2. Ground Truth 怎么避免绑定模型偶然输出？
+3. 失败以后如何定位到具体责任层和具体 Turn？
+4. 怎么防止为了 Dataset 一直堆局部规则？
+```
+
+如果这四个问题能讲清，JSONL、Diagnostics、Run 号、具体断言 operator 都只是追问细节，不需要一开始死记。

@@ -299,3 +299,47 @@ stale-result guard
 - 不能说所有状态问题都被消灭，Context Rewrite、复杂 compound semantics 等仍有边界；
 - 不要把 Working Memory 讲成完整 Event Sourcing；当前主要是 versioned full snapshot；
 - 不要把 Location 说成完全通用 NER/POI disambiguation 系统；当前仍依赖 Provider、名称相关度和业务规则。
+
+---
+
+## 13. 开发记录里最值得拿来证明“这条线不是设计出来背的”三次事故
+
+### 事故一：命名目的地和设备位置混在一起
+
+真实会话里，用户先明确搜北京，后面说“看看我附近有什么好吃的”。早期只把 `nearby=true` 当新增条件，旧 `targetCity=北京` 和 `searchLocation.city=北京` 仍保留，导致系统实际上没有完成 Scope Switch。
+
+后来不是补一个“北京”特判，而是给地点增加 `locationIntent`，把 `EXPLICIT_TARGET`、`CURRENT_DEVICE`、`UNSPECIFIED` 建模成互斥状态；切到 CURRENT_DEVICE 时确定性清理旧 targetCity/targetArea/searchLocation，缺 GPS 才进入 CLARIFYING。这个改动当时配套全量回归达到 91 个测试、0 failure、0 error、3 skipped。
+
+面试官如果问“Working Memory 为什么不只是几个字段”，就用这个 Case：真正困难的是字段之间存在 scope / invalidation semantics，而不是把文本转成 JSON。
+
+### 事故二：零结果后的“我附近呢”被当成闲聊
+
+当候选池为空时，旧 Context Rewrite 因 `NO_WORKING_MEMORY_CANDIDATES` 直接跳过；用户在零结果后说“我附近呢”，路由模型就可能误判为 GENERAL_CHAT。后来把当前位置 continuation 提升成确定性状态转换：即使候选池为空，只要已有消费决策上下文，“我附近/当前位置”也能进入 CURRENT_DEVICE continuation，而不是依赖候选商户做 reference rewrite。
+
+这次回归后全量测试达到 93 个用例、0 failure、0 error、3 skipped。它说明 Context Rewrite 不是简单“补全一句话”，它必须受当前业务状态约束。
+
+### 事故三：历史推荐为什么不能靠当前状态重新解释
+
+后续增加决策上下文查询时，“为什么推荐第一家”没有重新执行推荐，也没有让 LLM 根据当前 criteria 重猜。Grounding 链固定为：
+
+```text
+ReferenceIntent
+→ ResolvedShopReference
+→ RecommendationBatch.decisionSessionId
+→ AiDecisionSession.resultJson
+→ 当时的 Recommendation.matchedReasons / evidence
+```
+
+这样用户后来修改预算，也不会拿新预算去解释旧推荐，避免 Temporal Leakage。RecommendationBatch 继续只保存历史 identity / pointer，不复制完整 evidence 到版本化 WM。
+
+---
+
+## 14. 面试官如果质疑：这些是不是你后来为了写资料才总结出来的？
+
+可以直接说开发顺序不是“一开始就设计好 Working Memory 全家桶”。开发记录能看到它是逐步被 Bad Case 推出来的：先有 location scope 泄漏、零结果恢复、candidate/history 语义问题，再逐渐形成 `locationIntent`、Task、RecommendationBatch、same-turn snapshot、OCC 等约束。
+
+回答时不要把自己包装成一开始就知道最终架构，更可信的说法是：
+
+> 第一版主要靠 Chat History 和当前上下文，能跑简单流程；后来 robustness Case 和真实聊天不断暴露状态串扰。我每次先定位哪个 authority/representation 出问题，再把修复提升成状态不变量，最后加 targeted/full regression 防回归。
+
+这比“我设计了一个先进的 Working Memory 架构”更像真实工程经历。

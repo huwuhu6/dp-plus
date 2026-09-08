@@ -240,3 +240,65 @@ Milvus 失败
 - 不能说项目是典型 PDF Chunk RAG；它更接近商户 Profile / Review 的结构化约束 + 语义检索 + grounded generation；
 - 不能说当前已经实现 nDCG、Cross-Encoder rerank、完整 LLM Judge Faithfulness 等行业常见能力；
 - 语义召回仍存在一部分未完全归因的失败，需要继续区分 embedding 能力、TopK 截断和 candidate universe 限制。
+
+---
+
+## 13. 开发记录里真正能拿出来的检索实验结论
+
+开发记录里做过 Semantic Scoring Ablation，不只是“跑通 Milvus”。其中一个比较重要的结论是：启用 semantic scoring 的方向有收益，但仍有 7/112 个 Ground Truth 属于 `SEMANTIC_RETRIEVAL_ERROR`，约 6%，而且在 Base / Semantic / Semantic 2x 三组里这 7 个都没有消失。
+
+这意味着失败不能简单归因成“权重太小”。更可能需要继续区分：
+
+```text
+Embedding 本身表达能力不足
+TopK 截断
+Milvus candidate restriction
+前置 hard candidate universe 已经丢失正确商户
+```
+
+当前已有实验口径里可引用 Recall@3 约 0.76、Hard Constraint Violation 为 0；这能说明系统没有为了提高语义召回放弃业务合法性，但也不能说 retrieval 已经接近完美。
+
+### 面试官问：那为什么不继续把这 6% 修掉？
+
+回答重点：先做 error decomposition。7 个 GT 在加倍 semantic weight 后仍不变，说明继续调权重很可能没有收益；应该先确认正确向量是否进入 TopK、候选是否在前置 hard filter 阶段就被排除，再决定改 embedding、TopK 还是 candidate generation。
+
+---
+
+## 14. Vector Sync 被追深时，要能说到“旧 Worker 不能覆盖新状态”
+
+不要只背“异步最终一致”。当前代码里 `VectorSyncTaskService` 有明确的 lease / status；集成测试还覆盖了一个关键竞争场景：旧 worker 持有旧 lease 和 revision 时，`markSynced` 不能错误把更新后的任务标成已同步，而是通过 requeue 保留 newer desired state。
+
+可以把它讲成：
+
+```text
+revision=10 的 UPSERT 被 worker A claim
+↓
+期间业务又产生更新 / DELETE
+↓
+任务 desired state 已变化
+↓
+A 完成旧工作时不能把新状态覆盖成 SYNCED
+↓
+按 operation + targetRevision + lease token 做条件更新
+```
+
+所以这里真正解决的不是“定时任务重试”，而是异步外部索引同步中的 stale worker 问题。
+
+### 面试官可能反驳
+
+> 那为什么不用 MQ？
+
+当前选择 durable task table 的优势是 desired state、revision、lease、retry 都可直接落库和审计，项目规模下实现成本更低；MQ 更适合更高吞吐、跨服务事件分发，但仍需要消费幂等、失败重试和最终状态收敛，不能自动消除一致性问题。
+
+---
+
+## 15. 这条线建议你真正背熟的不是参数，而是四个判断
+
+```text
+1. 哪些条件必须 hard filter，为什么；
+2. 为什么 vector score 不能直接作为最终排序；
+3. 检索失败怎么分层归因；
+4. 数据更新后怎么保证 MySQL 与 Milvus 最终收敛。
+```
+
+0.35、80、18 只是追问时的实现细节。真正能让你扛住面试的是你能解释这些参数为什么不能替代业务 Contract，以及实验为什么只能证明“方向有效”而不能证明“全局最优”。
