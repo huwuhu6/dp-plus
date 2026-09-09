@@ -185,7 +185,11 @@ public class OpenAiCompatibleClient {
     }
 
     private String observationPurpose(String action) {
-        return "CHAT_ROUTING".equals(action) ? "ROUTING" : "OTHER";
+        if ("REWRITE".equals(action)) return "REWRITE";
+        if ("CHAT_ROUTING".equals(action)) return "ROUTING";
+        if ("CONSTRAINT_EXTRACTION".equals(action)) return "EXTRACTION";
+        if ("STRUCTURED_UNDERSTANDING".equals(action)) return "STRUCTURED_UNDERSTANDING";
+        return "OTHER";
     }
 
     private RestTemplate restTemplate(Integer requestedTimeoutMs) {

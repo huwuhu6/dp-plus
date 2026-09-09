@@ -19,6 +19,7 @@ public class AiProperties {
     private RoutingProperties routing = new RoutingProperties();
     private LightweightProperties lightweight = new LightweightProperties();
     private QueryRewriteProperties queryRewrite = new QueryRewriteProperties();
+    private StructuredUnderstandingProperties structuredUnderstanding = new StructuredUnderstandingProperties();
     private ProfileRebuildProperties profileRebuild = new ProfileRebuildProperties();
     private VectorSyncProperties vectorSync = new VectorSyncProperties();
     private String retrievalStrategyVersion = "structured-profile-evidence-v2";
@@ -56,6 +57,25 @@ public class AiProperties {
 
         public boolean isConfigured() {
             return Boolean.TRUE.equals(enabled) && apiKey != null && !apiKey.trim().isEmpty();
+        }
+    }
+
+    @Data
+    public static class StructuredUnderstandingProperties {
+        /** off keeps the legacy semantic pipeline authoritative; shadow is observational only. */
+        private String mode = "off";
+        private Integer timeoutMs = 20000;
+
+        public boolean isShadow() {
+            return "shadow".equalsIgnoreCase(mode);
+        }
+
+        public boolean isActive() {
+            return "active".equalsIgnoreCase(mode);
+        }
+
+        public boolean isEnabled() {
+            return isShadow() || isActive();
         }
     }
 

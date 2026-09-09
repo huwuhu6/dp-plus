@@ -9,6 +9,8 @@ import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionRequest;
 import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionContextQuery;
+import com.hmdp.ai.dto.TurnSemanticIR;
+import com.hmdp.ai.dto.StructuredUnderstandingResult;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.dto.TurnPlan;
 import com.hmdp.ai.dto.TurnCommandSet;
@@ -54,6 +56,8 @@ public class ChatProcessingContext {
     private CriteriaMergeResult criteriaMergeResult;
     private PolicyDecision policyDecision;
     private DecisionContextQuery decisionContextQuery;
+    private TurnSemanticIR structuredUnderstanding;
+    private StructuredUnderstandingResult structuredUnderstandingResult;
     private RoutingDecisionAssessment routingAssessment;
     private ChatMessageResponse response;
 

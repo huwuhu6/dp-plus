@@ -103,6 +103,9 @@ ai:
     api-key: ${DASHSCOPE_API_KEY:}
     model: ${AI_QUERY_REWRITE_MODEL:qwen-flash}
     timeout-ms: ${AI_QUERY_REWRITE_TIMEOUT_MS:8000}
+  structured-understanding:
+    mode: ${AI_STRUCTURED_UNDERSTANDING_MODE:off}
+    timeout-ms: ${AI_STRUCTURED_UNDERSTANDING_TIMEOUT_MS:20000}
   narrative-enabled: ${AI_NARRATIVE_ENABLED:true}
   profile-rebuild:
     enabled: ${AI_PROFILE_REBUILD_ENABLED:false}

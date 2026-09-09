@@ -2360,3 +2360,19 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 定向单测覆盖 provider 类型元数据、弱排序、完整附属小学名称不被过滤、通用 fallback、澄清文本提取和 query override。本轮未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
 
 随后校正候选排序优先级：名称精确/相关度优先于类型提示，类型仅作为辅助排序，最后才使用设备距离；因此完整的“福建师范大学附属小学”不会被误标的 UNIVERSITY hint 挤到后面。
+
+### Structured Understanding 最小可证伪实验（2026-09-09）
+
+本轮在最新 `main` 基线之上创建独立实验分支 `feat/structured-understanding-experiment`，不直接修改 `main`。目标是验证：同一轮的 Context Rewrite、Routing、Constraint Extraction 是否可以由一次 request-scoped Structured Understanding 调用统一抽取语言事实，同时保持 Java 对业务真相的所有权。模型只输出 `TurnSemanticIR v1`（acts、references、raw criteria delta、location expression、只读查询和 evidence），不输出 shop/session identity，也不直接决定 `ChatProcessingAction`、Task、Working Memory、Policy 或 Tool。
+
+新增 `StructuredUnderstandingService` 使用一次 tool call `extract_turn_semantic_ir`；evidence 由 Java 严格校验原文 span，非法 Schema、未知实体字段或模型超时均 fail-closed，沿用 legacy pipeline，禁止第二次 semantic repair。`off` 完全不调用模型；`shadow` 只记录 IR/validation/latency/token，legacy 仍为唯一执行 authority；`active` 仅在无引用、无地点、无查询、无歧义且 Java adapter 能完整表达的窄安全子集启用，其他输入回退 legacy。没有修改 Merger、ConversationStateService、PolicyGuard、Retrieval、Tool 或持久化 Working Memory。
+
+模型调用 purpose 统一记录为 `REWRITE`、`ROUTING`、`EXTRACTION`、`STRUCTURED_UNDERSTANDING`，最终回答模型仍归入 `OTHER`。`AiConversationEvaluationService` 逐轮输出结构化 IR、校验状态、fallback 和错误，便于对 compound turn、relative constraint、location、reference、context query 等 disagreement 做人工核对；没有新增数据库 Schema。
+
+实验 off 基线（同一实验分支、业务行为保持 legacy）为：Run147 robustness 48 条 Complete 21、Route 44、Tool 47、Final 39、Locality 48；Run148 conversation-v1 40 条 Complete 27、Route 36、Tool 31、Final 40、Locality 40；Run149 holdout 16 条 Complete 7、Route 13、Tool 14、Final 12、Locality 16。off 基线逐轮 semantic call 分布已按 `(rewrite,routing,extraction)` 记录，后续与 shadow/active 的 `structured-understanding` 调用、token、latency 和 fail-closed 比较，不将最终回答或 Tool Planner 计入 semantic latency。
+
+影子实验真实 smoke 中，“找福州火锅”成功得到有效 IR（REQUEST_RECOMMENDATION、CUISINE SET、地点表达和逐字 evidence），业务仍按 legacy 执行；复合句在上游模型超时或返回不可解析结构时安全回退，没有第二次修复调用。空的可选 `locationExpression`/`decisionContextQuery` 对象在 Java 侧归一化为未提供；有内容但缺少枚举类型仍然 invalid，继续 fail-closed。
+
+影子完整评测结果：Run150 robustness 48 条 Complete 21、Route 44、Tool 47、Final 38、Locality 48；Run151 conversation-v1 40 条 Complete 29、Route 38、Tool 33、Final 40、Locality 40；Run152 holdout-v1 16 条 Complete 7、Route 13、Tool 14、Final 12、Locality 16。与同分支 off 基线 Run147/148/149 相比，robustness 的 Complete/Route/Tool/Locality 相同、Final 少 1 条；conversation-v1 的 Complete/Route/Tool 分别提升 2、2、2，Final/Locality 不变；holdout 全部指标相同。该结果只能说明 shadow 旁路没有造成结构性业务回归，不能把 shadow IR 本身视为业务提分来源；robustness 单条 Final 差异归为外部模型/执行波动候选。
+
+active smoke 验证了 `推荐火锅` 的结构化结果可被读取并继续执行既有 `START_DECISION → CLARIFY_LOCATION` 业务链；地点、引用、查询和模型输出带歧义的 Turn 会因 Adapter 安全门回到 legacy。模型经常填充未使用的 `CURRENT_CRITERIA` 空查询对象，已按“有内容才视为查询”的规则保持保守，不把这类不确定输出直接写入业务状态。当前 active 只启用无引用、无地点、无查询、无歧义且 delta 操作可完整映射的窄子集，未进行 active 全量 A/B，不把 active 结果扩展为最终评测结论。最终 `mvn -q test`：409 tests，0 failures，0 errors，3 skipped。
