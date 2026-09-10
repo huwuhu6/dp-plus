@@ -12,5 +12,7 @@
 | 152 | conversation-holdout-v1 | shadow | 16 | 7 | 13 | 14 | 12 | 16 | 16/16 |
 | 153 | conversation-v1 | shadow | 40 | 28 | 37 | 32 | 40 | 40 | 40/40 |
 | 154 | conversation-robustness-v1 | shadow | 48 | 21 | 44 | 47 | 39 | 48 | 48/48 |
+| 155 | conversation-v1 | shadow | 40 | 28 | 37 | 32 | 40 | 40 | 40/40 |
+| 156 | conversation-robustness-v1 | shadow | 48 | 21 | 44 | 47 | 38 | 48 | 48/48 |
 
 Unavailable fields are explicitly marked in each JSON snapshot; no value is inferred from a missing API/DB field.

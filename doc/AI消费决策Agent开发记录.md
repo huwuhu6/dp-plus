@@ -2442,3 +2442,13 @@ V2 的单次 tool schema 只允许 `REQUEST_RECOMMENDATION`、`MUTATE_CRITERIA`�
 证据协议改为模型只提供逐字 `evidenceText`，`EvidenceGrounder` 使用 Java `String.indexOf` 生成权威 span：唯一命中为 `RESOLVED`，重复为 `AMBIGUOUS`，缺失/未命中分别为 `MISSING`/`NOT_FOUND`；模型不能提交 start/end，也不能提交实体 ID。raw location 只作为语言事实保留，行政解析和实体身份仍由 Java authority 负责，当前 active 对 location expression 保守回退。
 
 本轮定向测试：`StructuredUnderstandingServiceTest` 9、`StructuredUnderstandingAdapterTest` 7、`StructuredUnderstandingInvocationTest` 6、`RoutingFusionV2ServiceTest` 5、`RoutingFusionV2InvocationTest` 3、`EvidenceGrounderTest` 3，共 33 tests，0 failures、0 errors、0 skipped。验证覆盖 deterministic Turn 不调用 V2、ROUTING_ESCALATION 单次调用与 memoization、同一结果复用 criteria、unsafe/malformed IR fallback、raw location 保留、Evidence grounding 及禁止 identity/query/offset 字段。本轮未运行 Shadow/Active 或任何 conversation/holdout/robustness 评测，也未调用真实 LLM；因此不对成本、延迟或业务正确率作结论，后续若继续实验必须重新进行 paired Shadow 验证。
+
+### Structured Understanding V2 Shadow 复测与归档（2026-09-10）
+
+在同一实验分支、同一 `99dd6ca` 代码基线（评测归档写入前后工作树为 dirty）完成了最后一轮 paired Shadow 验证。先执行全量 `mvn -q test`：**436 tests，0 failures，0 errors，3 skipped**；随后只按顺序运行一次 Run155 `conversation-v1`（40 Case）和 Run156 `conversation-robustness-v1`（48 Case），没有运行 Active 或 holdout。两个 Run 均通过 `tools/archive_conversation_eval.py` 立即保存为逐轮 JSON 快照，原始结果不再依赖数据库。
+
+Run155：28/40 Complete、Route 37/40、Tool 32/40、Final 40/40、Locality 40/40；78 Turn 中 V2 invoked 7（9.0%），全部 valid，criteriaReusable 4，离线 Active eligibility 3。Run156：21/48 Complete、Route 44/48、Tool 47/48、Final 38/48、Locality 48/48；99 Turn 中 V2 invoked 16（16.2%），10 valid、6 fallback/invalid，criteriaReusable 5，离线 Active eligibility 1。两次均没有 `CONSTRAINT_EXTRACTION` 触发违规、extraction-only Turn 误调用 V2 或同 Turn 多次 V2；没有 start/end evidence 字段污染。
+
+新增纯离线分析 `tools/analyze_routing_fusion_v2_shadow.py` 及 `routing_fusion_v2_shadow_155_156.json/.md`。报告把 Legacy shape 精确拆为 `NONE/ROUTING/EXTRACTION/ROUTING+EXTRACTION`，保留所有 V2 IR、validation/fallback、stage 和 model-call 细节，并用离线字符串出现次数诊断 evidence（生产 authority 仍是 Java `EvidenceGrounder`）。Run155 的 V2 valid rate 为 100%，Run156 为 62.5%；Run156 的主要 fallback 是 `criteriaDelta[*].field` schema/enum 与 location evidence grounding。ROUTING-only paired latency 分别为 legacy 741/605ms、V2 1041/1170ms；ROUTING+EXTRACTION 的 Legacy 是两次调用合计，分别为 8639/9429ms，V2 单次为 1185/1469ms。这个成本对比不能掩盖 robustness valid rate 未达 80%，且 Routing-only 延迟变差。
+
+与同分支历史 Shadow Run153/154 的聚合结果没有结构性变化（Run155 与 Run153 完全一致；Run156 与 Run154 仅 Final 少 1，属于运行波动观察），与 off Run148/147 也没有新增可归因于 Shadow 的业务回归。基于 `CONSTRAINT_EXTRACTION` 触发为零、单次调用契约成立，但 robustness valid rate 62.5% 和 Routing-only latency 变差，本轮决策为 **`STOP_ROUTING_FUSION`**：不进入 Active，不继续修改业务实现，不重跑评测。后续若重启实验，应先处理 V2 schema/evidence 稳定性和调用成本，再重新做 paired Shadow。
