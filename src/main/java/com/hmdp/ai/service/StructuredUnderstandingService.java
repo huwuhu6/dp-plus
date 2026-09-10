@@ -15,6 +15,12 @@ import com.hmdp.ai.dto.ShopFactQueryType;
 import com.hmdp.ai.dto.ShopFactSemanticQuery;
 import com.hmdp.ai.dto.StructuredUnderstandingResult;
 import com.hmdp.ai.dto.TurnSemanticIR;
+import com.hmdp.ai.dto.ResolvedEvidence;
+import com.hmdp.ai.dto.RoutingCriteriaDeltaV2;
+import com.hmdp.ai.dto.RoutingFusionV2Result;
+import com.hmdp.ai.dto.RoutingLocationExpressionV2;
+import com.hmdp.ai.dto.RoutingSemanticActV2;
+import com.hmdp.ai.dto.RoutingSemanticIRV2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -40,6 +46,7 @@ public class StructuredUnderstandingService {
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private ObjectMapper objectMapper;
     @Resource private AiProperties aiProperties;
+    @Resource private EvidenceGrounder evidenceGrounder;
 
     public StructuredUnderstandingResult understand(String originalMessage,
                                                     List<Map<String, Object>> history,
@@ -102,6 +109,122 @@ public class StructuredUnderstandingService {
                     e.getClass().getSimpleName(), compact(e.getMessage()));
             return StructuredUnderstandingResult.fallback(e.getClass().getSimpleName(), duration);
         }
+    }
+
+    /**
+     * V2 runtime entry point. It is called only for ROUTING_ESCALATION and uses
+     * the existing lightweight routing provider. The legacy understand() method
+     * remains only for archived V1 compatibility and is not a pipeline authority.
+     */
+    public RoutingFusionV2Result understandRoutingFusion(String originalMessage,
+                                                          List<Map<String, Object>> history,
+                                                          Map<String, Object> readOnlyContext) {
+        AiProperties.StructuredUnderstandingProperties properties = aiProperties == null
+                ? null : aiProperties.getStructuredUnderstanding();
+        if (properties == null || !properties.isEnabled()) return RoutingFusionV2Result.disabled();
+        long started = System.currentTimeMillis();
+        try {
+            List<Map<String, Object>> messages = new ArrayList<>();
+            messages.add(message("system", routingFusionPrompt()));
+            if (readOnlyContext != null && !readOnlyContext.isEmpty()) {
+                messages.add(message("system", "只读上下文（不得输出行政 canonical identity 或实体 id）："
+                        + objectMapper.writeValueAsString(readOnlyContext)));
+            }
+            if (history != null && !history.isEmpty()) messages.add(message("system", "最近对话：" + compactHistory(history)));
+            messages.add(message("user", originalMessage == null ? "" : originalMessage));
+            Map<String, Object> function = new LinkedHashMap<>();
+            function.put("name", "extract_routing_fusion_v2");
+            function.put("description", "Extract only compact routing and possible criteria language facts.");
+            function.put("parameters", routingFusionSchema());
+            Map<String, Object> tool = new LinkedHashMap<>();
+            tool.put("type", "function");
+            tool.put("function", function);
+            Map<String, Object> toolChoice = new LinkedHashMap<>();
+            toolChoice.put("type", "function");
+            toolChoice.put("function", Collections.singletonMap("name", "extract_routing_fusion_v2"));
+            // V2 deliberately reuses the routing provider and its latency budget;
+            // the legacy structured-understanding timeout is not a second provider contract.
+            JsonNode response = aiClient.chatRoutingFusionCompletion(messages, Collections.singletonList(tool), toolChoice,
+                    null);
+            String arguments = response.path("choices").path(0).path("message").path("tool_calls")
+                    .path(0).path("function").path("arguments").asText("");
+            if (arguments.trim().isEmpty()) throw new IllegalStateException("routing fusion v2 tool arguments missing");
+            JsonNode argumentNode = objectMapper.readTree(arguments);
+            rejectForbiddenRoutingFields(argumentNode);
+            RoutingSemanticIRV2 ir = objectMapper.readerFor(RoutingSemanticIRV2.class)
+                    .with(DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
+                    .without(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .readValue(argumentNode.traverse(objectMapper));
+            if (!argumentNode.hasNonNull("version")) ir.setVersion(null);
+            List<String> errors = validateRoutingFusion(ir, originalMessage == null ? "" : originalMessage);
+            RoutingFusionV2Result result = new RoutingFusionV2Result();
+            result.setIr(ir);
+            result.setValid(errors.isEmpty());
+            result.setFallback(!errors.isEmpty());
+            result.setFailureReason(errors.isEmpty() ? null : "INVALID_EVIDENCE_OR_SCHEMA");
+            result.setValidationErrors(errors);
+            result.setCriteriaReusable(errors.isEmpty() && hasReusableRoutingActs(ir));
+            result.setDurationMs(System.currentTimeMillis() - started);
+            log.info("[AI][structured-v2] event={} valid={} durationMs={} acts={} deltas={} errors={}",
+                    errors.isEmpty() ? "SUCCESS" : "INVALID", result.isValid(), result.getDurationMs(),
+                    sizeOf(ir.getActs()), sizeOf(ir.getCriteriaDelta()), errors.size());
+            return result;
+        } catch (Exception e) {
+            long duration = System.currentTimeMillis() - started;
+            log.warn("[AI][structured-v2] event=FALLBACK durationMs={} errorType={} detail={}", duration,
+                    e.getClass().getSimpleName(), compact(e.getMessage()));
+            return RoutingFusionV2Result.fallback(e.getClass().getSimpleName(), duration);
+        }
+    }
+
+    private List<String> validateRoutingFusion(RoutingSemanticIRV2 ir, String original) {
+        List<String> errors = new ArrayList<>();
+        if (ir == null) {
+            errors.add("ir=null");
+            return errors;
+        }
+        if (!"v2".equals(ir.getVersion())) errors.add("version");
+        if (ir.getActs() == null || ir.getActs().isEmpty()) errors.add("acts");
+        else for (int i = 0; i < ir.getActs().size(); i++) {
+            RoutingSemanticActV2 act = ir.getActs().get(i);
+            if (act == null || act.getType() == null) errors.add("acts[" + i + "].type");
+            if (act == null || ground(act.getEvidenceText(), original).getStatus() != ResolvedEvidence.Status.RESOLVED) {
+                errors.add("acts[" + i + "].evidenceText");
+            }
+        }
+        if (ir.getCriteriaDelta() == null) errors.add("criteriaDelta");
+        else for (int i = 0; i < ir.getCriteriaDelta().size(); i++) {
+            RoutingCriteriaDeltaV2 delta = ir.getCriteriaDelta().get(i);
+            if (delta == null || delta.getField() == null) errors.add("criteriaDelta[" + i + "].field");
+            if (delta == null || delta.getOperation() == null) errors.add("criteriaDelta[" + i + "].operation");
+            if (delta == null || ground(delta.getEvidenceText(), original).getStatus() != ResolvedEvidence.Status.RESOLVED) {
+                errors.add("criteriaDelta[" + i + "].evidenceText");
+            }
+        }
+        RoutingLocationExpressionV2 location = ir.getLocationExpression();
+        if (location != null) {
+            if (location.getRawText() == null) errors.add("locationExpression.rawText");
+            if (location.getReset() == null) errors.add("locationExpression.reset");
+            if (location.getRawText() != null && !location.getRawText().isBlank()
+                    && ground(location.getEvidenceText(), original).getStatus() != ResolvedEvidence.Status.RESOLVED) {
+                errors.add("locationExpression.evidenceText");
+            }
+        }
+        if (ir.getAmbiguities() == null) errors.add("ambiguities");
+        return errors;
+    }
+
+    private boolean hasReusableRoutingActs(RoutingSemanticIRV2 ir) {
+        if (ir == null || ir.getActs() == null || ir.getActs().isEmpty()) return false;
+        for (RoutingSemanticActV2 act : ir.getActs()) {
+            if (act == null || act.getType() == null) return false;
+            if (act.getType() == RoutingSemanticActV2.Type.CHITCHAT_OR_UNKNOWN) return false;
+        }
+        return ir.getAmbiguities() == null || ir.getAmbiguities().isEmpty();
+    }
+
+    private ResolvedEvidence ground(String text, String original) {
+        return (evidenceGrounder == null ? new EvidenceGrounder() : evidenceGrounder).ground(original, text);
     }
 
     private List<String> validate(TurnSemanticIR ir, String original) {
@@ -210,11 +333,74 @@ public class StructuredUnderstandingService {
         } else if (node.isArray()) node.elements().forEachRemaining(this::rejectForbiddenIdentityFields);
     }
 
+    private void rejectForbiddenRoutingFields(JsonNode node) {
+        if (node == null) return;
+        if (node.isObject()) {
+            if (node.has("shopId") || node.has("candidateId") || node.has("decisionSessionId")
+                    || node.has("start") || node.has("end")
+                    || node.has("references") || node.has("shopFactQueries")
+                    || node.has("decisionContextQuery") || node.has("query")
+                    || node.has("shopFacts") || node.has("policy") || node.has("tools")
+                    || node.has("finalAction") || node.has("state")) {
+                throw new IllegalArgumentException("routing fusion v2 cannot contain identity or indexed evidence fields");
+            }
+            node.elements().forEachRemaining(this::rejectForbiddenRoutingFields);
+        } else if (node.isArray()) node.elements().forEachRemaining(this::rejectForbiddenRoutingFields);
+    }
+
     private String systemPrompt() {
         return "你是 Turn Semantic IR v1 抽取器。只抽取用户原话中的语言事实，不决定 Chat Action、Decision 状态、shopId、candidateId、sessionId 或最终行政身份。"
                 + "未提及的字段保持空。evidence 的 text/start/end 必须逐字来自用户原话。允许一个 Turn 同时包含多个 acts，例如‘第一家太贵了，第二家有插座吗’同时输出 MUTATE_CRITERIA 和 ASK_SHOP_FACT。"
                 + "LOCATION 只输出 locationExpression.rawText，不把地点写入 criteriaDelta；预算、距离、菜系、排除菜系、关键词、偏好和到店时间使用 criteriaDelta。"
                 + "所有 business truth 由 Java resolver、merger、policy 和 tool 层决定。";
+    }
+
+    private String routingFusionPrompt() {
+        return "你是 Routing Fusion IR v2 抽取器。只抽取当前用户这一轮的语言事实，供 Java 决定是否需要 START_DECISION。"
+                + "只允许输出 REQUEST_RECOMMENDATION、MUTATE_CRITERIA、EXPLORE_ALTERNATIVE、CHITCHAT_OR_UNKNOWN 四类 linguistic act。"
+                + "如果这句话可能开始推荐或修改条件，在同一次结果中输出必要 criteriaDelta 和原始 locationExpression。"
+                + "evidenceText 必须逐字来自用户原话；不要输出 start、end。不要输出 shopId、candidateId、decisionSessionId、行政 canonical identity、最终 ChatProcessingAction、Policy、Tool、reference、shopFact 或 query。"
+                + "地点只能输出用户原话中的 rawText，行政解析和实体身份由 Java authority 完成；未提及的字段保持空。";
+    }
+
+    /** Package-visible for V2 schema contract tests. */
+    Map<String, Object> routingFusionSchema() {
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("type", "object");
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("version", enumProperty("string", "Routing Fusion version", "v2"));
+        properties.put("acts", array("compact linguistic acts", routingActSchema()));
+        properties.put("criteriaDelta", array("raw criteria mutations", routingDeltaSchema()));
+        properties.put("locationExpression", routingLocationSchema());
+        properties.put("ambiguities", array("unresolved linguistic ambiguity", property("string", "ambiguity")));
+        root.put("properties", properties);
+        root.put("required", List.of("version", "acts", "criteriaDelta", "ambiguities"));
+        root.put("additionalProperties", false);
+        return root;
+    }
+
+    private Map<String, Object> routingActSchema() {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("type", enumProperty("string", "routing linguistic act", RoutingSemanticActV2.Type.values()));
+        properties.put("evidenceText", property("string", "verbatim source text"));
+        return object(properties, java.util.Set.of("type", "evidenceText"));
+    }
+
+    private Map<String, Object> routingDeltaSchema() {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("field", enumProperty("string", "criteria field", CriteriaDeltaOperation.Field.values()));
+        properties.put("operation", enumProperty("string", "criteria operation", CriteriaDeltaOperation.Operation.values()));
+        properties.put("rawValue", property("string", "raw semantic value"));
+        properties.put("evidenceText", property("string", "verbatim source text"));
+        return object(properties, java.util.Set.of("field", "operation", "evidenceText"));
+    }
+
+    private Map<String, Object> routingLocationSchema() {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("rawText", property("string", "raw location mention only"));
+        properties.put("reset", property("boolean", "whether location is reset"));
+        properties.put("evidenceText", property("string", "verbatim source text"));
+        return object(properties, java.util.Set.of("rawText", "reset", "evidenceText"));
     }
 
     /** Package-visible for schema-contract tests; this is the exact tool schema sent to the provider. */

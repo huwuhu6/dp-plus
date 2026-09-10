@@ -2,10 +2,10 @@ package com.hmdp.ai.service;
 
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.ChatMessageRequest;
-import com.hmdp.ai.dto.SemanticAct;
-import com.hmdp.ai.dto.StructuredUnderstandingResult;
-import com.hmdp.ai.dto.TurnSemanticIR;
 import com.hmdp.ai.dto.DecisionResponse;
+import com.hmdp.ai.dto.RoutingFusionV2Result;
+import com.hmdp.ai.dto.RoutingSemanticActV2;
+import com.hmdp.ai.dto.RoutingSemanticIRV2;
 import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.service.pipeline.ChatProcessingAction;
 import com.hmdp.ai.service.pipeline.ChatProcessingContext;
@@ -72,27 +72,9 @@ class StructuredUnderstandingInvocationTest {
     }
 
     @Test
-    void lazyInvocationIsMemoizedAcrossRoutingAndExtractionTriggers() {
-        StructuredUnderstandingService structured = mock(StructuredUnderstandingService.class);
-        StructuredUnderstandingResult valid = validRecommendation();
-        when(structured.understand(any(), any(), any())).thenReturn(valid);
-        ChatOrchestrationService service = configured(structured, "shadow");
-        ChatProcessingContext context = context(message("推荐火锅"));
-
-        ReflectionTestUtils.invokeMethod(service, "ensureStructuredUnderstanding", context, "ROUTING_ESCALATION");
-        ReflectionTestUtils.invokeMethod(service, "ensureStructuredUnderstanding", context, "CONSTRAINT_EXTRACTION");
-
-        assertTrue(context.isStructuredInvoked());
-        assertEquals("ROUTING_ESCALATION", context.getStructuredInvocationTrigger());
-        assertEquals(valid, context.getStructuredUnderstandingResult());
-        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "useStructuredActive", context));
-        verify(structured).understand(any(), any(), any());
-    }
-
-    @Test
     void activeConsumesSafeStructuredResultOnlyAtRoutingEscalation() {
         StructuredUnderstandingService structured = mock(StructuredUnderstandingService.class);
-        when(structured.understand(any(), any(), any())).thenReturn(validRecommendation());
+        when(structured.understandRoutingFusion(any(), any(), any())).thenReturn(validRoutingRecommendation());
         ChatOrchestrationService service = configured(structured, "active");
         ChatMemoryService memory = mock(ChatMemoryService.class);
         ReflectionTestUtils.setField(service, "chatMemoryService", memory);
@@ -106,15 +88,14 @@ class StructuredUnderstandingInvocationTest {
         assertEquals("ROUTING_ESCALATION", context.getStructuredInvocationTrigger());
         assertTrue(context.isStructuredApplied());
         assertEquals("ROUTING", context.getStructuredApplyPoint());
-        verify(structured).understand(any(), any(), any());
+        verify(structured).understandRoutingFusion(any(), any(), any());
     }
 
     @Test
     void unsafeActiveResultFallsBackToLegacyRouting() {
         StructuredUnderstandingService structured = mock(StructuredUnderstandingService.class);
-        StructuredUnderstandingResult unsafe = validRecommendation();
-        unsafe.getIr().setAmbiguities(java.util.List.of("ambiguous"));
-        when(structured.understand(any(), any(), any())).thenReturn(unsafe);
+        when(structured.understandRoutingFusion(any(), any(), any()))
+                .thenReturn(RoutingFusionV2Result.fallback("INVALID_EVIDENCE_OR_SCHEMA", 1L));
         ChatOrchestrationService service = configured(structured, "active");
         ChatMemoryService memory = mock(ChatMemoryService.class);
         ReflectionTestUtils.setField(service, "chatMemoryService", memory);
@@ -128,43 +109,36 @@ class StructuredUnderstandingInvocationTest {
         assertTrue(context.isStructuredInvoked());
         assertFalse(context.isStructuredApplied());
         assertEquals("NOT_APPLIED", context.getStructuredApplyPoint());
-        verify(structured).understand(any(), any(), any());
+        verify(structured).understandRoutingFusion(any(), any(), any());
     }
 
     @Test
-    void activeUsesSafeResultAndUnsafeResultRemainsLegacyEligible() {
-        ChatOrchestrationService service = configured(mock(StructuredUnderstandingService.class), "active");
-        ChatProcessingContext context = context(message("推荐火锅"));
-        context.setStructuredUnderstandingResult(validRecommendation());
-        context.setStructuredUnderstanding(context.getStructuredUnderstandingResult().getIr());
-        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "useStructuredActive", context));
-
-        context.getStructuredUnderstanding().setAmbiguities(java.util.List.of("ambiguous"));
-        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "useStructuredActive", context));
-    }
-
-    @Test
-    void activeStructuredDeltaIsAttributedToExtraction() {
+    void deterministicExtractionDoesNotInvokeRoutingFusionV2() {
         StructuredUnderstandingService structured = mock(StructuredUnderstandingService.class);
-        when(structured.understand(any(), any(), any())).thenReturn(validMutation());
         ChatOrchestrationService service = configured(structured, "active");
-        ReflectionTestUtils.setField(service, "constraintExtractor", mock(ConstraintExtractor.class));
+        ConstraintExtractor extractor = mock(ConstraintExtractor.class);
+        com.hmdp.ai.dto.DecisionConstraints extracted = new com.hmdp.ai.dto.DecisionConstraints();
+        extracted.setBudgetDirection(-1);
+        when(extractor.extract(any(), any())).thenReturn(extracted);
+        ReflectionTestUtils.setField(service, "constraintExtractor", extractor);
         ChatProcessingContext context = context(message("便宜点"));
 
         ReflectionTestUtils.invokeMethod(service, "ensureCriteriaDelta", context);
 
-        assertTrue(context.isStructuredInvoked());
-        assertTrue(context.isStructuredApplied());
-        assertEquals("EXTRACTION", context.getStructuredApplyPoint());
+        assertFalse(context.isStructuredInvoked());
+        assertFalse(context.isStructuredApplied());
         assertEquals(-1, context.getCriteriaDelta().getBudgetDirection());
+        verifyNoInteractions(structured);
     }
 
     @Test
-    void deterministicStartDecisionAttributesStructuredConsumptionInRealCriteriaReduction() {
+    void deterministicStartDecisionUsesLegacyExtractionInRealCriteriaReduction() {
         StructuredUnderstandingService structured = mock(StructuredUnderstandingService.class);
-        when(structured.understand(any(), any(), any())).thenReturn(validCuisineMutation());
         ChatOrchestrationService service = configured(structured, "active");
         ConstraintExtractor extractor = mock(ConstraintExtractor.class);
+        com.hmdp.ai.dto.DecisionConstraints extracted = new com.hmdp.ai.dto.DecisionConstraints();
+        extracted.setCuisine("火锅");
+        when(extractor.extract(any(), any())).thenReturn(extracted);
         ConversationStateService state = mock(ConversationStateService.class);
         ConversationCriteriaMerger merger = mock(ConversationCriteriaMerger.class);
         ReflectionTestUtils.setField(service, "constraintExtractor", extractor);
@@ -192,11 +166,12 @@ class StructuredUnderstandingInvocationTest {
         assertEquals(ChatProcessingAction.START_DECISION, context.getAction());
         service.reduceCriteria(context);
 
-        assertTrue(context.isStructuredInvoked());
-        assertTrue(context.isStructuredApplied());
-        assertEquals("EXTRACTION", context.getStructuredApplyPoint());
+        assertFalse(context.isStructuredInvoked());
+        assertFalse(context.isStructuredApplied());
+        assertEquals("NOT_APPLIED", context.getStructuredApplyPoint());
         assertEquals("火锅", context.getCriteriaDelta().getCuisine());
-        verifyNoInteractions(extractor);
+        verify(extractor).extract(any(), any());
+        verifyNoInteractions(structured);
     }
 
     private ChatOrchestrationService configured(StructuredUnderstandingService structured, String mode) {
@@ -231,46 +206,16 @@ class StructuredUnderstandingInvocationTest {
         return properties;
     }
 
-    private StructuredUnderstandingResult validRecommendation() {
-        SemanticAct act = new SemanticAct();
-        act.setType(SemanticAct.Type.REQUEST_RECOMMENDATION);
-        TurnSemanticIR ir = new TurnSemanticIR();
+    private RoutingFusionV2Result validRoutingRecommendation() {
+        RoutingSemanticActV2 act = new RoutingSemanticActV2();
+        act.setType(RoutingSemanticActV2.Type.REQUEST_RECOMMENDATION);
+        RoutingSemanticIRV2 ir = new RoutingSemanticIRV2();
         ir.getActs().add(act);
-        StructuredUnderstandingResult result = new StructuredUnderstandingResult();
-        result.setValid(true);
+        RoutingFusionV2Result result = new RoutingFusionV2Result();
         result.setIr(ir);
+        result.setValid(true);
+        result.setCriteriaReusable(true);
         return result;
     }
 
-    private StructuredUnderstandingResult validMutation() {
-        SemanticAct act = new SemanticAct();
-        act.setType(SemanticAct.Type.MUTATE_CRITERIA);
-        com.hmdp.ai.dto.CriteriaDeltaOperation delta = new com.hmdp.ai.dto.CriteriaDeltaOperation();
-        delta.setField(com.hmdp.ai.dto.CriteriaDeltaOperation.Field.BUDGET_PER_PERSON);
-        delta.setOperation(com.hmdp.ai.dto.CriteriaDeltaOperation.Operation.DECREASE);
-        delta.setRawValue("便宜点");
-        TurnSemanticIR ir = new TurnSemanticIR();
-        ir.getActs().add(act);
-        ir.getCriteriaDelta().add(delta);
-        StructuredUnderstandingResult result = new StructuredUnderstandingResult();
-        result.setValid(true);
-        result.setIr(ir);
-        return result;
-    }
-
-    private StructuredUnderstandingResult validCuisineMutation() {
-        SemanticAct act = new SemanticAct();
-        act.setType(SemanticAct.Type.MUTATE_CRITERIA);
-        com.hmdp.ai.dto.CriteriaDeltaOperation delta = new com.hmdp.ai.dto.CriteriaDeltaOperation();
-        delta.setField(com.hmdp.ai.dto.CriteriaDeltaOperation.Field.CUISINE);
-        delta.setOperation(com.hmdp.ai.dto.CriteriaDeltaOperation.Operation.SET);
-        delta.setRawValue("火锅");
-        TurnSemanticIR ir = new TurnSemanticIR();
-        ir.getActs().add(act);
-        ir.getCriteriaDelta().add(delta);
-        StructuredUnderstandingResult result = new StructuredUnderstandingResult();
-        result.setValid(true);
-        result.setIr(ir);
-        return result;
-    }
 }

@@ -5,6 +5,10 @@ import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.SemanticAct;
 import com.hmdp.ai.dto.StructuredUnderstandingResult;
 import com.hmdp.ai.dto.TurnSemanticIR;
+import com.hmdp.ai.dto.RoutingCriteriaDeltaV2;
+import com.hmdp.ai.dto.RoutingFusionV2Result;
+import com.hmdp.ai.dto.RoutingSemanticActV2;
+import com.hmdp.ai.dto.RoutingSemanticIRV2;
 import com.hmdp.ai.service.pipeline.ChatProcessingAction;
 import com.hmdp.ai.util.CuisineCanonicalizer;
 import com.hmdp.ai.util.PreferenceCanonicalizer;
@@ -43,6 +47,69 @@ public class StructuredUnderstandingAdapter {
 
     public ChatProcessingAction actionFor(TurnSemanticIR ir) {
         return supportsAllActs(ir) ? ChatProcessingAction.START_DECISION : ChatProcessingAction.GENERAL_CHAT;
+    }
+
+    /** V2 authority gate: only compact routing fusion without unresolved location authority. */
+    public boolean canApplyRoutingFusionSafely(RoutingFusionV2Result result) {
+        if (result == null || !result.isValid() || !result.isCriteriaReusable() || result.getIr() == null) return false;
+        RoutingSemanticIRV2 ir = result.getIr();
+        return ir.getLocationExpression() == null
+                && (ir.getAmbiguities() == null || ir.getAmbiguities().isEmpty())
+                && supportsAllRoutingActs(ir)
+                && supportsAllRoutingDeltas(ir);
+    }
+
+    public ChatProcessingAction actionFor(RoutingSemanticIRV2 ir) {
+        if (ir == null || ir.getActs() == null || ir.getActs().isEmpty()) return ChatProcessingAction.GENERAL_CHAT;
+        boolean recommendation = false;
+        for (RoutingSemanticActV2 act : ir.getActs()) {
+            if (act == null || act.getType() == null) return ChatProcessingAction.GENERAL_CHAT;
+            if (act.getType() == RoutingSemanticActV2.Type.REQUEST_RECOMMENDATION
+                    || act.getType() == RoutingSemanticActV2.Type.MUTATE_CRITERIA
+                    || act.getType() == RoutingSemanticActV2.Type.EXPLORE_ALTERNATIVE) recommendation = true;
+        }
+        return recommendation ? ChatProcessingAction.START_DECISION : ChatProcessingAction.GENERAL_CHAT;
+    }
+
+    public DecisionConstraints toConstraints(RoutingSemanticIRV2 ir) {
+        DecisionConstraints constraints = new DecisionConstraints();
+        if (ir == null || ir.getCriteriaDelta() == null) return constraints;
+        for (RoutingCriteriaDeltaV2 item : ir.getCriteriaDelta()) {
+            if (item == null) continue;
+            CriteriaDeltaOperation operation = new CriteriaDeltaOperation();
+            operation.setField(item.getField());
+            operation.setOperation(item.getOperation());
+            operation.setRawValue(item.getRawValue());
+            apply(constraints, operation);
+        }
+        return constraints;
+    }
+
+    private boolean supportsAllRoutingActs(RoutingSemanticIRV2 ir) {
+        if (ir == null || ir.getActs() == null || ir.getActs().isEmpty()) return false;
+        for (RoutingSemanticActV2 act : ir.getActs()) {
+            if (act == null || act.getType() == null || act.getType() == RoutingSemanticActV2.Type.CHITCHAT_OR_UNKNOWN) return false;
+        }
+        return true;
+    }
+
+    private boolean supportsAllRoutingDeltas(RoutingSemanticIRV2 ir) {
+        if (ir == null || ir.getCriteriaDelta() == null) return false;
+        if (ir.getCriteriaDelta().isEmpty()) {
+            return ir.getActs() != null && ir.getActs().stream()
+                    .noneMatch(act -> act != null && act.getType() == RoutingSemanticActV2.Type.MUTATE_CRITERIA);
+        }
+        for (RoutingCriteriaDeltaV2 item : ir.getCriteriaDelta()) {
+            if (item == null || item.getField() == null || item.getOperation() == null) return false;
+            CriteriaDeltaOperation operation = new CriteriaDeltaOperation();
+            operation.setField(item.getField());
+            operation.setOperation(item.getOperation());
+            operation.setRawValue(item.getRawValue());
+            TurnSemanticIR probe = new TurnSemanticIR();
+            probe.getCriteriaDelta().add(operation);
+            if (!supportsAllDeltas(probe)) return false;
+        }
+        return true;
     }
 
     private boolean supportsAllActs(TurnSemanticIR ir) {

@@ -112,6 +112,24 @@ public class OpenAiCompatibleClient {
                 routing.getBaseUrl(), routing.getApiKey(), routing.getModel());
     }
 
+    /**
+     * Compact routing-fusion uses the existing lightweight routing provider. It
+     * has a distinct observation purpose so V2 cost is not mixed with legacy
+     * ROUTING calls, while sharing the same HTTP/client implementation.
+     */
+    public JsonNode chatRoutingFusionCompletion(List<Map<String, Object>> messages,
+                                                 List<Map<String, Object>> tools,
+                                                 Map<String, Object> toolChoice,
+                                                 Integer timeoutMs) {
+        AiProperties.RoutingProperties routing = aiProperties.getRouting();
+        if (routing == null || !routing.isConfigured()) {
+            throw new IllegalStateException("Chat routing model is not configured");
+        }
+        return chatCompletion(messages, tools, toolChoice, "STRUCTURED_UNDERSTANDING_V2",
+                timeoutMs == null ? routing.getTimeoutMs() : timeoutMs,
+                routing.getBaseUrl(), routing.getApiKey(), routing.getModel());
+    }
+
     private JsonNode chatCompletion(List<Map<String, Object>> messages, List<Map<String, Object>> tools,
                                     Map<String, Object> toolChoice, String action, Integer timeoutMs,
                                     String baseUrl, String apiKey, String model) {
@@ -188,7 +206,9 @@ public class OpenAiCompatibleClient {
         if ("REWRITE".equals(action)) return "REWRITE";
         if ("CHAT_ROUTING".equals(action)) return "ROUTING";
         if ("CONSTRAINT_EXTRACTION".equals(action)) return "EXTRACTION";
-        if ("STRUCTURED_UNDERSTANDING".equals(action)) return "STRUCTURED_UNDERSTANDING";
+        if ("STRUCTURED_UNDERSTANDING".equals(action) || "STRUCTURED_UNDERSTANDING_V2".equals(action)) {
+            return "STRUCTURED_UNDERSTANDING";
+        }
         return "OTHER";
     }
 

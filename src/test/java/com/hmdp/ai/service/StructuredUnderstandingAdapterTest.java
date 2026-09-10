@@ -5,6 +5,10 @@ import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.SemanticAct;
 import com.hmdp.ai.dto.StructuredUnderstandingResult;
 import com.hmdp.ai.dto.TurnSemanticIR;
+import com.hmdp.ai.dto.RoutingFusionV2Result;
+import com.hmdp.ai.dto.RoutingLocationExpressionV2;
+import com.hmdp.ai.dto.RoutingSemanticActV2;
+import com.hmdp.ai.dto.RoutingSemanticIRV2;
 import com.hmdp.ai.service.pipeline.ChatProcessingAction;
 import org.junit.jupiter.api.Test;
 
@@ -151,6 +155,28 @@ class StructuredUnderstandingAdapterTest {
         assertTrue(adapter.canApplySafely(valid(validPreferenceMutation)));
     }
 
+    @Test
+    void routingFusionActiveGateRequiresCriteriaForMutationAndRejectsRawLocation() {
+        StructuredUnderstandingAdapter adapter = new StructuredUnderstandingAdapter();
+
+        RoutingSemanticIRV2 recommendation = new RoutingSemanticIRV2();
+        recommendation.getActs().add(routingAct(RoutingSemanticActV2.Type.REQUEST_RECOMMENDATION));
+        RoutingFusionV2Result recommendationResult = routingResult(recommendation);
+        assertTrue(adapter.canApplyRoutingFusionSafely(recommendationResult));
+
+        RoutingSemanticIRV2 mutationWithoutDelta = new RoutingSemanticIRV2();
+        mutationWithoutDelta.getActs().add(routingAct(RoutingSemanticActV2.Type.MUTATE_CRITERIA));
+        assertFalse(adapter.canApplyRoutingFusionSafely(routingResult(mutationWithoutDelta)));
+
+        RoutingSemanticIRV2 location = new RoutingSemanticIRV2();
+        location.getActs().add(routingAct(RoutingSemanticActV2.Type.REQUEST_RECOMMENDATION));
+        RoutingLocationExpressionV2 expression = new RoutingLocationExpressionV2();
+        expression.setRawText("厦门");
+        expression.setReset(false);
+        location.setLocationExpression(expression);
+        assertFalse(adapter.canApplyRoutingFusionSafely(routingResult(location)));
+    }
+
     private TurnSemanticIR irWith(CriteriaDeltaOperation.Field field,
                                   CriteriaDeltaOperation.Operation operation,
                                   String rawValue) {
@@ -174,6 +200,20 @@ class StructuredUnderstandingAdapterTest {
         StructuredUnderstandingResult result = new StructuredUnderstandingResult();
         result.setValid(true);
         result.setIr(ir);
+        return result;
+    }
+
+    private RoutingSemanticActV2 routingAct(RoutingSemanticActV2.Type type) {
+        RoutingSemanticActV2 act = new RoutingSemanticActV2();
+        act.setType(type);
+        return act;
+    }
+
+    private RoutingFusionV2Result routingResult(RoutingSemanticIRV2 ir) {
+        RoutingFusionV2Result result = new RoutingFusionV2Result();
+        result.setIr(ir);
+        result.setValid(true);
+        result.setCriteriaReusable(true);
         return result;
     }
 }

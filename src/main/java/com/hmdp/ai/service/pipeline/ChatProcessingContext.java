@@ -11,6 +11,8 @@ import com.hmdp.ai.dto.DecisionResponse;
 import com.hmdp.ai.dto.DecisionContextQuery;
 import com.hmdp.ai.dto.TurnSemanticIR;
 import com.hmdp.ai.dto.StructuredUnderstandingResult;
+import com.hmdp.ai.dto.RoutingFusionV2Result;
+import com.hmdp.ai.dto.RoutingSemanticIRV2;
 import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.dto.TurnPlan;
 import com.hmdp.ai.dto.TurnCommandSet;
@@ -58,6 +60,8 @@ public class ChatProcessingContext {
     private DecisionContextQuery decisionContextQuery;
     private TurnSemanticIR structuredUnderstanding;
     private StructuredUnderstandingResult structuredUnderstandingResult;
+    private RoutingSemanticIRV2 routingFusionV2;
+    private RoutingFusionV2Result routingFusionV2Result;
     /** Evaluation-only invocation provenance; this data is request-scoped and never durable state. */
     private boolean structuredInvoked;
     private String structuredInvocationTrigger = "NOT_INVOKED";

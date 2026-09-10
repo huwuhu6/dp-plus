@@ -16,6 +16,7 @@ import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionContextFacts;
 import com.hmdp.ai.dto.DecisionContextQuery;
 import com.hmdp.ai.dto.StructuredUnderstandingResult;
+import com.hmdp.ai.dto.RoutingFusionV2Result;
 import com.hmdp.ai.dto.ConversationLocationSlot;
 import com.hmdp.ai.dto.ConversationSlots;
 import com.hmdp.ai.dto.AgentSessionContext;
@@ -332,12 +333,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (route == null) {
             // Deterministic event/state/domain/context guards above own their branches.
             // Structured interpretation only participates at legacy routing escalation.
-            ensureStructuredUnderstanding(context, "ROUTING_ESCALATION");
-            if (!assessment.isConflictDetected() && useStructuredActive(context)) {
+            ensureRoutingFusionV2(context);
+            if (!assessment.isConflictDetected() && useRoutingFusionActive(context)) {
                 com.hmdp.ai.service.pipeline.ChatProcessingAction structuredAction =
-                        structuredUnderstandingAdapter.actionFor(context.getStructuredUnderstanding());
+                        structuredUnderstandingAdapter.actionFor(context.getRoutingFusionV2());
                 if (structuredAction == com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION) {
-                    context.setCriteriaDelta(structuredUnderstandingAdapter.toConstraints(context.getStructuredUnderstanding()));
+                    context.setCriteriaDelta(structuredUnderstandingAdapter.toConstraints(context.getRoutingFusionV2()));
                 }
                 context.setRoute(structuredAction.name());
                 selectAction(context, structuredAction, "structured_understanding_routing_escalation");
@@ -404,6 +405,16 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             response.setStructuredUnderstandingFallback(result.isFallback());
             response.setStructuredUnderstandingErrors(result.getValidationErrors());
         }
+        if (response != null && context.getRoutingFusionV2Result() != null
+                && !"MODE_OFF".equals(context.getRoutingFusionV2Result().getFailureReason())) {
+            RoutingFusionV2Result result = context.getRoutingFusionV2Result();
+            response.setRoutingFusionV2(context.getRoutingFusionV2());
+            response.setRoutingFusionV2Valid(result.isValid());
+            response.setRoutingFusionV2Fallback(result.isFallback());
+            response.setRoutingFusionV2CriteriaReusable(result.isCriteriaReusable());
+            response.setRoutingFusionV2Errors(result.getValidationErrors());
+            response.setStructuredVersion("v2");
+        }
         if (response != null) {
             response.setStructuredInvoked(context.isStructuredInvoked());
             response.setStructuredInvocationTrigger(context.getStructuredInvocationTrigger());
@@ -433,11 +444,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         }
         com.hmdp.ai.dto.DecisionConstraints activeCriteriaBeforeExtraction = conversationStateService.activeCriteria(context.getWorkingMemory());
         com.hmdp.ai.dto.DecisionConstraints extracted = context.getCriteriaDelta();
-        if (extracted == null) ensureStructuredUnderstanding(context, "CONSTRAINT_EXTRACTION");
-        if (extracted == null && useStructuredActive(context)) {
-            extracted = structuredUnderstandingAdapter.toConstraints(context.getStructuredUnderstanding());
-            markStructuredApplied(context, "EXTRACTION");
-        }
         if (extracted == null) {
             // The original turn is the semantic source. Rewritten text may only enrich
             // references and must never erase a second command such as an exclusion.
@@ -581,12 +587,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private void ensureCriteriaDelta(ChatProcessingContext context) {
         if (context.getCriteriaDelta() != null || constraintExtractor == null) return;
-        ensureStructuredUnderstanding(context, "CONSTRAINT_EXTRACTION");
-        if (useStructuredActive(context)) {
-            context.setCriteriaDelta(structuredUnderstandingAdapter.toConstraints(context.getStructuredUnderstanding()));
-            markStructuredApplied(context, "EXTRACTION");
-            return;
-        }
         com.hmdp.ai.dto.DecisionConstraints activeCriteria = context.getWorkingMemory() == null
                 ? null : conversationStateService.activeCriteria(context.getWorkingMemory());
         context.setCriteriaDelta(constraintExtractor.extract(context.getOriginalMessage(), activeCriteria));
@@ -596,28 +596,31 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         }
     }
 
-    private boolean useStructuredActive(ChatProcessingContext context) {
+    private boolean useRoutingFusionActive(ChatProcessingContext context) {
         return context != null && structuredUnderstandingAdapter != null
-                && structuredUnderstandingAdapter.canApplySafely(context.getStructuredUnderstandingResult())
+                && structuredUnderstandingAdapter.canApplyRoutingFusionSafely(context.getRoutingFusionV2Result())
                 && aiProperties != null && aiProperties.getStructuredUnderstanding() != null
                 && aiProperties.getStructuredUnderstanding().isActive();
     }
 
-    /** Request-scoped, lazy and memoized interpretation shared by routing and extraction. */
-    private StructuredUnderstandingResult ensureStructuredUnderstanding(ChatProcessingContext context, String trigger) {
-        if (context == null || !structuredModeEnabled()) return context == null ? null : context.getStructuredUnderstandingResult();
-        if (context.getStructuredUnderstandingResult() != null) return context.getStructuredUnderstandingResult();
+    /** Request-scoped, lazy-once V2 interpretation. V2 is never triggered by extraction-only turns. */
+    private RoutingFusionV2Result ensureRoutingFusionV2(ChatProcessingContext context) {
+        if (context == null || !structuredModeEnabled()) {
+            return context == null ? null : context.getRoutingFusionV2Result();
+        }
+        if (context.getRoutingFusionV2Result() != null) return context.getRoutingFusionV2Result();
         if (structuredUnderstandingService == null) {
-            StructuredUnderstandingResult unavailable = StructuredUnderstandingResult.fallback("SERVICE_UNAVAILABLE", 0L);
-            context.setStructuredUnderstandingResult(unavailable);
+            RoutingFusionV2Result unavailable = RoutingFusionV2Result.fallback("SERVICE_UNAVAILABLE", 0L);
+            context.setRoutingFusionV2Result(unavailable);
             return unavailable;
         }
         context.setStructuredInvoked(true);
-        context.setStructuredInvocationTrigger(trigger);
-        StructuredUnderstandingResult result = structuredUnderstandingService.understand(context.getOriginalMessage(), context.getChatHistory(),
-                structuredReadOnlyContext(context));
-        context.setStructuredUnderstandingResult(result);
-        context.setStructuredUnderstanding(result == null ? null : result.getIr());
+        context.setStructuredInvocationTrigger("ROUTING_ESCALATION");
+        RoutingFusionV2Result result = structuredUnderstandingService.understandRoutingFusion(
+                context.getOriginalMessage(), context.getChatHistory(), structuredReadOnlyContext(context));
+        if (result == null) result = RoutingFusionV2Result.fallback("SERVICE_RETURNED_NULL", 0L);
+        context.setRoutingFusionV2Result(result);
+        context.setRoutingFusionV2(result.getIr());
         return result;
     }
 

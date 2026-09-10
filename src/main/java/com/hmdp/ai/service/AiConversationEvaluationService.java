@@ -380,6 +380,12 @@ public class AiConversationEvaluationService {
                 output.put("structuredUnderstandingValid", response.getStructuredUnderstandingValid());
                 output.put("structuredUnderstandingFallback", response.getStructuredUnderstandingFallback());
                 output.put("structuredUnderstandingErrors", response.getStructuredUnderstandingErrors());
+                output.put("structuredVersion", response.getStructuredVersion());
+                output.put("routingFusionV2", response.getRoutingFusionV2());
+                output.put("routingFusionV2Valid", response.getRoutingFusionV2Valid());
+                output.put("routingFusionV2Fallback", response.getRoutingFusionV2Fallback());
+                output.put("routingFusionV2CriteriaReusable", response.getRoutingFusionV2CriteriaReusable());
+                output.put("routingFusionV2Errors", response.getRoutingFusionV2Errors());
                 output.put("structuredInvoked", response.getStructuredInvoked());
                 output.put("structuredInvocationTrigger", response.getStructuredInvocationTrigger());
                 output.put("structuredApplied", response.getStructuredApplied());

@@ -23,6 +23,13 @@ public class ChatMessageResponse {
     private Boolean structuredUnderstandingValid;
     private Boolean structuredUnderstandingFallback;
     private List<String> structuredUnderstandingErrors;
+    /** Compact V2 routing-fusion IR; request-scoped and never persisted. */
+    private RoutingSemanticIRV2 routingFusionV2;
+    private Boolean routingFusionV2Valid;
+    private Boolean routingFusionV2Fallback;
+    private Boolean routingFusionV2CriteriaReusable;
+    private List<String> routingFusionV2Errors;
+    private String structuredVersion;
     private Boolean structuredInvoked;
     private String structuredInvocationTrigger;
     private Boolean structuredApplied;
