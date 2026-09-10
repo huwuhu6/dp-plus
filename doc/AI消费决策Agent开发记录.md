@@ -2376,3 +2376,9 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 影子完整评测结果：Run150 robustness 48 条 Complete 21、Route 44、Tool 47、Final 38、Locality 48；Run151 conversation-v1 40 条 Complete 29、Route 38、Tool 33、Final 40、Locality 40；Run152 holdout-v1 16 条 Complete 7、Route 13、Tool 14、Final 12、Locality 16。与同分支 off 基线 Run147/148/149 相比，robustness 的 Complete/Route/Tool/Locality 相同、Final 少 1 条；conversation-v1 的 Complete/Route/Tool 分别提升 2、2、2，Final/Locality 不变；holdout 全部指标相同。该结果只能说明 shadow 旁路没有造成结构性业务回归，不能把 shadow IR 本身视为业务提分来源；robustness 单条 Final 差异归为外部模型/执行波动候选。
 
 active smoke 验证了 `推荐火锅` 的结构化结果可被读取并继续执行既有 `START_DECISION → CLARIFY_LOCATION` 业务链；地点、引用、查询和模型输出带歧义的 Turn 会因 Adapter 安全门回到 legacy。模型经常填充未使用的 `CURRENT_CRITERIA` 空查询对象，已按“有内容才视为查询”的规则保持保守，不把这类不确定输出直接写入业务状态。当前 active 只启用无引用、无地点、无查询、无歧义且 delta 操作可完整映射的窄子集，未进行 active 全量 A/B，不把 active 结果扩展为最终评测结论。最终 `mvn -q test`：409 tests，0 failures，0 errors，3 skipped。
+
+### Structured Understanding 评测结果持久化归档（2026-09-10）
+
+为避免后续为了分析逐 Turn Structured Understanding trace 而重复调用模型，新增 `tools/archive_conversation_eval.py` 和 Git 版本化目录 `eval_reports/structured_understanding/`。每个 Run 保存一份 JSON 快照，并由 `manifest.jsonl` 和 `SUMMARY.md` 提供机器索引及人工汇总。快照包含 Run 聚合指标、Case Result、逐轮 route/state/assertion、`modelCalls`（purpose、success、durationMs、promptTokens、completionTokens）、stage latency、Structured IR、valid/fallback/error 诊断；敏感字段会在写盘前脱敏。导出脚本只使用 GET API，不会提交或重跑评测；应用未启动时可用只读 MySQL source 导出历史 Run。
+
+Run147~152 已从数据库只读导出，均保留完整 Case Result 与逐轮 `turn_outputs_json`（147/148/149 为 off，150/151/152 为 shadow；逐轮 trace 覆盖率分别为 48/48、40/40、16/16、48/48、40/40、16/16）。Run 表没有历史 branch、routing/rewrite/structured model 独立字段，因此这些值在快照中标记 `unavailable`；Run 记录的 `gitCommit=8611c2f-dirty`、聚合指标和数据库 `create_time` 已保存。未来完成一个 Run 后执行：`python tools/archive_conversation_eval.py --run-id <id> --mode <off|shadow|active>`。这样 Baseline/Shadow 的原始数据可脱离数据库长期分析，不需要再次运行评测。
