@@ -10,9 +10,15 @@ import com.hmdp.ai.util.CuisineCanonicalizer;
 import com.hmdp.ai.util.PreferenceCanonicalizer;
 import org.springframework.stereotype.Component;
 
+import java.util.EnumSet;
+import java.util.Set;
+
 /** Thin adapter from raw IR to existing constraint/action contracts. */
 @Component
 public class StructuredUnderstandingAdapter {
+    private static final Set<SemanticAct.Type> ACTIVE_ACTS = EnumSet.of(
+            SemanticAct.Type.REQUEST_RECOMMENDATION, SemanticAct.Type.MUTATE_CRITERIA);
+
     public boolean canApplySafely(StructuredUnderstandingResult result) {
         if (result == null || !result.isValid() || result.getIr() == null) return false;
         TurnSemanticIR ir = result.getIr();
@@ -23,7 +29,7 @@ public class StructuredUnderstandingAdapter {
                 && ir.getDecisionContextQuery() == null
                 && (ir.getShopFactQueries() == null || ir.getShopFactQueries().isEmpty())
                 && (ir.getAmbiguities() == null || ir.getAmbiguities().isEmpty())
-                && hasApplicableAct(ir)
+                && supportsAllActs(ir)
                 && supportsAllDeltas(ir);
     }
 
@@ -35,33 +41,23 @@ public class StructuredUnderstandingAdapter {
     }
 
     public ChatProcessingAction actionFor(TurnSemanticIR ir) {
-        if (ir == null || ir.getActs() == null || ir.getActs().isEmpty()) return ChatProcessingAction.GENERAL_CHAT;
-        for (SemanticAct act : ir.getActs()) {
-            if (act == null || act.getType() == null) continue;
-            if (act.getType() == SemanticAct.Type.RESET_INTENT) return ChatProcessingAction.EXIT_DECISION;
-            if (act.getType() == SemanticAct.Type.REQUEST_RECOMMENDATION
-                    || act.getType() == SemanticAct.Type.MUTATE_CRITERIA
-                    || act.getType() == SemanticAct.Type.EXPLORE_ALTERNATIVE) return ChatProcessingAction.START_DECISION;
-        }
-        return ChatProcessingAction.GENERAL_CHAT;
+        return supportsAllActs(ir) ? ChatProcessingAction.START_DECISION : ChatProcessingAction.GENERAL_CHAT;
     }
 
-    private boolean hasApplicableAct(TurnSemanticIR ir) {
+    private boolean supportsAllActs(TurnSemanticIR ir) {
+        if (ir == null) return false;
         if (ir.getActs() == null || ir.getActs().isEmpty()) return false;
         for (SemanticAct act : ir.getActs()) {
-            if (act == null || act.getType() == null) continue;
-            if (act.getType() == SemanticAct.Type.REQUEST_RECOMMENDATION
-                    || act.getType() == SemanticAct.Type.MUTATE_CRITERIA
-                    || act.getType() == SemanticAct.Type.EXPLORE_ALTERNATIVE
-                    || act.getType() == SemanticAct.Type.RESET_INTENT) return true;
+            if (act == null || act.getType() == null || !ACTIVE_ACTS.contains(act.getType())) return false;
         }
-        return false;
+        return true;
     }
 
     private boolean supportsAllDeltas(TurnSemanticIR ir) {
         if (ir.getCriteriaDelta() == null) return true;
         for (CriteriaDeltaOperation item : ir.getCriteriaDelta()) {
             if (item == null || item.getField() == null || item.getOperation() == null) return false;
+            if (hasText(item.getAnchorReferenceId())) return false;
             CriteriaDeltaOperation.Operation operation = item.getOperation();
             switch (item.getField()) {
                 case CUISINE, KEYWORD, ARRIVAL_TIME -> {
@@ -81,6 +77,10 @@ public class StructuredUnderstandingAdapter {
                     if (operation != CriteriaDeltaOperation.Operation.SET
                             && operation != CriteriaDeltaOperation.Operation.INCREASE
                             && operation != CriteriaDeltaOperation.Operation.DECREASE) return false;
+                    if (operation == CriteriaDeltaOperation.Operation.SET && parseAbsoluteNumber(item.getRawValue()) == null) return false;
+                    if ((operation == CriteriaDeltaOperation.Operation.INCREASE
+                            || operation == CriteriaDeltaOperation.Operation.DECREASE)
+                            && hasNumericMagnitude(item.getRawValue())) return false;
                 }
                 case NEARBY -> {
                     if (operation != CriteriaDeltaOperation.Operation.SET
@@ -101,7 +101,8 @@ public class StructuredUnderstandingAdapter {
             case EXCLUDED_CUISINE -> { if (!value.isEmpty()) target.getExcludedCuisines().add(CuisineCanonicalizer.canonicalize(value)); }
             case BUDGET_PER_PERSON -> applyNumber(target, operation, value, true);
             case RADIUS_KM -> applyNumber(target, operation, value, false);
-            case NEARBY -> target.setNearby(!"CLEAR".equals(operation.getOperation()) && !"false".equalsIgnoreCase(value));
+            case NEARBY -> target.setNearby(operation.getOperation() != CriteriaDeltaOperation.Operation.CLEAR
+                    && !"false".equalsIgnoreCase(value));
             case ARRIVAL_TIME -> applyText(target, operation, value, false);
         }
     }
@@ -124,12 +125,35 @@ public class StructuredUnderstandingAdapter {
     }
 
     private void applyNumber(DecisionConstraints target, CriteriaDeltaOperation operation, String value, boolean budget) {
-        try {
-            double parsed = Double.parseDouble(value.replaceAll("[^0-9.]", ""));
+        if (operation.getOperation() == CriteriaDeltaOperation.Operation.SET) {
+            Double parsed = parseAbsoluteNumber(value);
+            if (parsed == null) return;
             if (budget) target.setBudgetPerPerson((int) Math.round(parsed)); else target.setRadiusKm(parsed);
-        } catch (RuntimeException ignored) {
-            if (budget) target.setBudgetDirection(operation.getOperation() == CriteriaDeltaOperation.Operation.DECREASE ? -1 : 1);
-            else target.setRadiusDirection(operation.getOperation() == CriteriaDeltaOperation.Operation.DECREASE ? -1 : 1);
+            return;
         }
+        if ((operation.getOperation() != CriteriaDeltaOperation.Operation.INCREASE
+                && operation.getOperation() != CriteriaDeltaOperation.Operation.DECREASE)
+                || hasNumericMagnitude(value)) return;
+        int direction = operation.getOperation() == CriteriaDeltaOperation.Operation.DECREASE ? -1 : 1;
+        if (budget) target.setBudgetDirection(direction); else target.setRadiusDirection(direction);
+    }
+
+    private Double parseAbsoluteNumber(String rawValue) {
+        String normalized = rawValue == null ? "" : rawValue.replaceAll("[^0-9.]", "");
+        if (normalized.isBlank() || normalized.chars().filter(ch -> ch == '.').count() > 1) return null;
+        try {
+            double value = Double.parseDouble(normalized);
+            return Double.isFinite(value) && value >= 0D ? value : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private boolean hasNumericMagnitude(String rawValue) {
+        return rawValue != null && rawValue.matches(".*(?:[0-9零二三四五六七八九十百千万两半]|一(?!点)).*");
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

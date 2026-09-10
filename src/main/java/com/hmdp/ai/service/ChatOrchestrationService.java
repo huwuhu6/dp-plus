@@ -341,6 +341,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 }
                 context.setRoute(structuredAction.name());
                 selectAction(context, structuredAction, "structured_understanding_routing_escalation");
+                markStructuredApplied(context, "ROUTING");
                 assessment.setCandidateAction(structuredAction);
                 assessment.setSource("STRUCTURED_UNDERSTANDING");
                 assessment.setStateAllowed(true);
@@ -406,6 +407,8 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (response != null) {
             response.setStructuredInvoked(context.isStructuredInvoked());
             response.setStructuredInvocationTrigger(context.getStructuredInvocationTrigger());
+            response.setStructuredApplied(context.isStructuredApplied());
+            response.setStructuredApplyPoint(context.getStructuredApplyPoint());
         }
         context.setResponse(response);
     }
@@ -580,6 +583,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         ensureStructuredUnderstanding(context, "CONSTRAINT_EXTRACTION");
         if (useStructuredActive(context)) {
             context.setCriteriaDelta(structuredUnderstandingAdapter.toConstraints(context.getStructuredUnderstanding()));
+            markStructuredApplied(context, "EXTRACTION");
             return;
         }
         com.hmdp.ai.dto.DecisionConstraints activeCriteria = context.getWorkingMemory() == null
@@ -619,6 +623,12 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     private boolean structuredModeEnabled() {
         return aiProperties != null && aiProperties.getStructuredUnderstanding() != null
                 && aiProperties.getStructuredUnderstanding().isEnabled();
+    }
+
+    private void markStructuredApplied(ChatProcessingContext context, String point) {
+        if (context == null) return;
+        context.setStructuredApplied(true);
+        context.setStructuredApplyPoint(point);
     }
 
     private Map<String, Object> structuredReadOnlyContext(ChatProcessingContext context) {

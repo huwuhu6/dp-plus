@@ -382,6 +382,8 @@ public class AiConversationEvaluationService {
                 output.put("structuredUnderstandingErrors", response.getStructuredUnderstandingErrors());
                 output.put("structuredInvoked", response.getStructuredInvoked());
                 output.put("structuredInvocationTrigger", response.getStructuredInvocationTrigger());
+                output.put("structuredApplied", response.getStructuredApplied());
+                output.put("structuredApplyPoint", response.getStructuredApplyPoint());
                 output.put("stages", stageTrace);
                 output.put("modelCalls", modelCallObservationSnapshot());
                 outputs.add(output);

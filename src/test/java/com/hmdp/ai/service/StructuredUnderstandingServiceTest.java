@@ -163,6 +163,39 @@ class StructuredUnderstandingServiceTest {
         verify(client).chatCompletion(any(), any(), any(), eq("STRUCTURED_UNDERSTANDING"), any());
     }
 
+    @Test
+    void missingVersionEmptyActsAndDanglingReferencesFailClosed() throws Exception {
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        StructuredUnderstandingService service = service(client, "active");
+        when(client.chatCompletion(any(), any(), any(), eq("STRUCTURED_UNDERSTANDING"), any()))
+                .thenReturn(response("{\"acts\":[],\"references\":[],\"criteriaDelta\":[],\"shopFactQueries\":[],\"ambiguities\":[]}"));
+
+        StructuredUnderstandingResult missingContract = service.understand("你好", Collections.emptyList(), Collections.emptyMap());
+
+        assertFalse(missingContract.isValid());
+        assertTrue(missingContract.getValidationErrors().contains("version"));
+        assertTrue(missingContract.getValidationErrors().contains("acts"));
+
+        when(client.chatCompletion(any(), any(), any(), eq("STRUCTURED_UNDERSTANDING"), any()))
+                .thenReturn(response("{\"version\":\"v1\",\"acts\":[{\"type\":\"MUTATE_CRITERIA\","
+                        + "\"evidence\":{\"text\":\"便宜点\",\"start\":0,\"end\":3}}],\"references\":["
+                        + "{\"id\":\"r1\",\"scope\":\"LATEST\",\"surface\":\"便宜\",\"start\":0,\"end\":2,\"evidence\":{\"text\":\"便宜\",\"start\":0,\"end\":2}},"
+                        + "{\"id\":\"r1\",\"scope\":\"LATEST\",\"surface\":\"便宜\",\"start\":0,\"end\":2,\"evidence\":{\"text\":\"便宜\",\"start\":0,\"end\":2}}],"
+                        + "\"criteriaDelta\":[{\"field\":\"BUDGET_PER_PERSON\",\"operation\":\"DECREASE\","
+                        + "\"anchorReferenceId\":\"missing\",\"evidence\":{\"text\":\"便宜点\",\"start\":0,\"end\":3}}],"
+                        + "\"shopFactQueries\":[{\"type\":\"EVIDENCE\",\"referenceId\":\"missing\","
+                        + "\"evidence\":{\"text\":\"便宜点\",\"start\":0,\"end\":3}}],"
+                        + "\"decisionContextQuery\":{\"type\":\"WHY_RECOMMENDED\",\"referenceId\":\"missing\"},\"ambiguities\":[]}"));
+
+        StructuredUnderstandingResult dangling = service.understand("便宜点", Collections.emptyList(), Collections.emptyMap());
+
+        assertFalse(dangling.isValid());
+        assertTrue(dangling.getValidationErrors().contains("criteriaDelta[0].anchorReferenceId"));
+        assertTrue(dangling.getValidationErrors().contains("shopFactQueries[0].referenceId"));
+        assertTrue(dangling.getValidationErrors().contains("decisionContextQuery.referenceId"));
+        assertTrue(dangling.getValidationErrors().contains("references[1].id_duplicate"));
+    }
+
     private StructuredUnderstandingService service(OpenAiCompatibleClient client, String mode) {
         StructuredUnderstandingService service = new StructuredUnderstandingService();
         AiProperties properties = new AiProperties();

@@ -20,5 +20,7 @@ public class IntentRoutingNode implements ChatPipelineNode {
         }
         event.getMetadata().put("structuredInvoked", context.isStructuredInvoked());
         event.getMetadata().put("structuredInvocationTrigger", context.getStructuredInvocationTrigger());
+        event.getMetadata().put("structuredApplied", context.isStructuredApplied());
+        event.getMetadata().put("structuredApplyPoint", context.getStructuredApplyPoint());
     }
 }

@@ -25,6 +25,8 @@ public class ChatMessageResponse {
     private List<String> structuredUnderstandingErrors;
     private Boolean structuredInvoked;
     private String structuredInvocationTrigger;
+    private Boolean structuredApplied;
+    private String structuredApplyPoint;
     private String policyAction;
     private String policyReason;
     /** Business output may be valid even when a post-execution durable trace record failed. */

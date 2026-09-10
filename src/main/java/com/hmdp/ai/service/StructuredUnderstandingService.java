@@ -23,8 +23,10 @@ import jakarta.annotation.Resource;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * One-call structured linguistic interpretation. It is intentionally not a
@@ -78,6 +80,9 @@ public class StructuredUnderstandingService {
                     .with(DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
                     .without(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                     .readValue(argumentNode.traverse(objectMapper));
+            // DTO defaults are useful in-process, but must not turn an omitted provider
+            // contract field into a valid IR at this trust boundary.
+            if (!argumentNode.hasNonNull("version")) ir.setVersion(null);
             normalizeEmptyOptionals(ir);
             List<String> errors = validate(ir, originalMessage == null ? "" : originalMessage);
             StructuredUnderstandingResult result = new StructuredUnderstandingResult();
@@ -105,18 +110,20 @@ public class StructuredUnderstandingService {
             errors.add("ir=null");
             return errors;
         }
-        if (ir.getVersion() != null && !"v1".equalsIgnoreCase(ir.getVersion())) errors.add("version");
-        if (ir.getActs() == null) errors.add("acts");
+        if (!"v1".equals(ir.getVersion())) errors.add("version");
+        if (ir.getActs() == null || ir.getActs().isEmpty()) errors.add("acts");
         else for (int i = 0; i < ir.getActs().size(); i++) {
             SemanticAct item = ir.getActs().get(i);
             if (item == null || item.getType() == null) errors.add("acts[" + i + "].type");
             if (item == null || item.getEvidence() == null) errors.add("acts[" + i + "].evidence_missing");
             else validateEvidence(item.getEvidence(), original, "acts[" + i + "]", errors);
         }
+        Set<String> referenceIds = new HashSet<>();
         if (ir.getReferences() == null) errors.add("references");
         else for (int i = 0; i < ir.getReferences().size(); i++) {
             SemanticReference item = ir.getReferences().get(i);
             if (item == null || item.getId() == null || item.getId().isBlank()) errors.add("references[" + i + "].id");
+            else if (!referenceIds.add(item.getId())) errors.add("references[" + i + "].id_duplicate");
             if (item == null || item.getScope() == null) errors.add("references[" + i + "].scope");
             validateSpan(item == null ? null : item.getSurface(), item == null ? null : item.getStart(),
                     item == null ? null : item.getEnd(), original, "references[" + i + "]", errors);
@@ -127,6 +134,9 @@ public class StructuredUnderstandingService {
             CriteriaDeltaOperation item = ir.getCriteriaDelta().get(i);
             if (item == null || item.getField() == null) errors.add("criteriaDelta[" + i + "].field");
             if (item == null || item.getOperation() == null) errors.add("criteriaDelta[" + i + "].operation");
+            if (item != null && hasText(item.getAnchorReferenceId()) && !referenceIds.contains(item.getAnchorReferenceId())) {
+                errors.add("criteriaDelta[" + i + "].anchorReferenceId");
+            }
             if (item == null || item.getEvidence() == null) errors.add("criteriaDelta[" + i + "].evidence_missing");
             else validateEvidence(item.getEvidence(), original, "criteriaDelta[" + i + "]", errors);
         }
@@ -143,11 +153,18 @@ public class StructuredUnderstandingService {
         else for (int i = 0; i < ir.getShopFactQueries().size(); i++) {
             ShopFactSemanticQuery item = ir.getShopFactQueries().get(i);
             if (item == null || item.getType() == null) errors.add("shopFactQueries[" + i + "].type");
+            if (item != null && hasText(item.getReferenceId()) && !referenceIds.contains(item.getReferenceId())) {
+                errors.add("shopFactQueries[" + i + "].referenceId");
+            }
             if (item == null || item.getEvidence() == null) errors.add("shopFactQueries[" + i + "].evidence_missing");
             else validateEvidence(item.getEvidence(), original, "shopFactQueries[" + i + "]", errors);
         }
         if (ir.getDecisionContextQuery() != null && ir.getDecisionContextQuery().getType() == null) {
             errors.add("decisionContextQuery.type");
+        }
+        if (ir.getDecisionContextQuery() != null && hasText(ir.getDecisionContextQuery().getReferenceId())
+                && !referenceIds.contains(ir.getDecisionContextQuery().getReferenceId())) {
+            errors.add("decisionContextQuery.referenceId");
         }
         if (ir.getAmbiguities() == null) errors.add("ambiguities");
         return errors;
@@ -169,6 +186,10 @@ public class StructuredUnderstandingService {
     private void validateEvidence(SemanticEvidence evidence, String original, String path, List<String> errors) {
         if (evidence == null) return;
         validateSpan(evidence.getText(), evidence.getStart(), evidence.getEnd(), original, path, errors);
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void validateSpan(String text, Integer start, Integer end, String original, String path, List<String> errors) {

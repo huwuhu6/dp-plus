@@ -104,6 +104,8 @@ class StructuredUnderstandingInvocationTest {
         assertEquals(ChatProcessingAction.START_DECISION, context.getAction());
         assertEquals("STRUCTURED_UNDERSTANDING", context.getRoutingAssessment().getSource());
         assertEquals("ROUTING_ESCALATION", context.getStructuredInvocationTrigger());
+        assertTrue(context.isStructuredApplied());
+        assertEquals("ROUTING", context.getStructuredApplyPoint());
         verify(structured).understand(any(), any(), any());
     }
 
@@ -123,6 +125,9 @@ class StructuredUnderstandingInvocationTest {
 
         assertEquals(ChatProcessingAction.GENERAL_CHAT, context.getAction());
         assertEquals("MODEL", context.getRoutingAssessment().getSource());
+        assertTrue(context.isStructuredInvoked());
+        assertFalse(context.isStructuredApplied());
+        assertEquals("NOT_APPLIED", context.getStructuredApplyPoint());
         verify(structured).understand(any(), any(), any());
     }
 
@@ -136,6 +141,22 @@ class StructuredUnderstandingInvocationTest {
 
         context.getStructuredUnderstanding().setAmbiguities(java.util.List.of("ambiguous"));
         assertFalse((Boolean) ReflectionTestUtils.invokeMethod(service, "useStructuredActive", context));
+    }
+
+    @Test
+    void activeStructuredDeltaIsAttributedToExtraction() {
+        StructuredUnderstandingService structured = mock(StructuredUnderstandingService.class);
+        when(structured.understand(any(), any(), any())).thenReturn(validMutation());
+        ChatOrchestrationService service = configured(structured, "active");
+        ReflectionTestUtils.setField(service, "constraintExtractor", mock(ConstraintExtractor.class));
+        ChatProcessingContext context = context(message("便宜点"));
+
+        ReflectionTestUtils.invokeMethod(service, "ensureCriteriaDelta", context);
+
+        assertTrue(context.isStructuredInvoked());
+        assertTrue(context.isStructuredApplied());
+        assertEquals("EXTRACTION", context.getStructuredApplyPoint());
+        assertEquals(-1, context.getCriteriaDelta().getBudgetDirection());
     }
 
     private ChatOrchestrationService configured(StructuredUnderstandingService structured, String mode) {
@@ -175,6 +196,22 @@ class StructuredUnderstandingInvocationTest {
         act.setType(SemanticAct.Type.REQUEST_RECOMMENDATION);
         TurnSemanticIR ir = new TurnSemanticIR();
         ir.getActs().add(act);
+        StructuredUnderstandingResult result = new StructuredUnderstandingResult();
+        result.setValid(true);
+        result.setIr(ir);
+        return result;
+    }
+
+    private StructuredUnderstandingResult validMutation() {
+        SemanticAct act = new SemanticAct();
+        act.setType(SemanticAct.Type.MUTATE_CRITERIA);
+        com.hmdp.ai.dto.CriteriaDeltaOperation delta = new com.hmdp.ai.dto.CriteriaDeltaOperation();
+        delta.setField(com.hmdp.ai.dto.CriteriaDeltaOperation.Field.BUDGET_PER_PERSON);
+        delta.setOperation(com.hmdp.ai.dto.CriteriaDeltaOperation.Operation.DECREASE);
+        delta.setRawValue("便宜点");
+        TurnSemanticIR ir = new TurnSemanticIR();
+        ir.getActs().add(act);
+        ir.getCriteriaDelta().add(delta);
         StructuredUnderstandingResult result = new StructuredUnderstandingResult();
         result.setValid(true);
         result.setIr(ir);

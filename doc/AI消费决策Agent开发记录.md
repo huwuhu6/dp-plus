@@ -2390,3 +2390,15 @@ Structured Understanding 原先在 bootstrap 无条件调用，导致连明确�
 Tool JSON Schema 改为真实 `enum`（SemanticAct、Reference scope、Criteria field/operation、DecisionContextQuery、ShopFactQuery），Java validator 继续作为第二层 fail-closed 保护；不再只在 description 写枚举后依赖 Jackson 的 unknown-enum null。Root 仅要求每 Turn 固定存在的 `version/acts/references/criteriaDelta/shopFactQueries/ambiguities` 集合，optional 的 `locationExpression` 与 `decisionContextQuery` 可直接缺失，避免模型被 required contract 诱导伪造空 LOCATION 或 `CURRENT_CRITERIA` 查询对象。逐 Turn trace 新增 `structuredInvoked` 与 `structuredInvocationTrigger`，以便后续评测解释调用原因并核对同 Turn 至多一次。
 
 本轮仅执行 `StructuredUnderstandingServiceTest`、`StructuredUnderstandingAdapterTest`、`StructuredUnderstandingInvocationTest` 定向单测；未重新运行 Shadow/Active 或任何 conversation/holdout/robustness 评测，因此不宣称调用量、性能或正确率已有提升，仍需下一轮 paired Shadow/Active 验证。
+
+### Structured Understanding Active Safety 与评测归因加固（2026-09-10）
+
+Active Adapter 的数值 delta 不能以“rawValue 能否解析”为操作语义来源：`DECREASE + 20` 若直接写成预算 20，会把相对幅度错误地伪装成绝对值；`SET + 一百` 也不能因为 Java 无法解析就降级成方向调整。本轮先按 `Operation` 分支：只有 Java 能无损表示的绝对 `SET` 进入 Active；纯方向的 `INCREASE/DECREASE` 映射为现有 `budgetDirection/radiusDirection`；任何具体相对幅度均 fail-closed 回退 legacy，不为实验增加金额或距离差值状态。`NEARBY CLEAR` 同时修正为 enum 比较，避免 String/enum 比较错误把清除附近限制反向写成开启。
+
+第一阶段 Active 仅接受由 `REQUEST_RECOMMENDATION` 与/或 `MUTATE_CRITERIA` 组成的完整 act 集合，稳定映射为 `START_DECISION`。任何 `ASK_SHOP_FACT`、`ASK_DECISION_CONTEXT`、`EXPLORE_ALTERNATIVE`、`RESET_INTENT`、`CHITCHAT_OR_UNKNOWN` 或未知 act 的混入都会整体回退，不能因其中恰好存在一个可执行 act 而静默丢失用户语义。含 `anchorReferenceId` 的 delta 也继续回退，因为 Structured Active 尚未接入 Reference Resolver。
+
+Java validator 继续独立于 Tool Schema fail-closed：`version` 缺失/非 `v1`、空 acts、重复 reference id、以及 delta/shop fact/context query 的 dangling reference 都会 invalid。DTO 默认值不会再把 provider 省略的 `version` 洗成有效 `v1`。
+
+逐 Turn trace 新增 `structuredApplied` 与 `structuredApplyPoint`（`ROUTING`、`EXTRACTION`、`NOT_APPLIED`）。这与 `structuredInvoked/structuredInvocationTrigger` 分离：模型被调用但 unsafe 或失败后走 legacy 时是 invoked 但未 applied；只有 Adapter 真正决定 routing 或 criteria delta 时才标记 applied。实验期仍只保证 `STRUCTURED_UNDERSTANDING` 自身每 Turn 至多一次；fail-closed fallback 的 Turn 仍可调用 legacy Routing/Extraction 模型，尚不宣称全局 semantic call 至多一次。
+
+本轮仅执行 `mvn -q "-Dtest=StructuredUnderstandingServiceTest,StructuredUnderstandingAdapterTest,StructuredUnderstandingInvocationTest" test`：20 tests、0 failures、0 errors、0 skipped。未运行任何 conversation-v1、holdout、robustness 或真实 LLM，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。

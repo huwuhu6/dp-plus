@@ -61,6 +61,8 @@ public class ChatProcessingContext {
     /** Evaluation-only invocation provenance; this data is request-scoped and never durable state. */
     private boolean structuredInvoked;
     private String structuredInvocationTrigger = "NOT_INVOKED";
+    private boolean structuredApplied;
+    private String structuredApplyPoint = "NOT_APPLIED";
     private RoutingDecisionAssessment routingAssessment;
     private ChatMessageResponse response;
 
