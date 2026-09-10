@@ -436,6 +436,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         if (extracted == null) ensureStructuredUnderstanding(context, "CONSTRAINT_EXTRACTION");
         if (extracted == null && useStructuredActive(context)) {
             extracted = structuredUnderstandingAdapter.toConstraints(context.getStructuredUnderstanding());
+            markStructuredApplied(context, "EXTRACTION");
         }
         if (extracted == null) {
             // The original turn is the semantic source. Rewritten text may only enrich

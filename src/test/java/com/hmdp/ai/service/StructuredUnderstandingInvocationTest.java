@@ -159,6 +159,46 @@ class StructuredUnderstandingInvocationTest {
         assertEquals(-1, context.getCriteriaDelta().getBudgetDirection());
     }
 
+    @Test
+    void deterministicStartDecisionAttributesStructuredConsumptionInRealCriteriaReduction() {
+        StructuredUnderstandingService structured = mock(StructuredUnderstandingService.class);
+        when(structured.understand(any(), any(), any())).thenReturn(validCuisineMutation());
+        ChatOrchestrationService service = configured(structured, "active");
+        ConstraintExtractor extractor = mock(ConstraintExtractor.class);
+        ConversationStateService state = mock(ConversationStateService.class);
+        ConversationCriteriaMerger merger = mock(ConversationCriteriaMerger.class);
+        ReflectionTestUtils.setField(service, "constraintExtractor", extractor);
+        ReflectionTestUtils.setField(service, "conversationStateService", state);
+        ReflectionTestUtils.setField(service, "criteriaMerger", merger);
+
+        com.hmdp.ai.dto.ConversationWorkingMemory memory = new com.hmdp.ai.dto.ConversationWorkingMemory();
+        com.hmdp.ai.dto.DecisionTaskState task = memory.ensureActiveTask();
+        com.hmdp.ai.dto.DecisionConstraints previous = new com.hmdp.ai.dto.DecisionConstraints();
+        com.hmdp.ai.dto.CriteriaMergeResult merged = new com.hmdp.ai.dto.CriteriaMergeResult();
+        merged.setConstraints(new com.hmdp.ai.dto.DecisionConstraints());
+        ChatProcessingContext context = context(message("推荐火锅"));
+        context.setWorkingMemory(memory);
+
+        when(state.activeCriteria(memory)).thenReturn(previous);
+        when(state.activeTask(memory)).thenReturn(task);
+        when(state.transitionTask(any(), any(), any())).thenReturn(
+                new ConversationStateService.TaskTransition("UPDATE", "REFINEMENT_OR_PARTIAL_REPLACEMENT", task.getTaskId(), task.getTaskId()));
+        when(state.latestCandidatePool(memory)).thenReturn(java.util.Collections.emptyList());
+        when(state.shownShopIds(memory)).thenReturn(java.util.Collections.emptyList());
+        when(state.workingMemory(context.getChatSession())).thenReturn(memory);
+        when(merger.merge(any(), any(), any(), any(), any(), any(), any())).thenReturn(merged);
+
+        service.route(context);
+        assertEquals(ChatProcessingAction.START_DECISION, context.getAction());
+        service.reduceCriteria(context);
+
+        assertTrue(context.isStructuredInvoked());
+        assertTrue(context.isStructuredApplied());
+        assertEquals("EXTRACTION", context.getStructuredApplyPoint());
+        assertEquals("火锅", context.getCriteriaDelta().getCuisine());
+        verifyNoInteractions(extractor);
+    }
+
     private ChatOrchestrationService configured(StructuredUnderstandingService structured, String mode) {
         ChatOrchestrationService service = new ChatOrchestrationService();
         ReflectionTestUtils.setField(service, "aiProperties", properties(mode));
@@ -209,6 +249,22 @@ class StructuredUnderstandingInvocationTest {
         delta.setField(com.hmdp.ai.dto.CriteriaDeltaOperation.Field.BUDGET_PER_PERSON);
         delta.setOperation(com.hmdp.ai.dto.CriteriaDeltaOperation.Operation.DECREASE);
         delta.setRawValue("便宜点");
+        TurnSemanticIR ir = new TurnSemanticIR();
+        ir.getActs().add(act);
+        ir.getCriteriaDelta().add(delta);
+        StructuredUnderstandingResult result = new StructuredUnderstandingResult();
+        result.setValid(true);
+        result.setIr(ir);
+        return result;
+    }
+
+    private StructuredUnderstandingResult validCuisineMutation() {
+        SemanticAct act = new SemanticAct();
+        act.setType(SemanticAct.Type.MUTATE_CRITERIA);
+        com.hmdp.ai.dto.CriteriaDeltaOperation delta = new com.hmdp.ai.dto.CriteriaDeltaOperation();
+        delta.setField(com.hmdp.ai.dto.CriteriaDeltaOperation.Field.CUISINE);
+        delta.setOperation(com.hmdp.ai.dto.CriteriaDeltaOperation.Operation.SET);
+        delta.setRawValue("火锅");
         TurnSemanticIR ir = new TurnSemanticIR();
         ir.getActs().add(act);
         ir.getCriteriaDelta().add(delta);

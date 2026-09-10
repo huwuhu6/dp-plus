@@ -30,6 +30,7 @@ public class StructuredUnderstandingAdapter {
                 && (ir.getShopFactQueries() == null || ir.getShopFactQueries().isEmpty())
                 && (ir.getAmbiguities() == null || ir.getAmbiguities().isEmpty())
                 && supportsAllActs(ir)
+                && hasRequiredActiveMutationPayload(ir)
                 && supportsAllDeltas(ir);
     }
 
@@ -89,6 +90,13 @@ public class StructuredUnderstandingAdapter {
             }
         }
         return true;
+    }
+
+    /** Active currently consumes mutations only through criteriaDelta. */
+    private boolean hasRequiredActiveMutationPayload(TurnSemanticIR ir) {
+        boolean mutatesCriteria = ir.getActs().stream()
+                .anyMatch(act -> act != null && act.getType() == SemanticAct.Type.MUTATE_CRITERIA);
+        return !mutatesCriteria || (ir.getCriteriaDelta() != null && !ir.getCriteriaDelta().isEmpty());
     }
 
     private void apply(DecisionConstraints target, CriteriaDeltaOperation operation) {

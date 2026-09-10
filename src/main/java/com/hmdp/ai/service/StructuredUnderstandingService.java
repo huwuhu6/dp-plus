@@ -94,7 +94,7 @@ public class StructuredUnderstandingService {
             result.setDurationMs(System.currentTimeMillis() - started);
             log.info("[AI][structured] event={} valid={} durationMs={} acts={} references={} deltas={} errors={}",
                     errors.isEmpty() ? "SUCCESS" : "INVALID", result.isValid(), result.getDurationMs(),
-                    ir.getActs().size(), ir.getReferences().size(), ir.getCriteriaDelta().size(), errors.size());
+                    sizeOf(ir.getActs()), sizeOf(ir.getReferences()), sizeOf(ir.getCriteriaDelta()), errors.size());
             return result;
         } catch (Exception e) {
             long duration = System.currentTimeMillis() - started;
@@ -190,6 +190,10 @@ public class StructuredUnderstandingService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private int sizeOf(List<?> values) {
+        return values == null ? 0 : values.size();
     }
 
     private void validateSpan(String text, Integer start, Integer end, String original, String path, List<String> errors) {

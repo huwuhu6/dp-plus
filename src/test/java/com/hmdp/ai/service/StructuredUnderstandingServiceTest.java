@@ -196,6 +196,23 @@ class StructuredUnderstandingServiceTest {
         assertTrue(dangling.getValidationErrors().contains("references[1].id_duplicate"));
     }
 
+    @Test
+    void malformedNullCollectionsPreserveValidationDiagnostics() throws Exception {
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        StructuredUnderstandingService service = service(client, "shadow");
+        when(client.chatCompletion(any(), any(), any(), eq("STRUCTURED_UNDERSTANDING"), any()))
+                .thenReturn(response("{\"version\":\"v1\",\"acts\":null,\"references\":null,"
+                        + "\"criteriaDelta\":null,\"shopFactQueries\":null,\"ambiguities\":null}"));
+
+        StructuredUnderstandingResult result = service.understand("你好", Collections.emptyList(), Collections.emptyMap());
+
+        assertFalse(result.isValid());
+        assertTrue(result.isFallback());
+        assertEquals("INVALID_EVIDENCE_OR_SCHEMA", result.getFailureReason());
+        assertTrue(result.getValidationErrors().containsAll(List.of(
+                "acts", "references", "criteriaDelta", "shopFactQueries", "ambiguities")));
+    }
+
     private StructuredUnderstandingService service(OpenAiCompatibleClient client, String mode) {
         StructuredUnderstandingService service = new StructuredUnderstandingService();
         AiProperties properties = new AiProperties();

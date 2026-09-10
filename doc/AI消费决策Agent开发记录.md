@@ -2402,3 +2402,13 @@ Java validator 继续独立于 Tool Schema fail-closed：`version` 缺失/非 `v
 逐 Turn trace 新增 `structuredApplied` 与 `structuredApplyPoint`（`ROUTING`、`EXTRACTION`、`NOT_APPLIED`）。这与 `structuredInvoked/structuredInvocationTrigger` 分离：模型被调用但 unsafe 或失败后走 legacy 时是 invoked 但未 applied；只有 Adapter 真正决定 routing 或 criteria delta 时才标记 applied。实验期仍只保证 `STRUCTURED_UNDERSTANDING` 自身每 Turn 至多一次；fail-closed fallback 的 Turn 仍可调用 legacy Routing/Extraction 模型，尚不宣称全局 semantic call 至多一次。
 
 本轮仅执行 `mvn -q "-Dtest=StructuredUnderstandingServiceTest,StructuredUnderstandingAdapterTest,StructuredUnderstandingInvocationTest" test`：20 tests、0 failures、0 errors、0 skipped。未运行任何 conversation-v1、holdout、robustness 或真实 LLM，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
+### Structured Active 接管归因与 IR 完整性补丁（2026-09-10）
+
+首次加入 `structuredApplied` 后，`ensureCriteriaDelta()` 已正确标记 Extraction，但真实 `START_DECISION → CriteriaReduction → prepareDecision()` 的本地 `extracted` 分支仍漏标：它会消费 Structured IR 并跳过 legacy `ConstraintExtractor`，评测却显示 invoked 未 applied。本轮在该消费点标记 `EXTRACTION`，并用公开 `route → reduceCriteria` 测试验证 Structured 菜系 delta 被实际合并、legacy extractor 零调用；调用 Structured 但 unsafe 后走 legacy 的 Turn 仍保持未 applied。
+
+Active Adapter 进一步要求：只要 acts 包含 `MUTATE_CRITERIA`，就必须有至少一个可安全映射的 `criteriaDelta`。单独的 `REQUEST_RECOMMENDATION` 可以没有 delta；与 mutation 混合时仍必须有 delta。Validator 保持语言 IR 的可扩展语义边界，不把“mutation 永远只能是 criteriaDelta”写死：未来 locationExpression 可成为 mutation payload；但当前 Active 仍因 location gate fail-closed。
+
+同时修复 malformed IR 的可观测性：validator 已生成的 null-collection errors 不会再在日志中因 `.size()` 二次 NPE 而被覆盖，Structured Result 保留 `INVALID_EVIDENCE_OR_SCHEMA` 与精确 `validationErrors`，不触发 repair LLM。
+
+本轮仅执行 `mvn -q "-Dtest=StructuredUnderstandingServiceTest,StructuredUnderstandingAdapterTest,StructuredUnderstandingInvocationTest" test`：23 tests、0 failures、0 errors、0 skipped。未运行 Shadow/Active、任何 conversation/holdout/robustness 评测或真实 LLM，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。

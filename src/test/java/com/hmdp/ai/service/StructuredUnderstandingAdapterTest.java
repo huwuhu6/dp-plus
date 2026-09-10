@@ -100,6 +100,11 @@ class StructuredUnderstandingAdapterTest {
         TurnSemanticIR supportedPair = new TurnSemanticIR();
         supportedPair.getActs().add(act(SemanticAct.Type.REQUEST_RECOMMENDATION));
         supportedPair.getActs().add(act(SemanticAct.Type.MUTATE_CRITERIA));
+        CriteriaDeltaOperation cuisineDelta = new CriteriaDeltaOperation();
+        cuisineDelta.setField(CriteriaDeltaOperation.Field.CUISINE);
+        cuisineDelta.setOperation(CriteriaDeltaOperation.Operation.SET);
+        cuisineDelta.setRawValue("火锅");
+        supportedPair.getCriteriaDelta().add(cuisineDelta);
         assertTrue(adapter.canApplySafely(valid(supportedPair)));
         assertEquals(ChatProcessingAction.START_DECISION, adapter.actionFor(supportedPair));
 
@@ -123,6 +128,27 @@ class StructuredUnderstandingAdapterTest {
                 CriteriaDeltaOperation.Operation.DECREASE, "便宜点");
         ir.getCriteriaDelta().get(0).setAnchorReferenceId("r1");
         assertFalse(adapter.canApplySafely(valid(ir)));
+    }
+
+    @Test
+    void mutationActRequiresSafeCriteriaPayloadButRecommendationDoesNot() {
+        StructuredUnderstandingAdapter adapter = new StructuredUnderstandingAdapter();
+        TurnSemanticIR recommendation = new TurnSemanticIR();
+        recommendation.getActs().add(act(SemanticAct.Type.REQUEST_RECOMMENDATION));
+        assertTrue(adapter.canApplySafely(valid(recommendation)));
+
+        TurnSemanticIR mutationWithoutDelta = new TurnSemanticIR();
+        mutationWithoutDelta.getActs().add(act(SemanticAct.Type.MUTATE_CRITERIA));
+        assertFalse(adapter.canApplySafely(valid(mutationWithoutDelta)));
+
+        TurnSemanticIR combinedWithoutDelta = new TurnSemanticIR();
+        combinedWithoutDelta.getActs().add(act(SemanticAct.Type.REQUEST_RECOMMENDATION));
+        combinedWithoutDelta.getActs().add(act(SemanticAct.Type.MUTATE_CRITERIA));
+        assertFalse(adapter.canApplySafely(valid(combinedWithoutDelta)));
+
+        TurnSemanticIR validPreferenceMutation = irWith(CriteriaDeltaOperation.Field.PREFERENCE,
+                CriteriaDeltaOperation.Operation.ADD, "安静");
+        assertTrue(adapter.canApplySafely(valid(validPreferenceMutation)));
     }
 
     private TurnSemanticIR irWith(CriteriaDeltaOperation.Field field,
