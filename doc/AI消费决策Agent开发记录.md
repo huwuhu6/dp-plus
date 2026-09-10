@@ -2382,3 +2382,11 @@ active smoke 验证了 `推荐火锅` 的结构化结果可被读取并继续执
 为避免后续为了分析逐 Turn Structured Understanding trace 而重复调用模型，新增 `tools/archive_conversation_eval.py` 和 Git 版本化目录 `eval_reports/structured_understanding/`。每个 Run 保存一份 JSON 快照，并由 `manifest.jsonl` 和 `SUMMARY.md` 提供机器索引及人工汇总。快照包含 Run 聚合指标、Case Result、逐轮 route/state/assertion、`modelCalls`（purpose、success、durationMs、promptTokens、completionTokens）、stage latency、Structured IR、valid/fallback/error 诊断；敏感字段会在写盘前脱敏。导出脚本只使用 GET API，不会提交或重跑评测；应用未启动时可用只读 MySQL source 导出历史 Run。
 
 Run147~152 已从数据库只读导出，均保留完整 Case Result 与逐轮 `turn_outputs_json`（147/148/149 为 off，150/151/152 为 shadow；逐轮 trace 覆盖率分别为 48/48、40/40、16/16、48/48、40/40、16/16）。Run 表没有历史 branch、routing/rewrite/structured model 独立字段，因此这些值在快照中标记 `unavailable`；Run 记录的 `gitCommit=8611c2f-dirty`、聚合指标和数据库 `create_time` 已保存。未来完成一个 Run 后执行：`python tools/archive_conversation_eval.py --run-id <id> --mode <off|shadow|active>`。这样 Baseline/Shadow 的原始数据可脱离数据库长期分析，不需要再次运行评测。
+
+### Structured Understanding 调用与 Schema 边界收敛（2026-09-10）
+
+Structured Understanding 原先在 bootstrap 无条件调用，导致连明确按钮、非餐饮领域 guard 等 Java 已能确定处理的 Turn 也额外产生一次语义模型调用，破坏每 Turn `0/1` semantic-call 的实验前提。现改为 request-scoped lazy-once：只有即将进入 legacy Routing Model fallback 时以 `ROUTING_ESCALATION` 触发，或真正需要 Constraint Extraction 时以 `CONSTRAINT_EXTRACTION` 触发；同一 `ChatProcessingContext` 缓存首次结果，后续触发直接复用，失败后不发起 structured repair。off 永不调用；shadow 只记录结果、继续 legacy；active 仍只有 Adapter 安全门通过时才消费 IR。selectedOption/Decision Event、暂停和位置状态机、location/context/reference fast path、non-dining domain guard 及其他确定性路由均优先于 Structured Authority。
+
+Tool JSON Schema 改为真实 `enum`（SemanticAct、Reference scope、Criteria field/operation、DecisionContextQuery、ShopFactQuery），Java validator 继续作为第二层 fail-closed 保护；不再只在 description 写枚举后依赖 Jackson 的 unknown-enum null。Root 仅要求每 Turn 固定存在的 `version/acts/references/criteriaDelta/shopFactQueries/ambiguities` 集合，optional 的 `locationExpression` 与 `decisionContextQuery` 可直接缺失，避免模型被 required contract 诱导伪造空 LOCATION 或 `CURRENT_CRITERIA` 查询对象。逐 Turn trace 新增 `structuredInvoked` 与 `structuredInvocationTrigger`，以便后续评测解释调用原因并核对同 Turn 至多一次。
+
+本轮仅执行 `StructuredUnderstandingServiceTest`、`StructuredUnderstandingAdapterTest`、`StructuredUnderstandingInvocationTest` 定向单测；未重新运行 Shadow/Active 或任何 conversation/holdout/robustness 评测，因此不宣称调用量、性能或正确率已有提升，仍需下一轮 paired Shadow/Active 验证。

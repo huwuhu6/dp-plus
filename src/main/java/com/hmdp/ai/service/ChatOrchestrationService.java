@@ -153,12 +153,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         Long activeSessionId = resolveActiveSessionId(state, request.getDecisionSessionId());
         context.setActiveDecisionSessionId(activeSessionId);
         context.setActiveDecision(activeSessionId == null ? null : decisionService.getDecision(activeSessionId));
-        if (structuredUnderstandingService != null) {
-            StructuredUnderstandingResult structured = structuredUnderstandingService.understand(
-                    context.getOriginalMessage(), context.getChatHistory(), structuredReadOnlyContext(context));
-            context.setStructuredUnderstandingResult(structured);
-            context.setStructuredUnderstanding(structured.getIr());
-        }
         context.setRoutingAssessment(assessRouting(context, false));
         log.info("[AI][chat] event=MEMORY_LOADED chatId={} messages={}", context.getChatId(), context.getChatHistory().size());
         log.info("[AI][chat] event=TURN_START chatId={} clientSessionId={} activeSessionId={} status={} query={}",
@@ -216,22 +210,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                     "waiting_relaxation_broaden_food_scope");
             assessment.setCandidateAction(com.hmdp.ai.service.pipeline.ChatProcessingAction.DECISION_EVENT);
             assessment.setSource("RULE");
-            return;
-        }
-        if (request.getSelectedOptionId() == null && useStructuredActive(context)
-                && !isPausedDecision(activeDecision)) {
-            com.hmdp.ai.service.pipeline.ChatProcessingAction structuredAction =
-                    structuredUnderstandingAdapter.actionFor(context.getStructuredUnderstanding());
-            if (structuredAction == com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION) {
-                context.setCriteriaDelta(structuredUnderstandingAdapter.toConstraints(context.getStructuredUnderstanding()));
-            }
-            context.setRoute(structuredAction.name());
-            selectAction(context, structuredAction, "structured_understanding");
-            assessment.setCandidateAction(structuredAction);
-            assessment.setSource("STRUCTURED_UNDERSTANDING");
-            assessment.setStateAllowed(true);
-            assessment.setShouldEscalate(false);
-            assessment.setReason("structured_ir_adapter");
             return;
         }
         if (request.getSelectedOptionId() != null && isPausedDecision(activeDecision)) {
@@ -352,6 +330,24 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 : resolveContextualFollowUpRoute(context.getChatId(), context.getEffectiveMessage(), context.getChatSession(),
                 context.getActiveDecisionSessionId(), activeDecision, context.getContextRewrite());
         if (route == null) {
+            // Deterministic event/state/domain/context guards above own their branches.
+            // Structured interpretation only participates at legacy routing escalation.
+            ensureStructuredUnderstanding(context, "ROUTING_ESCALATION");
+            if (!assessment.isConflictDetected() && useStructuredActive(context)) {
+                com.hmdp.ai.service.pipeline.ChatProcessingAction structuredAction =
+                        structuredUnderstandingAdapter.actionFor(context.getStructuredUnderstanding());
+                if (structuredAction == com.hmdp.ai.service.pipeline.ChatProcessingAction.START_DECISION) {
+                    context.setCriteriaDelta(structuredUnderstandingAdapter.toConstraints(context.getStructuredUnderstanding()));
+                }
+                context.setRoute(structuredAction.name());
+                selectAction(context, structuredAction, "structured_understanding_routing_escalation");
+                assessment.setCandidateAction(structuredAction);
+                assessment.setSource("STRUCTURED_UNDERSTANDING");
+                assessment.setStateAllowed(true);
+                assessment.setShouldEscalate(false);
+                assessment.setReason("structured_ir_adapter");
+                return;
+            }
             String modelRoute = route(context.getEffectiveMessage(), activeDecision == null ? "NONE" : activeDecision.getStatus(), context.getChatHistory());
             route = validateModelRoute(modelRoute, activeDecision, context.getEffectiveMessage());
             assessment.setSource("MODEL");
@@ -407,6 +403,10 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             response.setStructuredUnderstandingFallback(result.isFallback());
             response.setStructuredUnderstandingErrors(result.getValidationErrors());
         }
+        if (response != null) {
+            response.setStructuredInvoked(context.isStructuredInvoked());
+            response.setStructuredInvocationTrigger(context.getStructuredInvocationTrigger());
+        }
         context.setResponse(response);
     }
 
@@ -430,6 +430,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
         }
         com.hmdp.ai.dto.DecisionConstraints activeCriteriaBeforeExtraction = conversationStateService.activeCriteria(context.getWorkingMemory());
         com.hmdp.ai.dto.DecisionConstraints extracted = context.getCriteriaDelta();
+        if (extracted == null) ensureStructuredUnderstanding(context, "CONSTRAINT_EXTRACTION");
         if (extracted == null && useStructuredActive(context)) {
             extracted = structuredUnderstandingAdapter.toConstraints(context.getStructuredUnderstanding());
         }
@@ -576,6 +577,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     private void ensureCriteriaDelta(ChatProcessingContext context) {
         if (context.getCriteriaDelta() != null || constraintExtractor == null) return;
+        ensureStructuredUnderstanding(context, "CONSTRAINT_EXTRACTION");
         if (useStructuredActive(context)) {
             context.setCriteriaDelta(structuredUnderstandingAdapter.toConstraints(context.getStructuredUnderstanding()));
             return;
@@ -594,6 +596,29 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 && structuredUnderstandingAdapter.canApplySafely(context.getStructuredUnderstandingResult())
                 && aiProperties != null && aiProperties.getStructuredUnderstanding() != null
                 && aiProperties.getStructuredUnderstanding().isActive();
+    }
+
+    /** Request-scoped, lazy and memoized interpretation shared by routing and extraction. */
+    private StructuredUnderstandingResult ensureStructuredUnderstanding(ChatProcessingContext context, String trigger) {
+        if (context == null || !structuredModeEnabled()) return context == null ? null : context.getStructuredUnderstandingResult();
+        if (context.getStructuredUnderstandingResult() != null) return context.getStructuredUnderstandingResult();
+        if (structuredUnderstandingService == null) {
+            StructuredUnderstandingResult unavailable = StructuredUnderstandingResult.fallback("SERVICE_UNAVAILABLE", 0L);
+            context.setStructuredUnderstandingResult(unavailable);
+            return unavailable;
+        }
+        context.setStructuredInvoked(true);
+        context.setStructuredInvocationTrigger(trigger);
+        StructuredUnderstandingResult result = structuredUnderstandingService.understand(context.getOriginalMessage(), context.getChatHistory(),
+                structuredReadOnlyContext(context));
+        context.setStructuredUnderstandingResult(result);
+        context.setStructuredUnderstanding(result == null ? null : result.getIr());
+        return result;
+    }
+
+    private boolean structuredModeEnabled() {
+        return aiProperties != null && aiProperties.getStructuredUnderstanding() != null
+                && aiProperties.getStructuredUnderstanding().isEnabled();
     }
 
     private Map<String, Object> structuredReadOnlyContext(ChatProcessingContext context) {
@@ -1106,18 +1131,6 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             assessment.setStateAllowed(isPausedDecision(decision));
             assessment.setShouldEscalate(!assessment.isStateAllowed());
             assessment.setReason("selected_option_command");
-            return assessment;
-        }
-        if (useStructuredActive(context)) {
-            com.hmdp.ai.service.pipeline.ChatProcessingAction structuredAction =
-                    structuredUnderstandingAdapter.actionFor(context.getStructuredUnderstanding());
-            assessment.setCandidateAction(structuredAction);
-            assessment.setSource("STRUCTURED_UNDERSTANDING");
-            assessment.setStateAllowed(true);
-            assessment.setShouldEscalate(false);
-            assessment.setContextRequired(false);
-            assessment.setContextResolved(true);
-            assessment.setReason("structured_ir_preflight");
             return assessment;
         }
         boolean reference = isReferenceMessage(message);

@@ -18,5 +18,7 @@ public class IntentRoutingNode implements ChatPipelineNode {
             event.getMetadata().put("stateAllowed", context.getRoutingAssessment().isStateAllowed());
             event.getMetadata().put("shouldEscalate", context.getRoutingAssessment().isShouldEscalate());
         }
+        event.getMetadata().put("structuredInvoked", context.isStructuredInvoked());
+        event.getMetadata().put("structuredInvocationTrigger", context.getStructuredInvocationTrigger());
     }
 }

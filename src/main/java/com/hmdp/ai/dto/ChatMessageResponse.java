@@ -23,6 +23,8 @@ public class ChatMessageResponse {
     private Boolean structuredUnderstandingValid;
     private Boolean structuredUnderstandingFallback;
     private List<String> structuredUnderstandingErrors;
+    private Boolean structuredInvoked;
+    private String structuredInvocationTrigger;
     private String policyAction;
     private String policyReason;
     /** Business output may be valid even when a post-execution durable trace record failed. */

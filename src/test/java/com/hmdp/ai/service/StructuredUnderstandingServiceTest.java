@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -90,6 +92,75 @@ class StructuredUnderstandingServiceTest {
         assertTrue(result.isValid());
         assertEquals(null, result.getIr().getLocationExpression());
         assertEquals(null, result.getIr().getDecisionContextQuery());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void toolSchemaUsesEnumsAndDoesNotRequireOptionalObjects() {
+        StructuredUnderstandingService service = service(mock(OpenAiCompatibleClient.class), "active");
+
+        Map<String, Object> schema = service.schema();
+        Map<String, Object> rootProperties = (Map<String, Object>) schema.get("properties");
+        List<String> required = (List<String>) schema.get("required");
+        assertTrue(required.containsAll(List.of("version", "acts", "references", "criteriaDelta", "shopFactQueries", "ambiguities")));
+        assertFalse(required.contains("locationExpression"));
+        assertFalse(required.contains("decisionContextQuery"));
+
+        Map<String, Object> acts = (Map<String, Object>) rootProperties.get("acts");
+        Map<String, Object> actProperties = (Map<String, Object>) ((Map<String, Object>) acts.get("items")).get("properties");
+        Map<String, Object> actType = (Map<String, Object>) actProperties.get("type");
+        assertEquals(List.of("REQUEST_RECOMMENDATION", "MUTATE_CRITERIA", "ASK_SHOP_FACT", "ASK_DECISION_CONTEXT",
+                "EXPLORE_ALTERNATIVE", "RESET_INTENT", "CHITCHAT_OR_UNKNOWN"), actType.get("enum"));
+
+        Map<String, Object> delta = (Map<String, Object>) rootProperties.get("criteriaDelta");
+        Map<String, Object> deltaProperties = (Map<String, Object>) ((Map<String, Object>) delta.get("items")).get("properties");
+        Map<String, Object> deltaField = (Map<String, Object>) deltaProperties.get("field");
+        Map<String, Object> deltaOperation = (Map<String, Object>) deltaProperties.get("operation");
+        assertTrue(((List<String>) deltaField.get("enum")).contains("BUDGET_PER_PERSON"));
+        assertTrue(((List<String>) deltaOperation.get("enum")).contains("CLEAR"));
+
+        Map<String, Object> references = (Map<String, Object>) rootProperties.get("references");
+        Map<String, Object> referenceProperties = (Map<String, Object>) ((Map<String, Object>) references.get("items")).get("properties");
+        assertTrue(((List<String>) ((Map<String, Object>) referenceProperties.get("scope")).get("enum")).contains("FOCUSED"));
+        Map<String, Object> query = (Map<String, Object>) rootProperties.get("decisionContextQuery");
+        Map<String, Object> queryProperties = (Map<String, Object>) query.get("properties");
+        assertTrue(((List<String>) ((Map<String, Object>) queryProperties.get("type")).get("enum")).contains("WHY_RECOMMENDED"));
+        Map<String, Object> facts = (Map<String, Object>) rootProperties.get("shopFactQueries");
+        Map<String, Object> factProperties = (Map<String, Object>) ((Map<String, Object>) facts.get("items")).get("properties");
+        assertTrue(((List<String>) ((Map<String, Object>) factProperties.get("type")).get("enum")).contains("EVIDENCE"));
+    }
+
+    @Test
+    void omittedOptionalObjectsRemainAbsentWithoutNormalizationRepair() throws Exception {
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        StructuredUnderstandingService service = service(client, "shadow");
+        when(client.chatCompletion(any(), any(), any(), eq("STRUCTURED_UNDERSTANDING"), any()))
+                .thenReturn(response("{\"version\":\"v1\",\"acts\":[{\"type\":\"REQUEST_RECOMMENDATION\","
+                        + "\"evidence\":{\"text\":\"推荐火锅\",\"start\":0,\"end\":4}}],"
+                        + "\"references\":[],\"criteriaDelta\":[],\"shopFactQueries\":[],\"ambiguities\":[]}"));
+
+        StructuredUnderstandingResult result = service.understand("推荐火锅", Collections.emptyList(), Collections.emptyMap());
+
+        assertTrue(result.isValid());
+        assertEquals(null, result.getIr().getLocationExpression());
+        assertEquals(null, result.getIr().getDecisionContextQuery());
+    }
+
+    @Test
+    void unknownEnumFailsClosedAfterProviderSchemaBoundary() throws Exception {
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        StructuredUnderstandingService service = service(client, "active");
+        when(client.chatCompletion(any(), any(), any(), eq("STRUCTURED_UNDERSTANDING"), any()))
+                .thenReturn(response("{\"version\":\"v1\",\"acts\":[{\"type\":\"UNKNOWN_ACT\","
+                        + "\"evidence\":{\"text\":\"推荐火锅\",\"start\":0,\"end\":4}}],"
+                        + "\"references\":[],\"criteriaDelta\":[],\"shopFactQueries\":[],\"ambiguities\":[]}"));
+
+        StructuredUnderstandingResult result = service.understand("推荐火锅", Collections.emptyList(), Collections.emptyMap());
+
+        assertFalse(result.isValid());
+        assertTrue(result.isFallback());
+        assertTrue(result.getValidationErrors().contains("acts[0].type"));
+        verify(client).chatCompletion(any(), any(), any(), eq("STRUCTURED_UNDERSTANDING"), any());
     }
 
     private StructuredUnderstandingService service(OpenAiCompatibleClient client, String mode) {

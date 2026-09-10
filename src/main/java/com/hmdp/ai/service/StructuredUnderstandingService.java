@@ -11,6 +11,7 @@ import com.hmdp.ai.dto.LocationExpression;
 import com.hmdp.ai.dto.SemanticAct;
 import com.hmdp.ai.dto.SemanticEvidence;
 import com.hmdp.ai.dto.SemanticReference;
+import com.hmdp.ai.dto.ShopFactQueryType;
 import com.hmdp.ai.dto.ShopFactSemanticQuery;
 import com.hmdp.ai.dto.StructuredUnderstandingResult;
 import com.hmdp.ai.dto.TurnSemanticIR;
@@ -105,20 +106,24 @@ public class StructuredUnderstandingService {
             return errors;
         }
         if (ir.getVersion() != null && !"v1".equalsIgnoreCase(ir.getVersion())) errors.add("version");
-        if (ir.getActs() != null) for (int i = 0; i < ir.getActs().size(); i++) {
+        if (ir.getActs() == null) errors.add("acts");
+        else for (int i = 0; i < ir.getActs().size(); i++) {
             SemanticAct item = ir.getActs().get(i);
             if (item == null || item.getType() == null) errors.add("acts[" + i + "].type");
             if (item == null || item.getEvidence() == null) errors.add("acts[" + i + "].evidence_missing");
             else validateEvidence(item.getEvidence(), original, "acts[" + i + "]", errors);
         }
-        if (ir.getReferences() != null) for (int i = 0; i < ir.getReferences().size(); i++) {
+        if (ir.getReferences() == null) errors.add("references");
+        else for (int i = 0; i < ir.getReferences().size(); i++) {
             SemanticReference item = ir.getReferences().get(i);
+            if (item == null || item.getId() == null || item.getId().isBlank()) errors.add("references[" + i + "].id");
             if (item == null || item.getScope() == null) errors.add("references[" + i + "].scope");
             validateSpan(item == null ? null : item.getSurface(), item == null ? null : item.getStart(),
                     item == null ? null : item.getEnd(), original, "references[" + i + "]", errors);
             if (item != null) validateEvidence(item.getEvidence(), original, "references[" + i + "].evidence", errors);
         }
-        if (ir.getCriteriaDelta() != null) for (int i = 0; i < ir.getCriteriaDelta().size(); i++) {
+        if (ir.getCriteriaDelta() == null) errors.add("criteriaDelta");
+        else for (int i = 0; i < ir.getCriteriaDelta().size(); i++) {
             CriteriaDeltaOperation item = ir.getCriteriaDelta().get(i);
             if (item == null || item.getField() == null) errors.add("criteriaDelta[" + i + "].field");
             if (item == null || item.getOperation() == null) errors.add("criteriaDelta[" + i + "].operation");
@@ -126,11 +131,16 @@ public class StructuredUnderstandingService {
             else validateEvidence(item.getEvidence(), original, "criteriaDelta[" + i + "]", errors);
         }
         LocationExpression location = ir.getLocationExpression();
-        if (location != null && location.getRawText() != null && !location.getRawText().isBlank()) {
-            if (location.getEvidence() == null) errors.add("locationExpression.evidence_missing");
-            else validateEvidence(location.getEvidence(), original, "locationExpression", errors);
+        if (location != null) {
+            if (location.getRawText() == null) errors.add("locationExpression.rawText");
+            if (location.getReset() == null) errors.add("locationExpression.reset");
+            if (location.getRawText() != null && !location.getRawText().isBlank()) {
+                if (location.getEvidence() == null) errors.add("locationExpression.evidence_missing");
+                else validateEvidence(location.getEvidence(), original, "locationExpression", errors);
+            }
         }
-        if (ir.getShopFactQueries() != null) for (int i = 0; i < ir.getShopFactQueries().size(); i++) {
+        if (ir.getShopFactQueries() == null) errors.add("shopFactQueries");
+        else for (int i = 0; i < ir.getShopFactQueries().size(); i++) {
             ShopFactSemanticQuery item = ir.getShopFactQueries().get(i);
             if (item == null || item.getType() == null) errors.add("shopFactQueries[" + i + "].type");
             if (item == null || item.getEvidence() == null) errors.add("shopFactQueries[" + i + "].evidence_missing");
@@ -139,6 +149,7 @@ public class StructuredUnderstandingService {
         if (ir.getDecisionContextQuery() != null && ir.getDecisionContextQuery().getType() == null) {
             errors.add("decisionContextQuery.type");
         }
+        if (ir.getAmbiguities() == null) errors.add("ambiguities");
         return errors;
     }
 
@@ -181,11 +192,12 @@ public class StructuredUnderstandingService {
                 + "所有 business truth 由 Java resolver、merger、policy 和 tool 层决定。";
     }
 
-    private Map<String, Object> schema() {
+    /** Package-visible for schema-contract tests; this is the exact tool schema sent to the provider. */
+    Map<String, Object> schema() {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("type", "object");
         Map<String, Object> p = new LinkedHashMap<>();
-        p.put("version", property("string", "v1"));
+        p.put("version", enumProperty("string", "Turn Semantic IR version", "v1"));
         p.put("acts", array("semantic act", actSchema()));
         p.put("references", array("linguistic references only", referenceSchema()));
         p.put("criteriaDelta", array("raw constraint operations", deltaSchema()));
@@ -194,23 +206,25 @@ public class StructuredUnderstandingService {
         p.put("shopFactQueries", array("shop fact requests", factSchema()));
         p.put("ambiguities", array("unresolved linguistic ambiguity", property("string", "ambiguity")));
         root.put("properties", p);
-        root.put("required", new ArrayList<>(p.keySet()));
+        // Optional single-object fields must be omitted when no linguistic fact is present.
+        // Requiring them made providers fabricate empty location/query objects.
+        root.put("required", List.of("version", "acts", "references", "criteriaDelta", "shopFactQueries", "ambiguities"));
         root.put("additionalProperties", false);
         return root;
     }
 
     private Map<String, Object> actSchema() {
         Map<String, Object> p = new LinkedHashMap<>();
-        p.put("type", property("string", "REQUEST_RECOMMENDATION, MUTATE_CRITERIA, ASK_SHOP_FACT, ASK_DECISION_CONTEXT, EXPLORE_ALTERNATIVE, RESET_INTENT, CHITCHAT_OR_UNKNOWN"));
+        p.put("type", enumProperty("string", "linguistic act", SemanticAct.Type.values()));
         p.put("evidence", evidenceSchema());
         p.put("details", array("details", property("string", "raw semantic detail")));
-        return object(p, p.keySet());
+        return object(p, java.util.Set.of("type", "evidence"));
     }
 
     private Map<String, Object> referenceSchema() {
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("id", property("string", "turn-local reference id"));
-        p.put("scope", property("string", "LATEST, EARLIEST, FOCUSED, UNSPECIFIED"));
+        p.put("scope", enumProperty("string", "reference scope", SemanticReference.Scope.values()));
         p.put("ordinal", property("integer", "ordinal, null when not ordinal"));
         p.put("surface", property("string", "exact surface"));
         p.put("start", property("integer", "inclusive start"));
@@ -218,17 +232,17 @@ public class StructuredUnderstandingService {
         p.put("qualifier", property("string", "optional qualifier"));
         p.put("deictic", property("boolean", "deictic reference"));
         p.put("evidence", evidenceSchema());
-        return object(p, p.keySet());
+        return object(p, java.util.Set.of("id", "scope", "surface", "start", "end", "evidence"));
     }
 
     private Map<String, Object> deltaSchema() {
         Map<String, Object> p = new LinkedHashMap<>();
-        p.put("field", property("string", "BUDGET_PER_PERSON, RADIUS_KM, NEARBY, CUISINE, EXCLUDED_CUISINE, KEYWORD, PREFERENCE, ARRIVAL_TIME"));
-        p.put("operation", property("string", "SET, INCREASE, DECREASE, ADD, REMOVE, CLEAR"));
+        p.put("field", enumProperty("string", "criteria field", CriteriaDeltaOperation.Field.values()));
+        p.put("operation", enumProperty("string", "criteria operation", CriteriaDeltaOperation.Operation.values()));
         p.put("rawValue", property("string", "raw semantic value"));
         p.put("anchorReferenceId", property("string", "optional turn-local reference id"));
         p.put("evidence", evidenceSchema());
-        return object(p, p.keySet());
+        return object(p, java.util.Set.of("field", "operation", "evidence"));
     }
 
     private Map<String, Object> locationSchema() {
@@ -236,23 +250,23 @@ public class StructuredUnderstandingService {
         p.put("rawText", property("string", "raw location mention"));
         p.put("reset", property("boolean", "whether location is reset"));
         p.put("evidence", evidenceSchema());
-        return object(p, p.keySet());
+        return object(p, java.util.Set.of("rawText", "reset"));
     }
 
     private Map<String, Object> querySchema() {
         Map<String, Object> p = new LinkedHashMap<>();
-        p.put("type", property("string", "WHY_RECOMMENDED, CONSTRAINT_PROVENANCE, CURRENT_CRITERIA, EXECUTED_SEARCH_SCOPE"));
+        p.put("type", enumProperty("string", "decision context query type", DecisionContextSemanticQuery.Type.values()));
         p.put("referenceId", property("string", "optional reference id"));
         p.put("constraintKey", property("string", "canonical query key only"));
-        return object(p, p.keySet());
+        return object(p, java.util.Set.of("type"));
     }
 
     private Map<String, Object> factSchema() {
         Map<String, Object> p = new LinkedHashMap<>();
-        p.put("type", property("string", "STATIC_DETAIL, EVIDENCE, VOUCHER"));
+        p.put("type", enumProperty("string", "shop fact query type", ShopFactQueryType.values()));
         p.put("referenceId", property("string", "reference id"));
         p.put("evidence", evidenceSchema());
-        return object(p, p.keySet());
+        return object(p, java.util.Set.of("type", "evidence"));
     }
 
     private Map<String, Object> evidenceSchema() {
@@ -276,6 +290,20 @@ public class StructuredUnderstandingService {
 
     private Map<String, Object> property(String type, String description) {
         Map<String, Object> value = new LinkedHashMap<>(); value.put("type", type); value.put("description", description); return value;
+    }
+
+    private Map<String, Object> enumProperty(String type, String description, Enum<?>... values) {
+        List<String> names = new ArrayList<>();
+        for (Enum<?> value : values) names.add(value.name());
+        Map<String, Object> property = property(type, description);
+        property.put("enum", names);
+        return property;
+    }
+
+    private Map<String, Object> enumProperty(String type, String description, String... values) {
+        Map<String, Object> property = property(type, description);
+        property.put("enum", List.of(values));
+        return property;
     }
 
     private Map<String, Object> message(String role, String content) {
