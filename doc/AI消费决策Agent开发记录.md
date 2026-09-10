@@ -2412,3 +2412,13 @@ Active Adapter 进一步要求：只要 acts 包含 `MUTATE_CRITERIA`，就必�
 同时修复 malformed IR 的可观测性：validator 已生成的 null-collection errors 不会再在日志中因 `.size()` 二次 NPE 而被覆盖，Structured Result 保留 `INVALID_EVIDENCE_OR_SCHEMA` 与精确 `validationErrors`，不触发 repair LLM。
 
 本轮仅执行 `mvn -q "-Dtest=StructuredUnderstandingServiceTest,StructuredUnderstandingAdapterTest,StructuredUnderstandingInvocationTest" test`：23 tests、0 failures、0 errors、0 skipped。未运行 Shadow/Active、任何 conversation/holdout/robustness 评测或真实 LLM，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
+
+### Structured Understanding 正式 Shadow 评测与离线归档分析（2026-09-10）
+
+在实验分支 `feat/structured-understanding-experiment`、基线 `9f7c9dbf403fe872a7feb032001447a275bd6865` 上，先完成全量 `mvn -q test`（Surefire 60 个 report，0 failures、0 errors），再按顺序且各执行一次正式 Shadow：Run153 `conversation-v1`（40 Case、28 Complete、Route 37、Tool 32、Final 40、Locality 40）与 Run154 `conversation-robustness-v1`（48 Case、21 Complete、Route 44、Tool 47、Final 39、Locality 48）。未运行 holdout，也没有运行 Active 或第二次评测。两次 Run 均立即通过 `tools/archive_conversation_eval.py` 留档为 `eval_reports/structured_understanding/run-153.json`、`run-154.json`；归档保留逐 Turn 的 modelCalls、stage latency、IR、validation/fallback、route/state/assertion trace。Run 时工作树含评测归档文件，因此快照如实记录 `git=9f7c9db-dirty`，不伪装为 clean commit。
+
+新增纯离线 `tools/analyze_structured_shadow.py`，只读取归档 JSON，不访问应用、数据库、HTTP 或模型；输出 `shadow_analysis_153_154.json/.md`。统计口径把语义调用严格限定为 `REWRITE/ROUTING/EXTRACTION`，不把最终回答等 `OTHER` 混入。Run153 的 78 Turn 语义调用形状为 0/1/2 = 18/56/4，Structured invoked 60 次（`CONSTRAINT_EXTRACTION` 53、`ROUTING_ESCALATION` 7），31 valid、29 invalid/fallback；Run154 的 99 Turn 为 16/72/11，Structured invoked 83 次（67/16），44 valid、39 invalid/fallback。所有 Turn 均满足 Shadow `structuredApplied=0`，且每 Turn `STRUCTURED_UNDERSTANDING` 至多一次，说明旁路观测没有取得业务 authority。
+
+失败主要是 evidence span 校验：`acts[*].evidence`、`criteriaDelta[*].evidence`、`locationExpression.evidence(_missing)` 和少量 reference evidence，而不是 Java 状态或 Tool 失败；精确 IR 和 validation errors 已在 JSON 中保留，便于后续人工校对。相对已归档 off 基线 Run148/147，Run153 的 Complete/Route/Tool 各 +1、Final/Locality 不变，Run154 的 Complete/Route/Tool/Final/Locality 全部不变；这只是跨运行 safety observation，不能归因给 Shadow。
+
+同 Turn paired cost 不支持进入 Active：在所有 structured-invoked Turn 上，Run153 Structured 平均 latency 9.84s 对 legacy 6.92s（+42.28%），token 2795 对 2499（+11.86%）；Run154 latency 12.85s 对 8.49s（+51.44%），token 2470 对 2600（-5.01%）。即使把每个 invoked Turn 的 legacy semantic calls 理论替换为一次 structured call，调用次数上限也仅从 64→60（6.25%）和 94→83（11.70%）；这是 projection，不是 Active 实测。由于 valid 比率只有 51.67% / 53.01%，并且延迟系统性变差，本阶段结论为 `STOP_OR_REDESIGN`，不进入 `GO_TO_ACTIVE_PURE_CRITERIA`。后续如重启实验，应先处理 IR evidence span 可验证性与调用成本，再重新做 paired Shadow；不应从本次 Shadow 推出 Active 收益。
