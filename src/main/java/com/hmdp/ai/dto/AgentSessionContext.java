@@ -25,4 +25,10 @@ public class AgentSessionContext {
     private String referenceIntentMessage;
     private DecisionRequest decisionRequest;
     private DecisionConstraints decisionConstraints;
+
+    /** Explicit reference intents must resolve before a single-shop tool can inherit focus. */
+    public boolean hasUnresolvedReference() {
+        return referenceIntents != null && !referenceIntents.isEmpty()
+                && (resolvedReferences == null || resolvedReferences.size() < referenceIntents.size());
+    }
 }

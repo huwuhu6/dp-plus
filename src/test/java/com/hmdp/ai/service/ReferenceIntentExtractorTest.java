@@ -109,6 +109,15 @@ class ReferenceIntentExtractorTest {
         assertEquals(ReferenceIntent.Scope.FOCUSED, intents.get(0).getScope());
     }
 
+    @Test
+    void extractsAllSupportedFocusedSurfaceVariants() {
+        List<ReferenceIntent> intents = extractor.extract("这一家、那一家、这一个、那个、那一个怎么样？");
+        assertEquals(5, intents.size());
+        assertTrue(intents.stream().allMatch(item -> item.getScope() == ReferenceIntent.Scope.FOCUSED));
+        assertTrue(ShopReferenceDetector.containsFocusedReference("这一家怎么样？"));
+        assertTrue(ShopReferenceDetector.containsFocusedReference("那个怎么样？"));
+    }
+
     private ReferenceIntentExtractor withModel(String arguments) throws Exception {
         OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
         when(client.chatCompletion(anyList(), anyList(), isNull(), any(String.class)))

@@ -116,6 +116,9 @@ public class ToolExecutionOrchestrator {
         outcome.setOrder(request.getOrder());
         outcome.setToolName(request.getToolName());
         try {
+            if (context != null && context.hasUnresolvedReference() && isSingleShopTool(request.getToolName())) {
+                throw new IllegalArgumentException("商户引用未解析");
+            }
             BaseAgentTool tool = toolRegistry.find(request.getToolName());
             Map<String, Object> input = objectMapper.readValue(blankToObject(request.getArguments()), new TypeReference<Map<String, Object>>() { });
             if (request.getExplicitlyReferencedShopId() != null && isSingleShopTool(request.getToolName())
@@ -203,7 +206,8 @@ public class ToolExecutionOrchestrator {
     /** Materializes all state required by tools into a per-request input snapshot. */
     private void enrichWithDeterministicContext(Map<String, Object> input, String toolName, AgentSessionContext context) {
         if (context == null) return;
-        if (isSingleShopTool(toolName) && !input.containsKey("shopId") && context.getFocusedShopId() != null) {
+        if (isSingleShopTool(toolName) && !context.hasUnresolvedReference()
+                && !input.containsKey("shopId") && context.getFocusedShopId() != null) {
             input.put("shopId", context.getFocusedShopId());
         }
         if ("compare_shops".equals(toolName) && !input.containsKey("shopId") && context.getFocusedShopId() != null) {

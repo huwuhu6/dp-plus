@@ -1553,4 +1553,11 @@ class ChatOrchestrationServiceTest {
         assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isShopInquiry", "这家店有什么优惠"));
         assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isFocusedShopQuestion", "这家店有什么优惠"));
     }
+
+    @Test
+    void routingFocusedReferenceVariantsUseSharedDetector() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isFocusedShopQuestion", "这一家怎么样？"));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(service, "isFocusedShopQuestion", "那个有优惠吗？"));
+    }
 }

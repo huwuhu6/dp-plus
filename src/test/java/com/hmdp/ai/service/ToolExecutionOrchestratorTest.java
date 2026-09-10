@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.AgentSessionContext;
 import com.hmdp.ai.dto.ChatStreamEventData;
+import com.hmdp.ai.dto.ReferenceIntent;
 import com.hmdp.ai.tool.AgentToolRegistry;
 import com.hmdp.ai.tool.AgentToolResult;
 import com.hmdp.ai.tool.BaseAgentTool;
@@ -94,6 +95,25 @@ class ToolExecutionOrchestratorTest {
         assertEquals("{\"shopId\":18}", result.getEffectiveArguments());
         assertEquals(18L, context.getFocusedShopId());
         assertEquals("当前店", context.getFocusedShopName());
+    }
+
+    @Test
+    void doesNotInjectFocusWhenExplicitReferenceIsUnresolved() {
+        AgentToolRegistry registry = mock(AgentToolRegistry.class);
+        BaseAgentTool detail = mock(BaseAgentTool.class);
+        when(registry.find("get_shop_detail")).thenReturn(detail);
+        when(detail.executionMode()).thenReturn(com.hmdp.ai.tool.ToolExecutionMode.PARALLEL_SAFE);
+        when(detail.execute(anyMap())).thenReturn(new AgentToolResult().summary("detail").displayText("detail"));
+        AgentSessionContext context = new AgentSessionContext();
+        context.setFocusedShopId(18L);
+        context.setReferenceIntents(List.of(new ReferenceIntent(ReferenceIntent.Scope.FOCUSED, null, "这一家", 0, 3)));
+        context.setResolvedReferences(new ArrayList<>());
+
+        ToolExecutionResult result = orchestrator(registry).executeOne(
+                new ToolExecutionRequest(0, "get_shop_detail", "{}", null), context);
+
+        assertTrue(!result.isSuccess());
+        verify(detail, never()).execute(anyMap());
     }
 
     @Test

@@ -542,13 +542,16 @@ public class ConversationStateService {
         // the only normal writer of activeTask.criteria; execution must never overwrite it.
         List<DecisionRecommendation> recommendations = decision.getRecommendations() == null
                 ? new ArrayList<DecisionRecommendation>() : decision.getRecommendations();
-        if (!sameBatch(task, decision.getSessionId(), recommendations)) appendRecommendationBatch(task, decision.getSessionId(), recommendations);
-        if (!recommendations.isEmpty()) {
-            DecisionRecommendation first = recommendations.get(0);
-            memory.setFocusedShopId(first.getShopId()); memory.setFocusedShopName(first.getShopName());
-        } else {
-            // A new task with no candidates must not expose the previous task's shops to rewriting or tools.
-            memory.setFocusedShopId(null); memory.setFocusedShopName(null);
+        boolean newBatch = !sameBatch(task, decision.getSessionId(), recommendations);
+        if (newBatch) {
+            appendRecommendationBatch(task, decision.getSessionId(), recommendations);
+            if (recommendations.size() == 1) {
+                DecisionRecommendation only = recommendations.get(0);
+                memory.setFocusedShopId(only.getShopId()); memory.setFocusedShopName(only.getShopName());
+            } else {
+                // A new empty or multi-candidate batch has no implicit focus.
+                memory.setFocusedShopId(null); memory.setFocusedShopName(null);
+            }
         }
         updateWorkingMemory(state, memory);
         log.info("[AI][state] event=WORKING_MEMORY_SNAPSHOT chatId={} sessionId={} phase={} candidates={} focusedShopId={}", state.getChatId(), decision.getSessionId(), memory.getDialogPhase(), recommendations.size(), memory.getFocusedShopId());
@@ -587,9 +590,21 @@ public class ConversationStateService {
         List<DecisionRecommendation> candidates = context.getCandidatePoolSnapshot() == null
                 ? new ArrayList<DecisionRecommendation>() : context.getCandidatePoolSnapshot();
         DecisionTaskState task = ensureActiveTask(memory);
-        if (!sameCandidateIds(latestCandidatePool(memory), candidates)) appendRecommendationBatch(task, sessionId, candidates);
-        memory.setFocusedShopId(context.getFocusedShopId());
-        memory.setFocusedShopName(context.getFocusedShopName());
+        boolean newBatch = !sameCandidateIds(latestCandidatePool(memory), candidates);
+        if (newBatch) {
+            appendRecommendationBatch(task, sessionId, candidates);
+            if (candidates.size() == 1) {
+                DecisionRecommendation only = candidates.get(0);
+                memory.setFocusedShopId(only.getShopId());
+                memory.setFocusedShopName(only.getShopName());
+            } else {
+                memory.setFocusedShopId(null);
+                memory.setFocusedShopName(null);
+            }
+        } else {
+            memory.setFocusedShopId(context.getFocusedShopId());
+            memory.setFocusedShopName(context.getFocusedShopName());
+        }
         memory.setDialogPhase("RECOMMENDING");
         updateWorkingMemory(state, memory);
         log.info("[AI][state] event=AGENT_CONTEXT_REDUCED chatId={} sessionId={} candidates={} focusedShopId={}",

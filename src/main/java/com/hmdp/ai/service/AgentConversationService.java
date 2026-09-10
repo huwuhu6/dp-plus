@@ -188,7 +188,8 @@ public class AgentConversationService {
         if (context == null) return false;
         ReferenceResolution reference = resolveShopReference(message == null ? "" : message.trim(), context);
         return reference.shop != null || reference.isAmbiguous()
-                || reference.isBlocked()
+                || (reference.isBlocked() && context.getRecommendationBatches() != null
+                    && !context.getRecommendationBatches().isEmpty())
                 || !resolveCompoundFactTasks(message == null ? "" : message.trim(), context).isEmpty();
     }
 
@@ -532,6 +533,19 @@ public class AgentConversationService {
         if (focusedShop != null && isImplicitFocusedFactQuery(message)) {
             return new ReferenceResolution(focusedShop, new ArrayList<String>());
         }
+        boolean focusedIntent = intents.stream().anyMatch(item -> item.getScope() == ReferenceIntent.Scope.FOCUSED);
+        if (focusedIntent) {
+            List<DecisionRecommendation> candidates = context.getCandidatePoolSnapshot() == null
+                    ? new ArrayList<DecisionRecommendation>() : context.getCandidatePoolSnapshot();
+            boolean hasBatchAuthority = context.getRecommendationBatches() != null
+                    && !context.getRecommendationBatches().isEmpty();
+            if (hasBatchAuthority && candidates.size() == 1) {
+                return new ReferenceResolution(candidates.get(0), new ArrayList<String>());
+            }
+            if (!hasBatchAuthority) return new ReferenceResolution(null, new ArrayList<String>(), true, "当前指代");
+            if (!candidates.isEmpty()) return new ReferenceResolution(null, shopNames(candidates));
+            return new ReferenceResolution(null, new ArrayList<String>(), true, "当前指代");
+        }
         return new ReferenceResolution(null, names);
     }
 
@@ -716,7 +730,8 @@ public class AgentConversationService {
     private void materializeToolInput(Map<String, Object> input, String toolName, AgentSessionContext context,
                                       Long explicitlyReferencedShopId) {
         if (explicitlyReferencedShopId != null && isSingleShopTool(toolName)) input.put("shopId", explicitlyReferencedShopId);
-        else if (isSingleShopTool(toolName) && !input.containsKey("shopId") && context.getFocusedShopId() != null) {
+        else if (isSingleShopTool(toolName) && !context.hasUnresolvedReference()
+                && !input.containsKey("shopId") && context.getFocusedShopId() != null) {
             input.put("shopId", context.getFocusedShopId());
         }
         if ("compare_shops".equals(toolName) && !input.containsKey("shopId") && context.getFocusedShopId() != null) {

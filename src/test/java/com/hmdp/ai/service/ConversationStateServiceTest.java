@@ -23,6 +23,40 @@ class ConversationStateServiceTest {
         assertEquals(Arrays.asList(1L,2L,3L,4L,5L,6L), service.shownShopIds(memory)); assertEquals(2, service.activeTask(memory).getRecommendationBatches().size()); assertEquals(11L, service.latestSourceDecisionSessionId(memory));
     }
 
+    @Test void multiCandidateSnapshotDoesNotImplicitlyFocusFirstShop() throws Exception {
+        ConversationStateService service = new ConversationStateService();
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "objectMapper", mapper);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "workingMemoryVersionService", versionService(mapper));
+        AiChatSession state = new AiChatSession(); state.setChatId("focus-snapshot-test"); state.setVersion(0);
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        memory.setFocusedShopId(99L); memory.setFocusedShopName("旧焦点");
+        state.setWorkingMemoryJson(mapper.writeValueAsString(memory));
+
+        DecisionResponse response = new DecisionResponse(); response.setSessionId(10L); response.setStatus("COMPLETED");
+        response.setRecommendations(Arrays.asList(shop(1), shop(2), shop(3)));
+        service.snapshotDecision(state, response);
+        assertNull(service.workingMemory(state).getFocusedShopId());
+
+        service.snapshotDecision(state, response);
+        assertNull(service.workingMemory(state).getFocusedShopId());
+    }
+
+    @Test void singleCandidateSnapshotFocusesOnlyCandidate() throws Exception {
+        ConversationStateService service = new ConversationStateService();
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "objectMapper", mapper);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "workingMemoryVersionService", versionService(mapper));
+        AiChatSession state = new AiChatSession(); state.setChatId("single-focus-test"); state.setVersion(0);
+        state.setWorkingMemoryJson(mapper.writeValueAsString(new ConversationWorkingMemory()));
+        DecisionResponse response = new DecisionResponse(); response.setSessionId(11L); response.setStatus("COMPLETED");
+        response.setRecommendations(Collections.singletonList(shop(7)));
+        service.snapshotDecision(state, response);
+        assertEquals(7L, service.workingMemory(state).getFocusedShopId());
+    }
+
     @Test void excludedCuisineInvalidatesCurrentProjectionButKeepsBatchHistory() throws Exception {
         ConversationStateService service = new ConversationStateService();
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper()
@@ -215,4 +249,16 @@ class ConversationStateServiceTest {
     }
     private DecisionRecommendation shop(long id) { DecisionRecommendation value = new DecisionRecommendation(); value.setShopId(id); value.setShopName("shop-" + id); return value; }
     private List<Long> ids(List<DecisionRecommendation> values) { List<Long> result = new ArrayList<>(); for (DecisionRecommendation v : values) result.add(v.getShopId()); return result; }
+
+    private WorkingMemoryVersionService versionService(com.fasterxml.jackson.databind.ObjectMapper mapper) throws Exception {
+        WorkingMemoryVersionService result = org.mockito.Mockito.mock(WorkingMemoryVersionService.class);
+        org.mockito.Mockito.when(result.append(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    AiWorkingMemory committed = new AiWorkingMemory(); committed.setVersion(1);
+                    committed.setMemoryJson(mapper.writeValueAsString(invocation.getArgument(3))); return committed;
+                });
+        return result;
+    }
 }

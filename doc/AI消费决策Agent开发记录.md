@@ -2360,3 +2360,13 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 定向单测覆盖 provider 类型元数据、弱排序、完整附属小学名称不被过滤、通用 fallback、澄清文本提取和 query override。本轮未运行 robustness、conversation-v1、holdout 或全量 `mvn test`，`FULL REGRESSION: DEFERRED BY INSTRUCTION`。
 
 随后校正候选排序优先级：名称精确/相关度优先于类型提示，类型仅作为辅助排序，最后才使用设备距离；因此完整的“福建师范大学附属小学”不会被误标的 UNIVERSITY hint 挤到后面。
+
+### 多候选商户指代安全收口（2026-09-10）
+
+真实回放发现：一轮推荐返回多个商户时，`snapshotDecision()` 总是把第一家写入 `focusedShop`，用户随后问“这一家怎么样？”便会在没有明确解析引用的情况下把 rank-1 商户注入单店 Tool。该行为把“候选列表”错误降级成“当前唯一商户”。
+
+本轮建立共享的 `ShopReferenceDetector`，Routing 预评估与 `ReferenceIntentExtractor` 共用同一组 focused 指代词（包括“这家/这一家/那家/那个/刚才那家”等），解析仍由 `ReferenceIntent` 与 `BatchAwareReferenceResolver` 负责。新 RecommendationBatch 只有在恰好一个候选时建立隐式 focus；空批次或多候选批次清空 focus，同批次重复 snapshot 保留已通过明确引用建立的合法 focus。
+
+当存在显式但未解析的商户引用时，`AgentConversationService` 返回澄清，`ToolExecutionOrchestrator` 也 fail-closed，不再从 focusedShop 补入 `shopId` 或执行单店 Tool。ordinal/明确商户名仍走既有 Batch-aware 解析，Task/Working Memory/RecommendationBatch 数据模型未改变。
+
+定向测试通过：`ConversationStateServiceTest`、`ReferenceIntentExtractorTest`、`BatchAwareReferenceResolverTest`、`ConversationContextRewriterTest`、`ChatOrchestrationServiceTest`、`AgentConversationServiceTest`、`ToolExecutionOrchestratorTest`、`TurnUnderstandingServiceTest`；随后执行完整 `mvn -q test`。真实 clean-main 回放覆盖多候选后“这一家/这家”澄清、以及“第一家/第二家” ordinal 查询，结果记录在本轮验收报告中。

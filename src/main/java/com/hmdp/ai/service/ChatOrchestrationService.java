@@ -1159,9 +1159,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     }
 
     private boolean isFocusedShopQuestion(String message) {
-        return message.contains("这家") || message.contains("那家") || message.contains("这个") || message.contains("这一个")
-                || message.contains("上一家") || message.contains("刚才那家") || message.contains("刚才那个")
-                || message.contains("上一轮那个");
+        return ShopReferenceDetector.containsFocusedReference(message);
     }
 
     private boolean refersToCurrentDeviceLocation(String message) {
