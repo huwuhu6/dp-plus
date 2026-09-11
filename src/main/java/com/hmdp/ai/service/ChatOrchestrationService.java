@@ -1555,7 +1555,11 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     /** A city supplied while resolving a paused short POI becomes search context,
      * never a named POI itself. */
     private void enrichAdministrativeContext(String query, LocationResolutionContext context, AiChatSession state) {
-        if (!hasText(query) || context == null || hasText(context.getActiveCity()) || administrativeRegionResolver == null) return;
+        if (!hasText(query) || context == null || administrativeRegionResolver == null) return;
+        DecisionConstraints criteria = null;
+        if (state != null && conversationStateService != null) {
+            criteria = conversationStateService.activeCriteria(conversationStateService.workingMemory(state));
+        }
         AdministrativeResolution resolution = administrativeRegionResolver.resolve(query, null);
         if (resolution.status() != AdministrativeResolution.Status.RESOLVED) {
             // Short POI text may prefix an explicit city (for example, city +
@@ -1564,8 +1568,21 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             for (int end = Math.min(query.length(), 8); end >= 2; end--) {
                 AdministrativeResolution prefix = administrativeRegionResolver.resolveGeographicContextPrefix(query.substring(0, end));
                 if (prefix.status() == AdministrativeResolution.Status.RESOLVED && prefix.candidates().size() == 1) {
-                    resolution = prefix;
-                    break;
+                    AdministrativeRegion candidate = prefix.candidates().get(0);
+                    // A prefix is geographic only when the structured POI
+                    // target is the remaining suffix.  This prevents a name
+                    // such as “福州大学” from being split into “福州” + “大学”,
+                    // while allowing “北京农大” to override a stale task city.
+                    String canonical = candidate.getName() == null ? "" : candidate.getName();
+                    String alias = canonical.replaceFirst("(?:省|市)$", "");
+                    String normalizedQuery = query.replaceAll("\\s+", "");
+                    String remainder = normalizedQuery.startsWith(alias)
+                            ? normalizedQuery.substring(alias.length()) : "";
+                    String targetArea = criteria == null ? "" : criteria.getTargetArea();
+                    if (hasText(targetArea) && remainder.equals(targetArea.replaceAll("\\s+", ""))) {
+                        resolution = prefix;
+                        break;
+                    }
                 }
             }
         }
@@ -1575,6 +1592,10 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
                 context.setActiveProvince(candidate.getProvince());
                 context.setActiveCity(candidate.getName());
                 context.setActiveCityAdcode(candidate.getAdcode());
+            } else if (candidate.getLevel() == com.hmdp.ai.geo.AdministrativeLevel.PROVINCE) {
+                context.setActiveProvince(candidate.getName());
+                context.setActiveCity(null);
+                context.setActiveCityAdcode(null);
             }
         }
     }

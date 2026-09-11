@@ -1416,6 +1416,78 @@ class ChatOrchestrationServiceTest {
     }
 
     @Test
+    void explicitPoiCityPrefixOverridesExistingTaskCity() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+
+        AiChatSession state = new AiChatSession();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        DecisionConstraints criteria = new DecisionConstraints();
+        criteria.setTargetCity("福州市");
+        criteria.setTargetArea("农大");
+        when(stateService.workingMemory(state)).thenReturn(memory);
+        when(stateService.activeCriteria(memory)).thenReturn(criteria);
+
+        com.hmdp.ai.geo.AdministrativeRegion beijing = new com.hmdp.ai.geo.AdministrativeRegion();
+        beijing.setName("北京市");
+        beijing.setLevel(com.hmdp.ai.geo.AdministrativeLevel.CITY);
+        beijing.setAdcode("110100");
+        beijing.setProvince("北京市");
+        com.hmdp.ai.geo.AdministrativeRegionRepository repository = new com.hmdp.ai.geo.AdministrativeRegionRepository() {
+            public List<com.hmdp.ai.geo.AdministrativeRegion> findCandidates(String alias) { return List.of(); }
+            public List<com.hmdp.ai.geo.AdministrativeRegion> findChildren(String parentAdcode, String alias) { return List.of(); }
+            public java.util.Optional<com.hmdp.ai.geo.AdministrativeRegion> findByAdcode(String adcode) { return java.util.Optional.empty(); }
+            public boolean completeProvinceCity() { return false; }
+            public boolean completeDistrict() { return false; }
+        };
+        com.hmdp.ai.geo.AdministrativeRegionResolver resolver = new com.hmdp.ai.geo.AdministrativeRegionResolver(
+                repository, (keyword, parentAdcode) -> "北京".equals(keyword) ? List.of(beijing) : List.of());
+        ReflectionTestUtils.setField(service, "administrativeRegionResolver", resolver);
+
+        com.hmdp.ai.dto.LocationResolutionContext context = new com.hmdp.ai.dto.LocationResolutionContext();
+        context.setActiveCity("福州市");
+        ReflectionTestUtils.invokeMethod(service, "enrichAdministrativeContext", "北京农大", context, state);
+
+        assertEquals("北京市", context.getActiveCity());
+        assertEquals("110100", context.getActiveCityAdcode());
+    }
+
+    @Test
+    void poiNameIsNotSplitIntoGeographicPrefix() {
+        ChatOrchestrationService service = new ChatOrchestrationService();
+        ConversationStateService stateService = mock(ConversationStateService.class);
+        ReflectionTestUtils.setField(service, "conversationStateService", stateService);
+        AiChatSession state = new AiChatSession();
+        ConversationWorkingMemory memory = new ConversationWorkingMemory();
+        DecisionConstraints criteria = new DecisionConstraints();
+        criteria.setTargetCity("杭州市");
+        criteria.setTargetArea("福州大学");
+        when(stateService.workingMemory(state)).thenReturn(memory);
+        when(stateService.activeCriteria(memory)).thenReturn(criteria);
+
+        com.hmdp.ai.geo.AdministrativeRegion fuzhou = new com.hmdp.ai.geo.AdministrativeRegion();
+        fuzhou.setName("福州市");
+        fuzhou.setLevel(com.hmdp.ai.geo.AdministrativeLevel.CITY);
+        com.hmdp.ai.geo.AdministrativeRegionRepository repository = new com.hmdp.ai.geo.AdministrativeRegionRepository() {
+            public List<com.hmdp.ai.geo.AdministrativeRegion> findCandidates(String alias) { return List.of(); }
+            public List<com.hmdp.ai.geo.AdministrativeRegion> findChildren(String parentAdcode, String alias) { return List.of(); }
+            public java.util.Optional<com.hmdp.ai.geo.AdministrativeRegion> findByAdcode(String adcode) { return java.util.Optional.empty(); }
+            public boolean completeProvinceCity() { return false; }
+            public boolean completeDistrict() { return false; }
+        };
+        ReflectionTestUtils.setField(service, "administrativeRegionResolver",
+                new com.hmdp.ai.geo.AdministrativeRegionResolver(repository,
+                        (keyword, parentAdcode) -> "福州".equals(keyword) ? List.of(fuzhou) : List.of()));
+
+        com.hmdp.ai.dto.LocationResolutionContext context = new com.hmdp.ai.dto.LocationResolutionContext();
+        context.setActiveCity("杭州市");
+        ReflectionTestUtils.invokeMethod(service, "enrichAdministrativeContext", "福州大学", context, state);
+
+        assertEquals("杭州市", context.getActiveCity());
+    }
+
+    @Test
     void completedStateDemandSwitchStartsNewDecision() {
         // #34 端到端：已有推荐（COMPLETED）后「看看有没有别的吃的」→ START_DECISION 重决策，
         // 而非落入 LLM 被误判 BUSINESS_FOLLOW_UP 追问候选池。

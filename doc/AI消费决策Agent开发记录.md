@@ -2370,3 +2370,9 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 当存在显式但未解析的商户引用时，`AgentConversationService` 返回澄清，`ToolExecutionOrchestrator` 也 fail-closed，不再从 focusedShop 补入 `shopId` 或执行单店 Tool。ordinal/明确商户名仍走既有 Batch-aware 解析，Task/Working Memory/RecommendationBatch 数据模型未改变。
 
 定向测试通过：`ConversationStateServiceTest`、`ReferenceIntentExtractorTest`、`BatchAwareReferenceResolverTest`、`ConversationContextRewriterTest`、`ChatOrchestrationServiceTest`、`AgentConversationServiceTest`、`ToolExecutionOrchestratorTest`、`TurnUnderstandingServiceTest`；随后执行完整 `mvn -q test`。真实 clean-main 回放覆盖多候选后“这一家/这家”澄清、以及“第一家/第二家” ordinal 查询，结果记录在本轮验收报告中。
+
+### POI 显式城市前缀覆盖与防误拆（2026-09-11）
+
+在已有 Task 城市或设备位置时，命名 POI 的当前轮显式行政前缀必须覆盖旧地理 bias；否则“北京农大”可能沿用福州上下文。`ChatOrchestrationService` 现在只在结构化 `targetArea` 恰好等于城市前缀后的余缀时接受该前缀，并通过 `AdministrativeRegionResolver.resolveGeographicContextPrefix()` 校验城市/省份身份；因此“北京农大”可切换到北京市，而“福州大学”不会被拆成“福州”加“大学”。设备坐标仍只用于 POI 候选消歧，不覆盖命名 POI 搜索锚点。
+
+定向 Location/Orchestration 测试全部通过（409 tests，0 failures、0 errors、3 skipped；其中 `AmapPoiSearchProviderTest` 6、`AmapMcpLocationResolutionServiceTest` 4、`AdministrativeRegionResolverTest` 11、`ChatOrchestrationServiceTest` 52）。不泄露密钥的高德 HTTP smoke：福州限定 Text Search 命中福建理工大学多校区，福州坐标 Around Search 命中福建农林大学福州大学城校区；无上下文 Text Search 返回多校区候选，应用层应继续澄清。应用级启动因本机 Milvus `127.0.0.1:19530` 不可用而未完成，未运行三套 full regression。
