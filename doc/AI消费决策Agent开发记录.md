@@ -1,5 +1,11 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-14：V2 Core Contract Red Team 收敛
+
+三份独立架构审查共同指出 Phase 1 的“类型已建、契约未闭合”问题：SELECT 同时作为 feedback/request，clear 依赖布尔字段，guard 使用 String，TaskRef 和 ordinal 在 grounding 中重解自然语言/猜测 batch，Adaptive 又通过空 plan 暗示。修正后，SELECT 仅为 request，BatchFeedback 通过语义 BatchRef 绑定；clear、typed predicate、TaskSelector、currentVisibleBatch、typed clarification 和显式 CompilationResult 均被固定。
+
+条件 fallback 改为独立 ConditionalRequirementChange：PreReducer 只提交无条件用户事实，Compiler 在前序 search EMPTY 的受限 group 内生成冻结 SearchSpec，只有执行效果实际发生后 PostReducer 才持久化 fallback cuisine。此举避免“实在没有换烧烤”在搜索火锅前就污染 durable criteria。幂等复用已有 IdempotencyService，不另建第二套记录表。
+
 ## 2026-09-14：Architecture V2 第一阶段——独立领域核
 
 **现状 → 问题**：V1 pipeline 将 Context Rewrite、Route、Criteria reduction 和 policy 判断串联，任务切换仍使用地点+菜系签名。复合的历史引用、条件变更和序号查询不能在不提前改变 active task 的情况下清晰限定读取范围。

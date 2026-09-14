@@ -45,7 +45,7 @@ Executor 仅返回 observation、evidence 和 `DomainEffect`；不可直接写 m
 
 RecommendationBatch/Candidate 只持久化 `DecisionReason(reasonType, criterionRef, observedValue, evidenceRef)`，不保存完整 Milvus trace 或 rerank feature。编译失败（未绑定 reference、非前序 guard、超预算）为确定性失败；工具失败是 observation；OCC 冲突由 reducer 重读策略处理。
 
-V2 runtime 必须有唯一 `(chatId, turnId)` 的 `TurnExecutionRecord`，保存 status、committedVersion、response reference/hash 和时间戳。OCC 不能覆盖 `T1 -> T2 -> retry(T1)` 的幂等问题。
+V2 runtime 复用既有 `IdempotencyService` 与 `ai_idempotency_record` 的 `(userId, chatId, scope, idempotencyKey)` 唯一语义；它已保存 request hash、PROCESSING/SUCCEEDED、结果 JSON/reference。OCC 不覆盖 `T1 -> T2 -> retry(T1)` 的幂等问题，但不新增第二张 TurnExecutionRecord 表。
 
 ## V2.0 不支持
 
@@ -66,5 +66,7 @@ V2 runtime 必须有唯一 `(chatId, turnId)` 的 `TurnExecutionRecord`，保存
 | `ContextRewriteResult`、legacy route/TurnPlan semantics | DELETE AFTER CUTOVER |
 | `DecisionConstraints`、`ConversationWorkingMemory`、`WorkingMemoryVersionService` | KEEP TEMPORARILY；迁移持久投影时复用 OCC 语义 |
 | V1 RecommendationBatch / candidate DTO | KEEP TEMPORARILY；迁移为 evidence-aware projection |
+
+Phase 1.5 收敛：`CriteriaPatch` 的 null 仅表示 untouched，clear 使用封闭 `ClearedCriterion`；条件 requirement 独立建模且不进入 PreReducer。`ObservationPredicate` 为 Boolean/Numeric/ResultState/Category 的封闭类型；TaskRef 使用结构化 selector，Ordinal 只读取 `TaskView.currentVisibleBatch`，引用失败返回 typed clarification。`CompilationResult` 显式区分 Direct/StaticPlan/Adaptive；SearchAction 持有由 committed `PlanningSnapshot` 冻结的 SearchSpec，绝不在执行时重新读取 WorkingMemory。
 
 Java 21 sealed interface/record 为封闭领域模型提供编译期分支约束和不可变载体，均无需 preview；参见 [Oracle Java 21 language changes](https://docs.oracle.com/en/java/javase/21/language/java-language-changes-summary.html)。将来 group 内并发执行使用正式 `CompletableFuture` 或项目既有执行抽象，避免 preview API；参见 [Java 21 CompletableFuture](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/CompletableFuture.html)。

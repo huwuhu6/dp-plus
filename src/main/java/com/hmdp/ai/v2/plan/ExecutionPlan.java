@@ -1,6 +1,6 @@
 package com.hmdp.ai.v2.plan;
 
-import com.hmdp.ai.v2.semantic.SemanticRelation;
+import com.hmdp.ai.v2.semantic.ObservationPredicate;
 import java.util.List;
 import java.util.Set;
 
@@ -15,5 +15,5 @@ public record ExecutionPlan(List<ExecutionGroup> groups, PlanBudget budget) {
     public record ExecutionGroup(String groupId, Set<String> dependsOnGroups, Guard guard, List<ExecutionAction> actions) {
         public ExecutionGroup { dependsOnGroups = dependsOnGroups == null ? Set.of() : Set.copyOf(dependsOnGroups); actions = actions == null ? List.of() : List.copyOf(actions); }
     }
-    public record Guard(String observedRequestId, SemanticRelation.ObservationMatcher matcher) { }
+    public record Guard(String observedRequestId, ObservationPredicate predicate) { }
 }

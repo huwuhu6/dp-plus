@@ -10,7 +10,9 @@ public final class ExecutionModeGate {
             return ExecutionMode.ADAPTIVE_RESEARCH;
         if (turn.requests().stream().anyMatch(r -> r.request() instanceof UserRequest.CompareRequest compare && compare.dimensions().size() > 1))
             return ExecutionMode.STATIC_PLAN;
-        if (turn.requests().size() == 1 && turn.semantics().relations().isEmpty()) return ExecutionMode.DIRECT;
+        if (turn.requests().size() == 1 && turn.semantics().relations().isEmpty()
+                && (turn.requests().getFirst().request() instanceof UserRequest.FactQueryRequest
+                || turn.requests().getFirst().request() instanceof UserRequest.GeneralKnowledgeRequest)) return ExecutionMode.DIRECT;
         return ExecutionMode.STATIC_PLAN;
     }
 }

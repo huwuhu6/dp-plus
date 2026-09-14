@@ -2,17 +2,21 @@ package com.hmdp.ai.v2.grounding;
 
 import com.hmdp.ai.v2.semantic.EntityReference;
 import com.hmdp.ai.v2.semantic.TurnSemantics;
+import java.util.Comparator;
 import java.util.List;
+import com.hmdp.ai.v2.semantic.TaskSelector;
 
 public final class EffectiveTaskContextResolver {
+    public EffectiveTaskContextResult resolveResult(String activeTaskId, List<TaskView> tasks, TurnSemantics semantics) {
+        try { return new EffectiveTaskContextResult.Resolved(resolve(activeTaskId, tasks, semantics)); }
+        catch (TaskIssue issue) { return new EffectiveTaskContextResult.NeedsClarification(new Ambiguity(issue.kind, issue.getMessage())); }
+    }
     public EffectiveTaskContext resolve(String activeTaskId, List<TaskView> tasks, TurnSemantics semantics) {
         List<TaskView> safe = tasks == null ? List.of() : tasks;
         TaskView active = safe.stream().filter(t -> t.taskId().equals(activeTaskId)).findFirst().orElse(null);
         EntityReference.TaskRef reference = taskReference(semantics);
         if (reference == null) return new EffectiveTaskContext(active, false);
-        String needle = reference.description() == null ? "" : reference.description().trim();
-        TaskView resolved = safe.stream().filter(t -> matches(t, needle, activeTaskId)).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("task reference is unresolved: " + needle));
+        TaskView resolved = resolve(reference.selector(), activeTaskId, safe);
         return new EffectiveTaskContext(resolved, !resolved.taskId().equals(activeTaskId));
     }
     private EntityReference.TaskRef taskReference(TurnSemantics semantics) {
@@ -33,8 +37,20 @@ public final class EffectiveTaskContextResolver {
             default -> List.of();
         };
     }
-    private boolean matches(TaskView task, String needle, String activeTaskId) {
-        if (needle.contains("最开始")) return !task.taskId().equals(activeTaskId);
-        return task.label() != null && task.label().contains(needle.replace("那个", ""));
+    private TaskView resolve(TaskSelector selector, String activeTaskId, List<TaskView> tasks) {
+        List<TaskView> matches = switch (selector) {
+            case TaskSelector.Earliest ignored -> tasks.stream().filter(t -> t.taskId() != null).sorted(Comparator.comparingInt(TaskView::creationOrder)).limit(1).toList();
+            case TaskSelector.Active ignored -> tasks.stream().filter(t -> t.taskId().equals(activeTaskId)).toList();
+            case TaskSelector.PreviousActive ignored -> tasks.stream().filter(t -> !t.taskId().equals(activeTaskId)).sorted(Comparator.comparingInt(TaskView::creationOrder).reversed()).limit(1).toList();
+            case TaskSelector.MatchContext context -> tasks.stream().filter(t -> equal(t.goalCategory(), context.goalCategory()) && equal(t.city(), context.city())).toList();
+        };
+        if (matches.isEmpty()) throw new TaskIssue(Ambiguity.Kind.UNRESOLVED_REFERENCE, "task selector matches no task");
+        if (matches.size() > 1) throw new TaskIssue(Ambiguity.Kind.AMBIGUOUS_REFERENCE, "task selector matches multiple tasks");
+        return matches.getFirst();
+    }
+    private boolean equal(String left, String right) { return left == null ? right == null : left.equals(right); }
+    private static final class TaskIssue extends RuntimeException {
+        private final Ambiguity.Kind kind;
+        private TaskIssue(Ambiguity.Kind kind, String message) { super(message); this.kind = kind; }
     }
 }
