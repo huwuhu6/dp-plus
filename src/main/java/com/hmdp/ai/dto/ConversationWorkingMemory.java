@@ -1,6 +1,7 @@
 package com.hmdp.ai.dto;
 
 import lombok.Data;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.List;
  * this object is the source of truth for references and incremental search criteria.
  */
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ConversationWorkingMemory {
     private int schemaVersion = 2;
     /** Internal recommendation-task references; chatId/traceId/eventId remain runtime identities. */
@@ -24,8 +26,6 @@ public class ConversationWorkingMemory {
     private Long focusedShopId;
     private String focusedShopName;
     private String dialogPhase = "IDLE";
-    private String lastPolicyAction = "NONE";
-    private String lastPolicyReason;
 
     /** Read-only lookup. State readers must not create a task as a side effect. */
     public DecisionTaskState activeTask() {

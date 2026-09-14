@@ -66,6 +66,9 @@ class V2DomainGoldenTest {
         assertInstanceOf(GroundingResult.NeedsClarification.class, new GroundingResolver().resolve(named, new EffectiveTaskContext(task, false)));
         TurnSemantics missingTask = new TurnSemantics(TaskDirective.RESTORE, List.of(), List.of(), List.of(), List.of(), List.of(new EntityReference.TaskRef(new TaskSelector.MatchContext("DINING", "北京"))));
         assertInstanceOf(EffectiveTaskContextResult.NeedsClarification.class, new EffectiveTaskContextResolver().resolveResult("A", List.of(task), missingTask));
+        TurnSemantics missingSelector = new TurnSemantics(TaskDirective.RESTORE, List.of(), List.of(), List.of(), List.of(), List.of());
+        assertInstanceOf(EffectiveTaskContextResult.NeedsClarification.class,
+                new EffectiveTaskContextResolver().resolveResult("A", List.of(task), missingSelector));
     }
 
     @Test void directStaticAndAdaptiveAreExplicitCompilationVariants() {

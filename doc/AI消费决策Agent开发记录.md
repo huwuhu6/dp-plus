@@ -1,5 +1,15 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-14：V2 验收收口与 V1 Chat Semantic Chain 物理删除
+
+真实评测 Run 161 使用 `conversation-v2-runtime-v1` 完成 3/3 case，V2 outcome 4/4（100%）；平均 12,361ms、p95 22,476ms。匿名 HTTP smoke 覆盖推荐、商户事实追问、拒绝后的 alternatives、Task RESTORE、设备定位及 OCC。Milvus 选用本机有数据的 `milvus-standalone`（19530），实际召回与 MySQL 硬过滤链路均被验证。
+
+移除 V1 Chat Semantic Chain：`ChatOrchestrationService` 变为保留既有 HTTP/SSE/评测签名的 V2 thin facade；删除 pipeline、ContextRewrite、TurnUnderstanding、PolicyDecision、DecisionContextQuery、QueryRewrite 及其 V1 DTO/测试。`ChatMessageResponse`、WorkingMemory、状态服务、评测指标与配置同步收口；历史 WorkingMemory 使用 `@JsonIgnoreProperties(ignoreUnknown = true)` 读取旧诊断字段。`DecisionTaskState` 的 `criteria`、`constraintSources`、`searchLocation` 未删除，因为仍由独立的 `/ai/decisions`、历史恢复和状态读取使用，并非 V1 chat chain 的残留写路径。
+
+语义 function schema 改为闭集且补齐 request/feedback 的必要字段，避免模型漏传 target、fact 或 feedback kind 后落入不可靠解析。条件 fallback 额外要求 `observedRequestId`、predicate、criteria、cleared 完整出现；对“如果…没有…就/则/改/换…”这类条件语句，若模型给出空 fallback change，会触发现有 repair call，而不是把用户承诺降级成无约束搜索。真实 smoke 验证“如果 3 公里内没有藏式火锅，就改找烧烤”：初始空结果后返回烧烤候选，距离为 0.32/0.85/0.99km，证明 fallback 仍保留 3km 硬约束。
+
+最终 `mvn -q clean test` 通过：260 tests，0 failures，0 errors，2 skipped。
+
 ## 2026-09-14：V2 Runtime Hardening 第二阶段
 
 `ShopRetrievalEngine` 恢复为无 durable side effect 的共享检索路径：MySQL 先按结构化硬条件取 shop 候选，再按候选 ID 读取 profile/review，并调用原 `SemanticShopRetriever` 的 Milvus PROFILE/REVIEW 召回及现有确定性 rerank；不再全量扫描 profile。V2 不创建 `AiDecisionSession`。PRICE LOWER 只作为本次排序信号；Alternatives 合并 task reject 与当前可见批次的临时排除。SIMILAR 使用 anchor profile 生成语义查询并要求真实语义召回；缺少可靠 anchor/召回时明确 unsupported，不退化为普通推荐。

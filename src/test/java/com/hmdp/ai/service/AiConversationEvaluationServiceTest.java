@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.ChatMessageResponse;
-import com.hmdp.ai.dto.ContextRewriteResult;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.ConversationEvaluationRunResponse;
 import com.hmdp.ai.dto.ConversationEvaluationRunComparisonResponse;
@@ -249,7 +248,6 @@ class AiConversationEvaluationServiceTest {
         assertEquals(1, response.getRun().getFinalStatusMatchedCount());
         assertEquals(1, response.getRun().getCompletedCount());
         assertEquals(true, response.getCaseResults().get(0).getRouteMatched());
-        assertEquals(0, response.getRun().getContextRewriteExpectedCount());
         assertEquals(true, response.getCaseResults().get(0).getChatId().matches("[A-Za-z0-9-]{1,64}"));
     }
 
@@ -368,48 +366,6 @@ class AiConversationEvaluationServiceTest {
     }
 
     @Test
-    void measuresContextRewriteAgainstStableBusinessAssertions() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
-        ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
-        AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
-        ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
-        AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
-        AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
-        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
-        ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
-        ReflectionTestUtils.setField(service, "caseMapper", caseMapper);
-        ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
-        ReflectionTestUtils.setField(service, "runMapper", runMapper);
-        ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
-        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
-        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
-        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
-
-        AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
-        evaluationCase.setId(2L);
-        evaluationCase.setCaseCode("CONTEXT_REWRITE");
-        evaluationCase.setTurnsJson("[{\"message\":\"推荐附近日料\"},{\"message\":\"第二家怎么样？\"}]");
-        evaluationCase.setExpectedRoutesJson("[\"START_DECISION\",\"BUSINESS_FOLLOW_UP\"]");
-        evaluationCase.setExpectedContextRewritesJson("[null,{\"applied\":true,\"candidateOrdinal\":2}]");
-        evaluationCase.setExpectedToolNamesJson("[]");
-        when(datasetLoader.loadCases(any())).thenReturn(Collections.singletonList(evaluationCase));
-        doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(13L); return 1; })
-                .when(runMapper).insert(any(AiConversationEvaluationRun.class));
-        when(chatService.chat(any(), isNull(), any())).thenReturn(responseWithCandidates("START_DECISION", "COMPLETED", "第一家", "筑地日本料理（上街店）"),
-                responseWithRewrite("BUSINESS_FOLLOW_UP", "COMPLETED", "第二家怎么样？", "查询筑地日本料理（上街店）怎么样？"));
-        when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
-
-        ConversationEvaluationRunResponse response = service.runActiveCases();
-
-        assertEquals(1, response.getRun().getContextRewriteExpectedCount());
-        assertEquals(1, response.getRun().getContextRewriteMatchedCount());
-        assertEquals(true, response.getCaseResults().get(0).getContextRewriteMatched());
-        assertEquals(1, response.getCaseResults().get(0).getExpectedContextRewriteCount());
-        assertEquals(1, response.getCaseResults().get(0).getMatchedContextRewriteCount());
-        assertEquals(true, response.getCaseResults().get(0).getActualContextRewritesJson().contains("筑地日本料理"));
-    }
-
-    @Test
     void continuesAfterExpectedTurnErrorAndAssertsRecoveryRoute() {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
@@ -458,10 +414,6 @@ class AiConversationEvaluationServiceTest {
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         AiConversationEvaluationRun baseline = run(1L, 100L, "conversation-v1", 10, 8, 7, 9, 8, 1000L);
         AiConversationEvaluationRun current = run(2L, 100L, "conversation-v1", 10, 9, 8, 10, 9, 800L);
-        baseline.setContextRewriteExpectedCount(2);
-        baseline.setContextRewriteMatchedCount(1);
-        current.setContextRewriteExpectedCount(2);
-        current.setContextRewriteMatchedCount(2);
         baseline.setUnseenRecommendationExpectedCount(2);
         baseline.setUnseenRecommendationMatchedCount(1);
         current.setUnseenRecommendationExpectedCount(2);
@@ -474,7 +426,6 @@ class AiConversationEvaluationServiceTest {
         try {
             ConversationEvaluationRunComparisonResponse response = service.compareRuns(2L, 1L);
             assertEquals(0.1D, response.getMetricDeltas().get("routeMatchRate"));
-            assertEquals(0.5D, response.getMetricDeltas().get("contextRewriteMatchRate"));
             assertEquals(0.5D, response.getMetricDeltas().get("unseenRecommendationMatchRate"));
             assertEquals(-200D, response.getMetricDeltas().get("avgDurationMs"));
         } finally {
@@ -562,18 +513,6 @@ class AiConversationEvaluationServiceTest {
         return response;
     }
 
-    private ChatMessageResponse responseWithRewrite(String route, String status, String original, String rewritten) {
-        ChatMessageResponse response = response(route, status);
-        ContextRewriteResult rewrite = new ContextRewriteResult();
-        rewrite.setOriginalQuery(original);
-        rewrite.setRewrittenQuery(rewritten);
-        rewrite.setApplied(true);
-        rewrite.setUsedModel(true);
-        rewrite.setReason("REWRITTEN");
-        response.setContextRewrite(rewrite);
-        return response;
-    }
-
     private ChatMessageResponse responseWithCandidates(String route, String status, String... names) {
         ChatMessageResponse response = response(route, status);
         com.hmdp.ai.dto.DecisionResponse decision = new com.hmdp.ai.dto.DecisionResponse();
@@ -624,7 +563,6 @@ class AiConversationEvaluationServiceTest {
         AiConversationEvaluationCaseResult result = new AiConversationEvaluationCaseResult();
         result.setCaseId(caseId);
         result.setRouteMatched(routeMatched);
-        result.setContextRewriteMatched(true);
         result.setToolMatched(toolMatched);
         result.setLocalityMatched(true);
         result.setFinalStatusMatched(true);

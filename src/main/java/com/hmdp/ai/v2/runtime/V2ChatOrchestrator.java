@@ -5,6 +5,7 @@ import com.hmdp.ai.dto.*;
 import com.hmdp.ai.entity.AiWorkingMemory;
 import com.hmdp.ai.runtime.ConversationEventType;
 import com.hmdp.ai.service.ChatMemoryService;
+import com.hmdp.ai.service.ConversationEventService;
 import com.hmdp.ai.service.VersionConflictException;
 import com.hmdp.ai.service.WorkingMemoryVersionService;
 import com.hmdp.ai.v2.grounding.*;
@@ -28,6 +29,7 @@ public class V2ChatOrchestrator {
     @Resource private SemanticInterpreter semanticInterpreter;
     @Resource private WorkingMemoryVersionService versions;
     @Resource private ChatMemoryService chatMemoryService;
+    @Resource private ConversationEventService conversationEventService;
     @Resource private ObjectMapper objectMapper;
     @Resource private StaticPlanExecutor executor;
     @Resource private V2ActionHandler actions;
@@ -50,17 +52,24 @@ public class V2ChatOrchestrator {
         String chatId = chatMemoryService.resolveChatId(request.getChatId());
         request.setChatId(chatId);
         String message = request.getMessage().trim();
-        TurnSemantics semantics = semanticInterpreter.interpret(message);
+        List<Map<String, Object>> history = chatMemoryService.load(chatId);
+        conversationEventService.begin(chatId, (history == null ? 0 : history.size()) / 2 + 1);
+        try {
+            TurnSemantics semantics = semanticInterpreter.interpret(message);
 
-        PreOutcome pre = prePhase(request, chatId, semantics);
-        ChatMessageResponse response;
-        if (pre.response() != null) {
-            response = pre.response();
-        } else {
-            response = postPhase(chatId, pre.prepared());
+            PreOutcome pre = prePhase(request, chatId, semantics);
+            ChatMessageResponse response;
+            if (pre.response() != null) {
+                response = pre.response();
+            } else {
+                response = postPhase(chatId, pre.prepared());
+            }
+            chatMemoryService.appendTurn(chatId, request.getMessage(), response.getAnswer(), response.getRoute(), null);
+            return response;
+        } finally {
+            // V2 状态事件依赖 chat/turn trace 关联工作记忆版本；不能落入 synthetic system trace。
+            conversationEventService.clearTrace();
         }
-        chatMemoryService.appendTurn(chatId, request.getMessage(), response.getAnswer(), response.getRoute(), null);
-        return response;
     }
 
     /** PRE conflict reloads and regrounds at most once. No POST path calls this method again. */

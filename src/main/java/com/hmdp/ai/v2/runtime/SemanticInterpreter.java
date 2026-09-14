@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,14 +39,38 @@ public class SemanticInterpreter {
     public TurnSemantics interpret(String userTurn) {
         if (userTurn == null || userTurn.isBlank()) throw new IllegalArgumentException("message cannot be blank");
         try {
-            return parse(call(userTurn, false));
+            return parseAndValidate(userTurn, false);
         } catch (RuntimeException firstFailure) {
             try {
-                return parse(call(userTurn, true));
+                return parseAndValidate(userTurn, true);
             } catch (RuntimeException ignored) {
                 throw new SemanticInterpretationException("无法可靠理解这句话，请换一种说法或说明要修改的条件", firstFailure);
             }
         }
+    }
+
+    private TurnSemantics parseAndValidate(String userTurn, boolean repair) {
+        TurnSemantics semantics = parse(call(userTurn, repair));
+        if (requiresConditionalFallback(userTurn) && semantics.requirementChanges().stream()
+                .filter(RequirementChange.ConditionalRequirementChange.class::isInstance)
+                .map(RequirementChange.ConditionalRequirementChange.class::cast)
+                .noneMatch(change -> !isEmpty(change.change()))) {
+            // A parsed-but-empty fallback silently turns a user promise into an unconstrained search.
+            // Treat it as invalid so the existing repair call can obtain a complete semantic contract.
+            throw new IllegalArgumentException("conditional fallback requires a non-empty criteria change");
+        }
+        return semantics;
+    }
+
+    private boolean requiresConditionalFallback(String userTurn) {
+        return userTurn.matches("(?s).*如果.*(?:没有|没|无).*(?:就|则|改|换).*?");
+    }
+
+    private boolean isEmpty(RequirementChange.CriteriaPatch change) {
+        DiningCriteriaPatch patch = change.patch();
+        return patch.location() == null && patch.cuisine() == null && patch.budget() == null
+                && patch.distance() == null && patch.diningTime() == null && patch.semanticPreferences() == null
+                && change.cleared().isEmpty();
     }
 
     /** Deterministic schema boundary, also used by contract tests without a model. */
@@ -87,9 +112,25 @@ public class SemanticInterpreter {
         Map<String, Object> tool = Map.of("type", "function", "function", function);
         Map<String, Object> choice = Map.of("type", "function", "function", Map.of("name", FUNCTION));
         String system = "You are a semantic parser for a dining assistant. Output only the function call. "
+                + "Use exact uppercase enum values from the schema; do not replace them with natural-language labels such as find or fact. "
+                + "taskDirective is CONTINUE unless the user clearly starts, restores, or abandons a task. "
+                + "A dining recommendation request must use type RECOMMENDATION; a general-information question must use type GENERAL with its topic, never FACT. "
+                + "Every request needs requestId, type, and topic; topic must be non-empty for GENERAL and empty for other request types. "
+                + "When taskDirective is RESTORE, references must contain exactly one task selector; never emit RESTORE without a selector. Use EARLIEST only when the user explicitly asks for the earliest task, ACTIVE only for the active task, and MATCH_CONTEXT only when category/city identify a unique task. "
+                + "Every request must include target and fact: use a valid reference for FACT, SELECT, SIMILAR, and EXPLORE; use {} and fact DETAIL for other types. "
+                + "For FACT, fact must describe the requested fact using its enum. "
+                + "Every feedback item must include target, kind, aspect, batch, and polarity. For a single entity use its reference, batch false, and polarity NEGATIVE as an ignored placeholder; for a batch use target {}, kind REJECT as an ignored placeholder, batch true, and the requested polarity. "
+                + "Examples: ‘找附近的餐厅’ -> START_NEW plus requests [{requestId: r1, type: RECOMMENDATION, topic: '', target: {}, fact: DETAIL}]; "
+                + "‘第一家几点营业？’ -> CONTINUE plus requests [{requestId: r1, type: FACT, topic: '', target: {ordinal: 1}, fact: DETAIL}]; "
+                + "‘第一家我不想要，排除掉’ -> CONTINUE plus feedback [{target: {ordinal: 1}, kind: REJECT, aspect: UNSPECIFIED, batch: false, polarity: NEGATIVE}]; "
+                + "‘恢复最早的推荐任务’ -> RESTORE plus references [{taskSelector: EARLIEST}] and requests []; "
+                + "‘再便宜一点’ -> CONTINUE plus relativePreferences [{dimension: PRICE, direction: LOWER}] and a RECOMMENDATION request with topic '', target {}, and fact DETAIL; "
+                + "For a conditional fallback such as ‘如果3公里内没有藏式火锅，就改找烧烤’, emit the initial criteria and exactly one RECOMMENDATION request, then conditionalRequirementChanges [{observedRequestId: r1, predicate: {type: RESULT_STATE, expected: EMPTY}, criteria: {cuisine: 烧烤}, cleared: []}]. The fallback criteria belongs only in conditionalRequirementChanges; it must not replace the initial criteria. "
+                + "‘介绍一下火锅历史’ -> START_NEW plus requests [{requestId: r1, type: GENERAL, topic: 火锅历史, target: {}, fact: DETAIL}]. "
                 + "References may only be ordinal, focused, named, or task selector; never invent database ids. "
+                + "Return every root field required by the schema; use empty arrays when there is no value. "
                 + "Use null/omission for untouched criteria and cleared for explicit removal. "
-                + (repair ? "Your previous output was invalid. Obey the schema exactly." : "");
+                + (repair ? "Your previous output was invalid. For a conditional fallback, include its non-empty criteria and cleared fields. Return a complete function call and obey every enum and required field exactly." : "");
         JsonNode response = aiClient.chatCompletion(List.of(
                 Map.of("role", "system", "content", system),
                 Map.of("role", "user", "content", userTurn)), List.of(tool), choice, "V2_SEMANTIC_INTERPRETATION");
@@ -183,30 +224,67 @@ public class SemanticInterpreter {
     private Map<String, Object> schema() {
         Map<String, Object> string = Map.of("type", "string");
         Map<String, Object> number = Map.of("type", "number");
-        Map<String, Object> target = Map.of("type", "object", "properties", Map.of(
+        Map<String, Object> target = objectSchema(Map.of(
                 "ordinal", Map.of("type", "integer"), "focused", Map.of("type", "boolean"),
-                "name", string, "taskSelector", string, "goalCategory", string, "city", string));
-        Map<String, Object> request = Map.of("type", "object", "properties", Map.of(
-                "requestId", string, "type", string, "target", target, "count", Map.of("type", "integer"),
-                "fact", string, "topic", string, "unboundedContinuation", Map.of("type", "boolean")));
+                "name", string, "taskSelector", enumString("EARLIEST", "ACTIVE", "MATCH_CONTEXT"),
+                "goalCategory", string, "city", string));
         Map<String, Object> criteria = Map.of("type", "object", "properties", Map.of(
                 "city", string, "district", string, "poi", string, "cuisine", string,
                 "excludedCuisines", Map.of("type", "array", "items", string),
                 "budgetSoft", number, "budgetHard", number, "distanceKm", number));
-        Map<String, Object> predicate = Map.of("type", "object", "properties", Map.of("type", string, "expected", string, "operator", string));
-        Map<String, Object> relation = Map.of("type", "object", "properties", Map.of("observedRequestId", string, "dependentRequestId", string, "predicate", predicate));
-        Map<String, Object> conditional = Map.of("type", "object", "properties", Map.of("observedRequestId", string, "predicate", predicate, "criteria", criteria,
-                "cleared", Map.of("type", "array", "items", string)));
+        Map<String, Object> predicate = objectSchema(Map.of("type", enumString("RESULT_STATE", "BOOLEAN", "NUMERIC", "CATEGORY"),
+                "expected", string, "operator", enumString(ObservationPredicate.NumericOperator.values())), "type", "expected");
+        Map<String, Object> relation = objectSchema(Map.of("observedRequestId", string,
+                "dependentRequestId", string, "predicate", predicate), "observedRequestId", "dependentRequestId", "predicate");
+        Map<String, Object> conditional = objectSchema(Map.of("observedRequestId", string, "predicate", predicate, "criteria", criteria,
+                "cleared", Map.of("type", "array", "items", enumString(RequirementChange.ClearedCriterion.values()))),
+                "observedRequestId", "predicate", "criteria", "cleared");
+        Map<String, Object> request = objectSchema(Map.of("requestId", string,
+                "type", enumString("RECOMMENDATION", "ALTERNATIVES", "FACT", "SELECT", "SIMILAR", "EXPLORE", "GENERAL"),
+                "target", target, "count", Map.of("type", "integer"),
+                "fact", enumString(UserRequest.FactType.values()),
+                "topic", Map.of("type", "string", "description", "Non-empty when type is GENERAL; empty string otherwise"),
+                "unboundedContinuation", Map.of("type", "boolean")), "requestId", "type", "topic", "target", "fact");
+        Map<String, Object> relativePreference = objectSchema(Map.of(
+                "dimension", enumString(DiningCriteria.PreferenceDimension.values()),
+                "direction", enumString(RequirementChange.Direction.values())), "dimension", "direction");
+        Map<String, Object> feedback = objectSchema(Map.of("target", target,
+                "kind", enumString(EntityFeedback.FeedbackKind.values()),
+                "aspect", enumString(EntityFeedback.FeedbackAspect.values()),
+                "batch", Map.of("type", "boolean"), "polarity", enumString(EntityFeedback.BatchPolarity.values())),
+                "target", "kind", "aspect", "batch", "polarity");
         Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("taskDirective", string); properties.put("criteria", criteria);
-        properties.put("cleared", Map.of("type", "array", "items", string));
-        properties.put("relativePreferences", Map.of("type", "array", "items", Map.of("type", "object")));
-        properties.put("relaxationAuthorizations", Map.of("type", "array", "items", string));
-        properties.put("requirementLocks", Map.of("type", "array", "items", string));
-        properties.put("feedback", Map.of("type", "array", "items", Map.of("type", "object")));
-        properties.put("requests", Map.of("type", "array", "items", request)); properties.put("relations", Map.of("type", "array", "items", relation));
-        properties.put("conditionalRequirementChanges", Map.of("type", "array", "items", conditional)); properties.put("references", Map.of("type", "array", "items", target));
-        return Map.of("type", "object", "properties", properties);
+        properties.put("taskDirective", enumString(TaskDirective.values()));
+        properties.put("criteria", criteria);
+        properties.put("cleared", Map.of("type", "array", "items", enumString(RequirementChange.ClearedCriterion.values())));
+        properties.put("relativePreferences", Map.of("type", "array", "items", relativePreference));
+        properties.put("relaxationAuthorizations", Map.of("type", "array", "items", enumString(DiningCriteria.PreferenceDimension.values())));
+        properties.put("requirementLocks", Map.of("type", "array", "items", enumString(DiningCriteria.PreferenceDimension.values())));
+        properties.put("feedback", Map.of("type", "array", "items", feedback));
+        properties.put("requests", Map.of("type", "array", "items", request));
+        properties.put("relations", Map.of("type", "array", "items", relation));
+        properties.put("conditionalRequirementChanges", Map.of("type", "array", "items", conditional));
+        properties.put("references", Map.of("type", "array", "items", target));
+        return objectSchema(properties, "taskDirective", "cleared", "relativePreferences", "relaxationAuthorizations",
+                "requirementLocks", "feedback", "requests", "relations", "conditionalRequirementChanges", "references");
+    }
+
+    /** 闭集枚举必须放进 JSON Schema；只用自然语言提示时模型曾输出小写自由词，导致运行时拒绝。 */
+    private Map<String, Object> enumString(String... values) {
+        return Map.of("type", "string", "enum", List.of(values));
+    }
+
+    private Map<String, Object> enumString(Enum<?>... values) {
+        return enumString(Arrays.stream(values).map(Enum::name).toArray(String[]::new));
+    }
+
+    private Map<String, Object> objectSchema(Map<String, Object> properties, String... required) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", properties);
+        schema.put("additionalProperties", false);
+        if (required.length > 0) schema.put("required", List.of(required));
+        return schema;
     }
 
     private <T extends Enum<T>> T enumValue(Class<T> type, String value) {

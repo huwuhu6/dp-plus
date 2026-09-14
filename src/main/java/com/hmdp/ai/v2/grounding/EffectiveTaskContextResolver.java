@@ -5,6 +5,7 @@ import com.hmdp.ai.v2.semantic.TurnSemantics;
 import java.util.Comparator;
 import java.util.List;
 import com.hmdp.ai.v2.semantic.TaskSelector;
+import com.hmdp.ai.v2.semantic.TaskDirective;
 
 public final class EffectiveTaskContextResolver {
     public EffectiveTaskContextResult resolveResult(String activeTaskId, List<TaskView> tasks, TurnSemantics semantics) {
@@ -15,7 +16,11 @@ public final class EffectiveTaskContextResolver {
         List<TaskView> safe = tasks == null ? List.of() : tasks;
         TaskView active = safe.stream().filter(t -> t.taskId().equals(activeTaskId)).findFirst().orElse(null);
         EntityReference.TaskRef reference = taskReference(semantics);
-        if (reference == null) return new EffectiveTaskContext(active, false);
+        if (reference == null) {
+            if (semantics != null && semantics.taskDirective() == TaskDirective.RESTORE)
+                throw new TaskIssue(Ambiguity.Kind.UNRESOLVED_REFERENCE, "RESTORE requires an explicit task selector");
+            return new EffectiveTaskContext(active, false);
+        }
         TaskView resolved = resolve(reference.selector(), activeTaskId, safe);
         return new EffectiveTaskContext(resolved, !resolved.taskId().equals(activeTaskId));
     }

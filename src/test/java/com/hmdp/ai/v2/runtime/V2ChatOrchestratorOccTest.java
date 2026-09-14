@@ -6,6 +6,7 @@ import com.hmdp.ai.dto.*;
 import com.hmdp.ai.entity.AiWorkingMemory;
 import com.hmdp.ai.runtime.ConversationEventType;
 import com.hmdp.ai.service.ChatMemoryService;
+import com.hmdp.ai.service.ConversationEventService;
 import com.hmdp.ai.service.VersionConflictException;
 import com.hmdp.ai.service.WorkingMemoryVersionService;
 import com.hmdp.ai.v2.grounding.V2LocationResolver;
@@ -32,11 +33,13 @@ class V2ChatOrchestratorOccTest {
         SemanticInterpreter interpreter = mock(SemanticInterpreter.class);
         WorkingMemoryVersionService versions = mock(WorkingMemoryVersionService.class);
         ChatMemoryService chats = mock(ChatMemoryService.class);
+        ConversationEventService events = mock(ConversationEventService.class);
         StaticPlanExecutor executor = new StaticPlanExecutor();
         V2ActionHandler actions = mock(V2ActionHandler.class);
         V2ResponseRenderer renderer = new V2ResponseRenderer();
         ShopMapper shopMapper = mock(ShopMapper.class);
         when(chats.resolveChatId("chat")).thenReturn("chat");
+        when(chats.load("chat")).thenReturn(List.of());
         when(interpreter.interpret("再便宜一点")).thenReturn(new TurnSemantics(TaskDirective.CONTINUE,
                 List.of(new RequirementChange.RelativePreference(DiningCriteria.PreferenceDimension.PRICE, RequirementChange.Direction.LOWER)),
                 List.of(), List.of(new UserRequest.RecommendationRequest("recommend")), List.of()));
@@ -73,6 +76,7 @@ class V2ChatOrchestratorOccTest {
         ReflectionTestUtils.setField(orchestrator, "semanticInterpreter", interpreter);
         ReflectionTestUtils.setField(orchestrator, "versions", versions);
         ReflectionTestUtils.setField(orchestrator, "chatMemoryService", chats);
+        ReflectionTestUtils.setField(orchestrator, "conversationEventService", events);
         ReflectionTestUtils.setField(orchestrator, "objectMapper", json);
         ReflectionTestUtils.setField(orchestrator, "executor", executor);
         ReflectionTestUtils.setField(orchestrator, "actions", actions);
@@ -98,6 +102,8 @@ class V2ChatOrchestratorOccTest {
         assertEquals("V2_PRE", phases.getAllValues().getFirst().get("phase"));
         assertEquals("V2_POST_RETRY", phases.getAllValues().getLast().get("phase"));
         verify(chats).appendTurn(eq("chat"), eq("再便宜一点"), anyString(), eq("V2"), isNull());
+        verify(events).begin("chat", 1);
+        verify(events).clearTrace();
     }
 
     private AiWorkingMemory row(int version, String json) {

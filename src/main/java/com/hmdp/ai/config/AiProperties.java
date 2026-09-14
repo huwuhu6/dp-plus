@@ -16,9 +16,7 @@ public class AiProperties {
     private Integer toolExecutionTimeoutMs = 2500;
     private Integer answerPolishTimeoutMs = 8000;
     private ResultEvaluationProperties resultEvaluation = new ResultEvaluationProperties();
-    private RoutingProperties routing = new RoutingProperties();
     private LightweightProperties lightweight = new LightweightProperties();
-    private QueryRewriteProperties queryRewrite = new QueryRewriteProperties();
     private ProfileRebuildProperties profileRebuild = new ProfileRebuildProperties();
     private VectorSyncProperties vectorSync = new VectorSyncProperties();
     private String retrievalStrategyVersion = "structured-profile-evidence-v2";
@@ -42,34 +40,6 @@ public class AiProperties {
 
         public boolean isConfigured() {
             return apiKey != null && !apiKey.trim().isEmpty();
-        }
-    }
-
-    @Data
-    public static class QueryRewriteProperties {
-        private Boolean enabled = true;
-        private String provider = "dashscope";
-        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-        private String apiKey;
-        private String model = "qwen-flash";
-        private Integer timeoutMs = 8000;
-
-        public boolean isConfigured() {
-            return Boolean.TRUE.equals(enabled) && apiKey != null && !apiKey.trim().isEmpty();
-        }
-    }
-
-    @Data
-    public static class RoutingProperties {
-        private Boolean enabled = true;
-        private String provider = "dashscope";
-        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-        private String apiKey;
-        private String model = "qwen-flash";
-        private Integer timeoutMs = 4000;
-
-        public boolean isConfigured() {
-            return Boolean.TRUE.equals(enabled) && apiKey != null && !apiKey.trim().isEmpty();
         }
     }
 

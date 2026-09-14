@@ -18,5 +18,7 @@ class ConversationEvaluationDatasetLoaderV2Test {
         AiConversationEvaluationCase relativeCase = loader.loadCases("conversation-v2-runtime-v1").stream()
                 .filter(item -> item.getCaseCode().equals("V2_RELATIVE_PRICE_IS_NOT_BUDGET")).findFirst().orElseThrow();
         assertTrue(relativeCase.getExpectedV2OutcomesJson().contains("relativePreferences"));
+        assertTrue(relativeCase.getExpectedV2OutcomesJson().contains("\"absent\":true"));
+        assertFalse(relativeCase.getExpectedV2OutcomesJson().contains("\"null\":true"));
     }
 }

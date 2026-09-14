@@ -13,7 +13,6 @@ import com.hmdp.ai.dto.DecisionTaskState;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.DecisionResponse;
-import com.hmdp.ai.dto.PolicyDecision;
 import com.hmdp.ai.dto.ResolvedLocationCandidate;
 import com.hmdp.ai.dto.RecommendationBatch;
 import com.hmdp.ai.dto.RecommendationCandidateRef;
@@ -355,12 +354,6 @@ public class ConversationStateService {
         return candidate;
     }
 
-    public void recordPolicy(AiChatSession state, PolicyDecision decision) {
-        if (decision == null) return;
-        // Policy is runtime diagnostics, not durable business state. Do not create
-        // a meaningless Working Memory version merely to retain a log field.
-    }
-
     public void declineLocation(AiChatSession state) {
         ConversationWorkingMemory memory = workingMemory(state);
         clearLocation(memory.getLocation(), "DECLINED");
@@ -658,15 +651,13 @@ public class ConversationStateService {
 
     /**
      * Restores only BUSINESS_STATE fields from a historical snapshot. This always appends
-     * a new version; diagnostics such as lastPolicyAction deliberately remain current.
+     * a new version; non-business turn diagnostics are not restored.
      */
     public AiWorkingMemory restoreBusinessState(AiChatSession state, ConversationWorkingMemory source,
                                                 Map<String, Object> metadata) {
         if (source == null) throw new IllegalArgumentException("Historical working memory cannot be empty");
         ConversationWorkingMemory current = workingMemory(state);
         ConversationWorkingMemory restored = copyBusinessState(source);
-        restored.setLastPolicyAction(current.getLastPolicyAction());
-        restored.setLastPolicyReason(current.getLastPolicyReason());
         normalize(restored);
         int expectedVersion = state.getVersion() == null ? 0 : state.getVersion();
         AiWorkingMemory committed = workingMemoryVersionService.append(state.getChatId(), state.getUserId(), expectedVersion,
@@ -716,9 +707,6 @@ public class ConversationStateService {
     private ConversationWorkingMemory copyBusinessState(ConversationWorkingMemory source) {
         try {
             ConversationWorkingMemory copy = objectMapper.readValue(writeWorkingMemory(source), ConversationWorkingMemory.class);
-            // lastPolicy* is runtime diagnostics, not part of the BUSINESS_STATE restore scope.
-            copy.setLastPolicyAction(null);
-            copy.setLastPolicyReason(null);
             return copy;
         } catch (Exception e) {
             throw new IllegalStateException("Historical working memory cannot be copied", e);
@@ -760,7 +748,7 @@ public class ConversationStateService {
     }
     private String writeLegacySlots(ConversationWorkingMemory memory) { ConversationSlots slots = new ConversationSlots(); slots.setLocation(memory.getLocation()); slots.setPendingLocationCandidates(memory.getPendingLocationCandidates()); try { return objectMapper.writeValueAsString(slots); } catch (Exception e) { throw new IllegalStateException("Conversation location slots cannot be saved", e); } }
     private String writeWorkingMemory(ConversationWorkingMemory memory) { try { return objectMapper.writeValueAsString(memory); } catch (Exception e) { throw new IllegalStateException("Conversation working memory cannot be saved", e); } }
-    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getTasks() == null) memory.setTasks(new ArrayList<DecisionTaskState>()); for (DecisionTaskState task : memory.getTasks()) { if (task.getCriteria() == null) task.setCriteria(new DecisionConstraints()); if (task.getConstraintSources() == null) task.setConstraintSources(new LinkedHashMap<String, ConstraintSource>()); if (task.getSearchLocation() == null) task.setSearchLocation(new ConversationLocationSlot()); if (task.getRecommendationBatches() == null) task.setRecommendationBatches(new ArrayList<RecommendationBatch>()); } if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); if (!hasText(memory.getLastPolicyAction())) memory.setLastPolicyAction("NONE"); }
+    private void normalize(ConversationWorkingMemory memory) { if (memory.getLocation() == null) memory.setLocation(new ConversationLocationSlot()); if (memory.getTasks() == null) memory.setTasks(new ArrayList<DecisionTaskState>()); for (DecisionTaskState task : memory.getTasks()) { if (task.getCriteria() == null) task.setCriteria(new DecisionConstraints()); if (task.getConstraintSources() == null) task.setConstraintSources(new LinkedHashMap<String, ConstraintSource>()); if (task.getSearchLocation() == null) task.setSearchLocation(new ConversationLocationSlot()); if (task.getRecommendationBatches() == null) task.setRecommendationBatches(new ArrayList<RecommendationBatch>()); } if (memory.getPendingLocationCandidates() == null) memory.setPendingLocationCandidates(new ArrayList<ResolvedLocationCandidate>()); if (!hasText(memory.getDialogPhase())) memory.setDialogPhase("IDLE"); }
     private boolean changesCandidateUniverse(CriteriaMergeResult reduction) {
         // A candidate pool is only valid for the exact retrieval domain that produced it.
         // Be deliberately conservative: preserving a stale reference is worse than asking
