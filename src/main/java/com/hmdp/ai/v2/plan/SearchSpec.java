@@ -7,6 +7,6 @@ import java.util.Set;
 /** Frozen causal input for search. Derived ranking preferences are not written back to DiningCriteria. */
 public record SearchSpec(int baseMemoryVersion, String taskId, ExecutionAction.SearchKind kind, int count,
                          DiningCriteria criteria, List<RequirementChange.RelativePreference> relativePreferences,
-                         Set<Long> excludedShopIds, GroundedReference.ShopIdentity anchor) {
+                         Set<Long> excludedShopIds, GroundedReference.ShopIdentity anchor, SearchAnchor searchAnchor) {
     public SearchSpec { relativePreferences = List.copyOf(relativePreferences); excludedShopIds = Set.copyOf(excludedShopIds); }
 }

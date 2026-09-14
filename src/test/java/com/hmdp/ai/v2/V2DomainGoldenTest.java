@@ -22,10 +22,10 @@ class V2DomainGoldenTest {
     }
 
     @Test void criteriaClearIsDistinctFromUntouchedAndRejectsContradiction() {
-        RequirementChange.CriteriaPatch clearBudget = new RequirementChange.CriteriaPatch(DiningCriteria.empty(), Set.of(RequirementChange.ClearedCriterion.BUDGET));
-        RequirementChange.CriteriaPatch cuisineOnly = new RequirementChange.CriteriaPatch(new DiningCriteria(null, new DiningCriteria.CuisineCriteria("日料", List.of()), null, null, null, DiningCriteria.SemanticPreferences.empty()), Set.of());
-        assertTrue(clearBudget.cleared().contains(RequirementChange.ClearedCriterion.BUDGET)); assertNull(cuisineOnly.fragment().budget());
-        assertThrows(IllegalArgumentException.class, () -> new RequirementChange.CriteriaPatch(new DiningCriteria(null, null, new DiningCriteria.BudgetCriteria(null, BigDecimal.TEN), null, null, DiningCriteria.SemanticPreferences.empty()), Set.of(RequirementChange.ClearedCriterion.BUDGET)));
+        RequirementChange.CriteriaPatch clearBudget = new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(null, null, null, null, null, null), Set.of(RequirementChange.ClearedCriterion.BUDGET));
+        RequirementChange.CriteriaPatch cuisineOnly = new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(null, new DiningCriteria.CuisineCriteria("日料", List.of()), null, null, null, null), Set.of());
+        assertTrue(clearBudget.cleared().contains(RequirementChange.ClearedCriterion.BUDGET)); assertNull(cuisineOnly.patch().budget());
+        assertThrows(IllegalArgumentException.class, () -> new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(null, null, new DiningCriteria.BudgetCriteria(null, BigDecimal.TEN), null, null, null), Set.of(RequirementChange.ClearedCriterion.BUDGET)));
     }
 
     @Test void relativePreferenceNeverCreatesAbsoluteBudget() {
@@ -75,17 +75,19 @@ class V2DomainGoldenTest {
         assertInstanceOf(CompilationResult.Direct.class, new ExecutionPlanCompiler().compile(fact, snapshot()));
         assertInstanceOf(CompilationResult.StaticPlan.class, new ExecutionPlanCompiler().compile(search, snapshot()));
         assertInstanceOf(CompilationResult.Adaptive.class, new ExecutionPlanCompiler().compile(explore, snapshot()));
+        CompilationResult.Adaptive adaptive = (CompilationResult.Adaptive) new ExecutionPlanCompiler().compile(explore, snapshot());
+        assertEquals(1L, adaptive.contract().entityWhitelist().getFirst().shopId());
     }
 
     @Test void conditionalFallbackDoesNotEnterPreReducerButAppliesAfterEffect() {
         V2TaskState initial = new V2TaskState(new DiningCriteria(null, new DiningCriteria.CuisineCriteria("火锅", List.of()), new DiningCriteria.BudgetCriteria(null, BigDecimal.valueOf(150)), null, null, DiningCriteria.SemanticPreferences.empty()), List.of(), Set.of(), Set.of());
-        RequirementChange.CriteriaPatch bbq = new RequirementChange.CriteriaPatch(new DiningCriteria(null, new DiningCriteria.CuisineCriteria("烧烤", List.of()), null, null, null, DiningCriteria.SemanticPreferences.empty()), Set.of());
+        RequirementChange.CriteriaPatch bbq = new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(null, new DiningCriteria.CuisineCriteria("烧烤", List.of()), null, null, null, null), Set.of());
         TurnSemantics turn = turn(List.of(new RequirementChange.RelaxationAuthorization(DiningCriteria.PreferenceDimension.DISTANCE), new RequirementChange.RequirementLock(DiningCriteria.PreferenceDimension.PRICE), new RequirementChange.ConditionalRequirementChange("search", new ObservationPredicate.ResultStateIs(ObservationPredicate.ResultState.EMPTY), bbq)), List.of(), List.of(new UserRequest.RecommendationRequest("search")));
         V2TaskState pre = new PreExecutionReducer().reduce(initial, turn);
         assertEquals("火锅", pre.criteria().cuisine().include()); assertTrue(pre.locked().contains(DiningCriteria.PreferenceDimension.PRICE));
         ExecutionPlan fallbackPlan = ((CompilationResult.StaticPlan) new ExecutionPlanCompiler().compile(ground(turn, task("A", 1, "福州", 1)), snapshot())).plan();
         assertEquals("烧烤", ((ExecutionAction.SearchAction) fallbackPlan.groups().get(1).actions().getFirst()).spec().criteria().cuisine().include());
-        V2TaskState post = new PostExecutionReducer().applyConditionalCuisine(pre, bbq, new ExecutionAction.DomainEffect.CuisineChangedTo("烧烤"));
+        V2TaskState post = new PostExecutionReducer().apply(pre, new ExecutionAction.DomainEffect.ConditionalCriteriaApplied(bbq));
         assertEquals("烧烤", post.criteria().cuisine().include());
     }
 
@@ -100,6 +102,6 @@ class V2DomainGoldenTest {
     private TurnSemantics turn(List<RequirementChange> changes, List<EntityFeedback> feedback, List<UserRequest> requests) { return new TurnSemantics(TaskDirective.CONTINUE, changes, feedback, requests, List.of()); }
     private TurnSemantics turn(List<RequirementChange> changes, List<EntityFeedback> feedback, List<UserRequest> requests, List<SemanticRelation> relations) { return new TurnSemantics(TaskDirective.CONTINUE, changes, feedback, requests, relations); }
     private GroundedTurn ground(TurnSemantics turn, TaskView task) { return new GroundingResolver().ground(turn, new EffectiveTaskContext(task, false)); }
-    private PlanningSnapshot snapshot() { return new PlanningSnapshot(7, "A", new DiningCriteria(null, null, new DiningCriteria.BudgetCriteria(BigDecimal.valueOf(100), BigDecimal.valueOf(150)), null, null, DiningCriteria.SemanticPreferences.empty()), List.of(new RequirementChange.RelativePreference(DiningCriteria.PreferenceDimension.PRICE, RequirementChange.Direction.LOWER)), Set.of(99L), "福州"); }
+    private PlanningSnapshot snapshot() { return new PlanningSnapshot(7, "A", new DiningCriteria(null, null, new DiningCriteria.BudgetCriteria(BigDecimal.valueOf(100), BigDecimal.valueOf(150)), null, null, DiningCriteria.SemanticPreferences.empty()), List.of(new RequirementChange.RelativePreference(DiningCriteria.PreferenceDimension.PRICE, RequirementChange.Direction.LOWER)), Set.of(99L), Set.of(DiningCriteria.PreferenceDimension.DISTANCE), Set.of(DiningCriteria.PreferenceDimension.PRICE), new SearchAnchor(null, "福州", 26.0, 119.0, "福建", "福州", null, SearchAnchor.AnchorSource.DEVICE)); }
     private TaskView task(String id, int order, String city, long... shops) { return new TaskView(id, order, "DINING", city, new TaskView.RecommendationBatchView(id + "-batch", java.util.stream.LongStream.of(shops).mapToObj(s -> new TaskView.ShopView(s, "店" + s)).toList()), null); }
 }

@@ -41,7 +41,6 @@ public final class EffectiveTaskContextResolver {
         List<TaskView> matches = switch (selector) {
             case TaskSelector.Earliest ignored -> tasks.stream().filter(t -> t.taskId() != null).sorted(Comparator.comparingInt(TaskView::creationOrder)).limit(1).toList();
             case TaskSelector.Active ignored -> tasks.stream().filter(t -> t.taskId().equals(activeTaskId)).toList();
-            case TaskSelector.PreviousActive ignored -> tasks.stream().filter(t -> !t.taskId().equals(activeTaskId)).sorted(Comparator.comparingInt(TaskView::creationOrder).reversed()).limit(1).toList();
             case TaskSelector.MatchContext context -> tasks.stream().filter(t -> equal(t.goalCategory(), context.goalCategory()) && equal(t.city(), context.city())).toList();
         };
         if (matches.isEmpty()) throw new TaskIssue(Ambiguity.Kind.UNRESOLVED_REFERENCE, "task selector matches no task");

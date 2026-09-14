@@ -16,7 +16,13 @@ import java.util.Set;
 public final class ExecutionPlanCompiler {
     public CompilationResult compile(GroundedTurn turn, PlanningSnapshot snapshot) {
         ExecutionMode mode = new ExecutionModeGate().decide(turn);
-        if (mode == ExecutionMode.ADAPTIVE_RESEARCH) return new CompilationResult.Adaptive(new AdaptiveResearchContract(List.of(), List.of(UserRequest.FactType.EVIDENCE), 4, 4, Duration.ofSeconds(12), true, true));
+        if (mode == ExecutionMode.ADAPTIVE_RESEARCH) {
+            List<GroundedReference.ShopIdentity> whitelist = turn.requests().stream()
+                    .filter(r -> r.request() instanceof UserRequest.ExploreRequest)
+                    .flatMap(r -> r.operands().stream()).filter(GroundedReference.ShopIdentity.class::isInstance)
+                    .map(GroundedReference.ShopIdentity.class::cast).toList();
+            return new CompilationResult.Adaptive(new AdaptiveResearchContract(whitelist, List.of(UserRequest.FactType.EVIDENCE), 4, 4, Duration.ofSeconds(12), true, true));
+        }
         if (mode == ExecutionMode.DIRECT) return new CompilationResult.Direct(action(turn.requests().getFirst(), snapshot));
         Map<String, SemanticRelation> guarded = new HashMap<>();
         for (SemanticRelation relation : turn.semantics().relations()) {
@@ -44,8 +50,10 @@ public final class ExecutionPlanCompiler {
             SearchSpec fallback = conditionalSearchSpec(snapshot, conditional.change());
             List<ExecutionAction> actions = new ArrayList<>();
             actions.add(new ExecutionAction.SearchAction("fallback-" + conditional.observedRequestId(), fallback));
-            if (fallback.criteria().cuisine() != null) actions.add(new ExecutionAction.EmitDomainEffectAction("effect-" + conditional.observedRequestId(), new ExecutionAction.DomainEffect.CuisineChangedTo(fallback.criteria().cuisine().include())));
-            groups.add(new ExecutionPlan.ExecutionGroup("G" + groupNumber++, Set.of(producer), new ExecutionPlan.Guard(conditional.observedRequestId(), conditional.predicate()), actions));
+            String fallbackGroup = "G" + groupNumber++;
+            groups.add(new ExecutionPlan.ExecutionGroup(fallbackGroup, Set.of(producer), new ExecutionPlan.Guard(conditional.observedRequestId(), conditional.predicate()), List.of(new ExecutionAction.SearchAction("fallback-" + conditional.observedRequestId(), fallback))));
+            // EMPTY is a successful observation; only technical group failure skips this dependent effect at execution time.
+            groups.add(new ExecutionPlan.ExecutionGroup("G" + groupNumber++, Set.of(fallbackGroup), null, List.of(new ExecutionAction.EmitDomainEffectAction("effect-" + conditional.observedRequestId(), new ExecutionAction.DomainEffect.ConditionalCriteriaApplied(conditional.change())))));
         }
         ExecutionPlan plan = new ExecutionPlan(groups, ExecutionPlan.PlanBudget.defaults());
         return new CompilationResult.StaticPlan(plan);
@@ -60,23 +68,16 @@ public final class ExecutionPlanCompiler {
             case UserRequest.CompareRequest compare -> new ExecutionAction.CompareAction(compare.requestId(), shops(grounded), compare.dimensions());
             case UserRequest.SelectRequest select -> new ExecutionAction.EmitDomainEffectAction(select.requestId(), new ExecutionAction.DomainEffect.CandidateSelected(shop(grounded).shopId()));
             case UserRequest.ExploreRequest explore -> new ExecutionAction.ToolAction(explore.requestId(), shop(grounded), UserRequest.FactType.EVIDENCE);
-            case UserRequest.GeneralKnowledgeRequest general -> throw new IllegalArgumentException("general knowledge is direct rendering, never shop search");
+            case UserRequest.GeneralKnowledgeRequest general -> new ExecutionAction.GeneralAnswerAction(general.requestId(), general.topic());
         };
     }
     private ExecutionAction.SearchAction search(String requestId, ExecutionAction.SearchKind kind, int count, GroundedRequest request, PlanningSnapshot snapshot) {
         GroundedReference.ShopIdentity anchor = request.operands().stream().filter(GroundedReference.ShopIdentity.class::isInstance).map(GroundedReference.ShopIdentity.class::cast).findFirst().orElse(null);
-        return new ExecutionAction.SearchAction(requestId, new SearchSpec(snapshot.baseMemoryVersion(), snapshot.taskId(), kind, count, snapshot.criteria(), snapshot.relativePreferences(), snapshot.rejectedShopIds(), anchor));
+        return new ExecutionAction.SearchAction(requestId, new SearchSpec(snapshot.baseMemoryVersion(), snapshot.taskId(), kind, count, snapshot.criteria(), snapshot.relativePreferences(), snapshot.rejectedShopIds(), anchor, snapshot.searchAnchor()));
     }
     private SearchSpec conditionalSearchSpec(PlanningSnapshot snapshot, com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch patch) {
-        com.hmdp.ai.v2.semantic.DiningCriteria base = snapshot.criteria(); com.hmdp.ai.v2.semantic.DiningCriteria fragment = patch.fragment();
-        com.hmdp.ai.v2.semantic.DiningCriteria criteria = new com.hmdp.ai.v2.semantic.DiningCriteria(
-                patch.cleared().contains(com.hmdp.ai.v2.semantic.RequirementChange.ClearedCriterion.LOCATION) ? null : fragment.location() == null ? base.location() : fragment.location(),
-                patch.cleared().contains(com.hmdp.ai.v2.semantic.RequirementChange.ClearedCriterion.CUISINE) ? null : fragment.cuisine() == null ? base.cuisine() : fragment.cuisine(),
-                patch.cleared().contains(com.hmdp.ai.v2.semantic.RequirementChange.ClearedCriterion.BUDGET) ? null : fragment.budget() == null ? base.budget() : fragment.budget(),
-                patch.cleared().contains(com.hmdp.ai.v2.semantic.RequirementChange.ClearedCriterion.DISTANCE) ? null : fragment.distance() == null ? base.distance() : fragment.distance(),
-                patch.cleared().contains(com.hmdp.ai.v2.semantic.RequirementChange.ClearedCriterion.DINING_TIME) ? null : fragment.diningTime() == null ? base.diningTime() : fragment.diningTime(),
-                fragment.preferences().equals(com.hmdp.ai.v2.semantic.DiningCriteria.SemanticPreferences.empty()) ? base.preferences() : fragment.preferences());
-        return new SearchSpec(snapshot.baseMemoryVersion(), snapshot.taskId(), ExecutionAction.SearchKind.RECOMMENDATIONS, 0, criteria, snapshot.relativePreferences(), snapshot.rejectedShopIds(), null);
+        var criteria = com.hmdp.ai.v2.semantic.CriteriaPatchApplier.apply(snapshot.criteria(), patch);
+        return new SearchSpec(snapshot.baseMemoryVersion(), snapshot.taskId(), ExecutionAction.SearchKind.RECOMMENDATIONS, 0, criteria, snapshot.relativePreferences(), snapshot.rejectedShopIds(), null, snapshot.searchAnchor());
     }
     private GroundedReference.ShopIdentity shop(GroundedRequest request) { return request.operands().stream().filter(GroundedReference.ShopIdentity.class::isInstance).map(GroundedReference.ShopIdentity.class::cast).findFirst().orElseThrow(() -> new IllegalArgumentException("request needs grounded shop identity")); }
     private List<GroundedReference.ShopIdentity> shops(GroundedRequest request) { return request.operands().stream().filter(GroundedReference.ShopIdentity.class::isInstance).map(GroundedReference.ShopIdentity.class::cast).toList(); }

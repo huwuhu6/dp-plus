@@ -5,13 +5,13 @@ import java.util.Set;
 public sealed interface RequirementChange permits RequirementChange.CriteriaPatch, RequirementChange.RelativePreference,
         RequirementChange.RelaxationAuthorization, RequirementChange.RequirementLock, RequirementChange.ConditionalRequirementChange {
     /** null in fragment means untouched; explicit removal must be present in cleared. */
-    record CriteriaPatch(DiningCriteria fragment, Set<ClearedCriterion> cleared) implements RequirementChange {
+    record CriteriaPatch(DiningCriteriaPatch patch, Set<ClearedCriterion> cleared) implements RequirementChange {
         public CriteriaPatch {
-            fragment = fragment == null ? DiningCriteria.empty() : fragment;
+            patch = patch == null ? new DiningCriteriaPatch(null, null, null, null, null, null) : patch;
             cleared = cleared == null ? Set.of() : Set.copyOf(cleared);
-            if (cleared.contains(ClearedCriterion.BUDGET) && fragment.budget() != null || cleared.contains(ClearedCriterion.CUISINE) && fragment.cuisine() != null
-                    || cleared.contains(ClearedCriterion.LOCATION) && fragment.location() != null || cleared.contains(ClearedCriterion.DISTANCE) && fragment.distance() != null
-                    || cleared.contains(ClearedCriterion.DINING_TIME) && fragment.diningTime() != null || cleared.contains(ClearedCriterion.SEMANTIC_PREFERENCES) && !fragment.preferences().equals(DiningCriteria.SemanticPreferences.empty()))
+            if (cleared.contains(ClearedCriterion.BUDGET) && patch.budget() != null || cleared.contains(ClearedCriterion.CUISINE) && patch.cuisine() != null
+                    || cleared.contains(ClearedCriterion.LOCATION) && patch.location() != null || cleared.contains(ClearedCriterion.DISTANCE) && patch.distance() != null
+                    || cleared.contains(ClearedCriterion.DINING_TIME) && patch.diningTime() != null || cleared.contains(ClearedCriterion.SEMANTIC_PREFERENCES) && patch.semanticPreferences() != null)
                 throw new IllegalArgumentException("criterion cannot be patched and cleared in one turn");
         }
     }

@@ -10,7 +10,7 @@ public final class PreExecutionReducer {
         DiningCriteria criteria = previous.criteria(); List<RequirementChange.RelativePreference> relative = new ArrayList<>(previous.relativePreferences());
         Set<DiningCriteria.PreferenceDimension> relaxable = new HashSet<>(previous.relaxable()); Set<DiningCriteria.PreferenceDimension> locked = new HashSet<>(previous.locked());
         for (RequirementChange change : turn.requirementChanges()) switch (change) {
-            case RequirementChange.CriteriaPatch patch -> criteria = merge(criteria, patch);
+            case RequirementChange.CriteriaPatch patch -> criteria = CriteriaPatchApplier.apply(criteria, patch);
             case RequirementChange.RelativePreference preference -> relative.add(preference);
             case RequirementChange.RelaxationAuthorization authorization -> relaxable.add(authorization.dimension());
             case RequirementChange.RequirementLock lock -> locked.add(lock.dimension());
@@ -18,14 +18,4 @@ public final class PreExecutionReducer {
         };
         return new V2TaskState(criteria, relative, relaxable, locked);
     }
-    private DiningCriteria merge(DiningCriteria base, RequirementChange.CriteriaPatch patch) {
-        DiningCriteria fragment = patch.fragment(); Set<RequirementChange.ClearedCriterion> clear = patch.cleared();
-        return new DiningCriteria(clear.contains(RequirementChange.ClearedCriterion.LOCATION) ? null : choose(fragment.location(), base.location()),
-                clear.contains(RequirementChange.ClearedCriterion.CUISINE) ? null : choose(fragment.cuisine(), base.cuisine()),
-                clear.contains(RequirementChange.ClearedCriterion.BUDGET) ? null : choose(fragment.budget(), base.budget()),
-                clear.contains(RequirementChange.ClearedCriterion.DISTANCE) ? null : choose(fragment.distance(), base.distance()),
-                clear.contains(RequirementChange.ClearedCriterion.DINING_TIME) ? null : choose(fragment.diningTime(), base.diningTime()),
-                clear.contains(RequirementChange.ClearedCriterion.SEMANTIC_PREFERENCES) ? DiningCriteria.SemanticPreferences.empty() : choose(fragment.preferences(), base.preferences()));
-    }
-    private <T> T choose(T patch, T current) { return patch == null ? current : patch; }
 }
