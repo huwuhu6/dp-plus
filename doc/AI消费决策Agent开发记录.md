@@ -1,5 +1,13 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-14：Architecture V2 第一阶段——独立领域核
+
+**现状 → 问题**：V1 pipeline 将 Context Rewrite、Route、Criteria reduction 和 policy 判断串联，任务切换仍使用地点+菜系签名。复合的历史引用、条件变更和序号查询不能在不提前改变 active task 的情况下清晰限定读取范围。
+
+**决策**：新增不依赖 V1 DTO 的 `com.hmdp.ai.v2`。sealed/record 固定 TurnSemantics、强类型 DiningCriteria/RequirementChange、feedback、grounded identity 与受限 group-DAG ExecutionPlan；EffectiveTaskContext 解析与 durable RESTORE 分离。LLM 只表达语义，Java grounding 和纯函数 compiler 决定执行；relative preference 不生成绝对用户值，Executor 只 emit DomainEffect，Reducer 才走 OCC 写状态。
+
+**结果与评测**：新增 deterministic golden tests，覆盖复合 critique/fact/alternatives、条件分支、static/adaptive、跨 Task grounding、batch feedback、预算/相对偏好和松弛锁定。V1 主链未改；下一阶段按此契约直接切换并删除旧 ContextRewrite/IntentRouting/CriteriaReduction 语义链，不建 Adapter 或双解释器。
+
 ### Short POI 地理前缀与设备定位交互边界（2026-09-07）
 
 短 POI 的行政前缀解析新增了独立的 `resolveGeographicContextPrefix`：本地 Registry 未命中时可请求行政 Provider，但只接受唯一、别名精确对应的省/市结果；普通行政 Resolver 的安全规则不放宽，也不把“福州大学”拆成“福州 + 大学”。显式城市优先于设备 GPS，因此“北京农大”会保留北京前缀并进入城市限定的 POI Text Search，而单独“农大”在有福州设备位置时仍使用 GPS 做 Around 消歧。
