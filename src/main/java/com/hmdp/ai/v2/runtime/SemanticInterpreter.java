@@ -12,6 +12,8 @@ import com.hmdp.ai.v2.semantic.TaskDirective;
 import com.hmdp.ai.v2.semantic.TaskSelector;
 import com.hmdp.ai.v2.semantic.TurnSemantics;
 import com.hmdp.ai.v2.semantic.UserRequest;
+import com.hmdp.ai.v2.semantic.SemanticRelation;
+import com.hmdp.ai.v2.semantic.ObservationPredicate;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
 
@@ -65,8 +67,16 @@ public class SemanticInterpreter {
         for (JsonNode item : root.path("requirementLocks")) {
             changes.add(new RequirementChange.RequirementLock(enumValue(DiningCriteria.PreferenceDimension.class, item.asText())));
         }
+        for (JsonNode item : root.path("conditionalRequirementChanges")) {
+            changes.add(new RequirementChange.ConditionalRequirementChange(requiredText(item, "observedRequestId"),
+                    predicate(item.path("predicate")), new RequirementChange.CriteriaPatch(criteriaPatch(item.path("criteria")),
+                    enumSet(RequirementChange.ClearedCriterion.class, item.path("cleared")))));
+        }
+        List<SemanticRelation> relations = new ArrayList<>();
+        for (JsonNode item : root.path("relations")) relations.add(new SemanticRelation(requiredText(item, "observedRequestId"),
+                predicate(item.path("predicate")), requiredText(item, "dependentRequestId")));
         return new TurnSemantics(directive, changes, feedback(root.path("feedback")),
-                requests(root.path("requests")), List.of(), references(root.path("references")));
+                requests(root.path("requests")), relations, references(root.path("references")));
     }
 
     private JsonNode call(String userTurn, boolean repair) {
@@ -159,6 +169,16 @@ public class SemanticInterpreter {
             default -> throw new IllegalArgumentException("unsupported reference");
         };
     }
+    private ObservationPredicate predicate(JsonNode node) {
+        String type = requiredText(node, "type");
+        return switch (type) {
+            case "RESULT_STATE" -> new ObservationPredicate.ResultStateIs(enumValue(ObservationPredicate.ResultState.class, requiredText(node, "expected")));
+            case "BOOLEAN" -> new ObservationPredicate.BooleanEquals(node.path("expected").asBoolean());
+            case "NUMERIC" -> new ObservationPredicate.NumericCompare(enumValue(ObservationPredicate.NumericOperator.class, requiredText(node, "operator")), decimal(node, "expected"));
+            case "CATEGORY" -> new ObservationPredicate.CategoryEquals(enumValue(ObservationPredicate.ObservationCategory.class, requiredText(node, "expected")));
+            default -> throw new IllegalArgumentException("unsupported observation predicate");
+        };
+    }
 
     private Map<String, Object> schema() {
         Map<String, Object> string = Map.of("type", "string");
@@ -173,15 +193,20 @@ public class SemanticInterpreter {
                 "city", string, "district", string, "poi", string, "cuisine", string,
                 "excludedCuisines", Map.of("type", "array", "items", string),
                 "budgetSoft", number, "budgetHard", number, "distanceKm", number));
-        return Map.of("type", "object", "properties", Map.of(
-                "taskDirective", string, "criteria", criteria,
-                "cleared", Map.of("type", "array", "items", string),
-                "relativePreferences", Map.of("type", "array", "items", Map.of("type", "object")),
-                "relaxationAuthorizations", Map.of("type", "array", "items", string),
-                "requirementLocks", Map.of("type", "array", "items", string),
-                "feedback", Map.of("type", "array", "items", Map.of("type", "object")),
-                "requests", Map.of("type", "array", "items", request),
-                "references", Map.of("type", "array", "items", target)));
+        Map<String, Object> predicate = Map.of("type", "object", "properties", Map.of("type", string, "expected", string, "operator", string));
+        Map<String, Object> relation = Map.of("type", "object", "properties", Map.of("observedRequestId", string, "dependentRequestId", string, "predicate", predicate));
+        Map<String, Object> conditional = Map.of("type", "object", "properties", Map.of("observedRequestId", string, "predicate", predicate, "criteria", criteria,
+                "cleared", Map.of("type", "array", "items", string)));
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("taskDirective", string); properties.put("criteria", criteria);
+        properties.put("cleared", Map.of("type", "array", "items", string));
+        properties.put("relativePreferences", Map.of("type", "array", "items", Map.of("type", "object")));
+        properties.put("relaxationAuthorizations", Map.of("type", "array", "items", string));
+        properties.put("requirementLocks", Map.of("type", "array", "items", string));
+        properties.put("feedback", Map.of("type", "array", "items", Map.of("type", "object")));
+        properties.put("requests", Map.of("type", "array", "items", request)); properties.put("relations", Map.of("type", "array", "items", relation));
+        properties.put("conditionalRequirementChanges", Map.of("type", "array", "items", conditional)); properties.put("references", Map.of("type", "array", "items", target));
+        return Map.of("type", "object", "properties", properties);
     }
 
     private <T extends Enum<T>> T enumValue(Class<T> type, String value) {

@@ -73,7 +73,9 @@ public final class ExecutionPlanCompiler {
     }
     private ExecutionAction.SearchAction search(String requestId, ExecutionAction.SearchKind kind, int count, GroundedRequest request, PlanningSnapshot snapshot) {
         GroundedReference.ShopIdentity anchor = request.operands().stream().filter(GroundedReference.ShopIdentity.class::isInstance).map(GroundedReference.ShopIdentity.class::cast).findFirst().orElse(null);
-        return new ExecutionAction.SearchAction(requestId, new SearchSpec(snapshot.baseMemoryVersion(), snapshot.taskId(), kind, count, snapshot.criteria(), snapshot.relativePreferences(), snapshot.rejectedShopIds(), anchor, snapshot.searchAnchor()));
+        Set<Long> excluded = new java.util.HashSet<>(snapshot.rejectedShopIds());
+        if (kind == ExecutionAction.SearchKind.ALTERNATIVES) excluded.addAll(snapshot.currentVisibleShopIds());
+        return new ExecutionAction.SearchAction(requestId, new SearchSpec(snapshot.baseMemoryVersion(), snapshot.taskId(), kind, count, snapshot.criteria(), snapshot.relativePreferences(), excluded, anchor, snapshot.searchAnchor()));
     }
     private SearchSpec conditionalSearchSpec(PlanningSnapshot snapshot, com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch patch) {
         var criteria = com.hmdp.ai.v2.semantic.CriteriaPatchApplier.apply(snapshot.criteria(), patch);

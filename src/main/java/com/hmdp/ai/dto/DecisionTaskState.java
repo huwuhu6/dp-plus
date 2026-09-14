@@ -9,6 +9,7 @@ import java.util.Set;
 import com.hmdp.ai.v2.plan.SearchAnchor;
 import com.hmdp.ai.v2.semantic.DiningCriteria;
 import com.hmdp.ai.v2.semantic.RequirementChange;
+import com.hmdp.ai.v2.reducer.TaskLifecycle;
 @Data
 public class DecisionTaskState {
     private String taskId;
@@ -24,6 +25,6 @@ public class DecisionTaskState {
     private Set<DiningCriteria.PreferenceDimension> v2Locked = new HashSet<>();
     private Set<Long> v2RejectedShopIds = new HashSet<>();
     private Long v2SelectedShopId;
-    private String v2Lifecycle = "CONTINUE";
+    private TaskLifecycle v2Lifecycle = TaskLifecycle.ACTIVE;
     private SearchAnchor v2SearchAnchor;
 }

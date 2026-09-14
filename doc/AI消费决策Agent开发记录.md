@@ -1,5 +1,19 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-14：V2 Runtime 第一轮加固
+
+修复 START_NEW 未新建 Task、RESTORE 未 durable 切换 activeTaskId、ABANDON 未实现的断链。新增
+`TaskLifecycle` 与 `TaskLifecycleReducer`，使 ACTIVE → START_NEW → SUSPENDED/ACTIVE、RESTORE 和
+ABANDON 均在 reducer/gateway 边界持久化；TaskDirective 不再作为 durable lifecycle 字段。
+
+V2 Search 从 `ConsumptionDecisionService.decide` 脱钩，使用不创建 decision session 的
+`ShopRetrievalEngine`。该边界只接收冻结 SearchSpec，消费 hard criteria、排除列表、PRICE LOWER
+rerank、Alternatives 当前批次临时排除和 Similar anchor；不读取 raw user text 或 WorkingMemory。
+同时为 execution observation 增加 typed Boolean/Numeric/Category value，guard 进行确定性比较，
+并将 conditional relations/criteria changes 纳入 semantic structured schema。
+
+定向验证：`mvn -q clean -Dtest='com.hmdp.ai.v2.*Test' test` 通过，14 tests、0 failures。
+
 ## 2026-09-14：V2 主链首次切换
 
 V2 runtime 已接入 `ChatOrchestrationService` 的唯一生产入口，因此 `/ai/chat/messages`、SSE 与

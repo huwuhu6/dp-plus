@@ -41,6 +41,7 @@ public class ConversationWorkingMemory {
         DecisionTaskState task = new DecisionTaskState();
         task.setTaskId(java.util.UUID.randomUUID().toString());
         task.setTitle("当前推荐");
+        task.setV2Lifecycle(com.hmdp.ai.v2.reducer.TaskLifecycle.ACTIVE);
         if (tasks == null) tasks = new ArrayList<DecisionTaskState>();
         tasks.add(task); activeTaskId = task.getTaskId();
         return task;

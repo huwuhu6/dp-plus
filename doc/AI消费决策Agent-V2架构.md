@@ -71,6 +71,16 @@ V2 runtime 复用既有 `IdempotencyService` 与 `ai_idempotency_record` 的 `(u
 它不接收 raw user text、WorkingMemory 或 durable writer。`ResponseSpec` 是 closed-world 输出，
 renderer 只做展示投影。
 
+运行时加固补充：TaskDirective 只是单轮命令；Task durable state 使用封闭的 `TaskLifecycle`
+（ACTIVE/SUSPENDED/COMPLETED/ABANDONED），唯一由 `TaskLifecycleReducer` 改写 activeTaskId 和
+task lifecycle。V2 Search 改为通过无状态 `ShopRetrievalEngine`，它不依赖 AiDecisionSession、
+DecisionTransition、消息持久化或 WorkingMemory writer。SearchSpec 的 PRICE LOWER、ALTERNATIVES
+临时可见批次排除、SIMILAR anchor 要求都在该边界消费。
+
+ExecutionObservation 增加封闭 typed value；StaticPlanExecutor 对 Boolean/Numeric/Category guard
+按类型比较，绝不从展示文本推断事实。SemanticInterpreter schema 已包含 typed relations 与
+conditionalRequirementChanges，条件菜系 fallback 可由已有静态 DAG 和 PostReducer 落地。
+
 ## Evaluation 与迁移
 
 领域核 golden tests 不依赖模型、数据库或时间，覆盖复合 critique/fact/alternatives、条件选店、static/adaptive、历史 Task grounding、batch feedback、critique/reject、预算和相对偏好、松弛/锁定。主链切换后将 fixture 接入 JSONL conversation evaluation，并运行 `mvn -q test` 和已登录轨迹评测。

@@ -70,9 +70,18 @@ public class StaticPlanExecutor {
             case ObservationPredicate.ResultStateIs state -> state.expected() == ObservationPredicate.ResultState.EMPTY
                     ? observation.status() == ExecutionObservation.Status.EMPTY
                     : observation.status() == ExecutionObservation.Status.SUCCESS;
-            case ObservationPredicate.BooleanEquals ignored -> false;
-            case ObservationPredicate.NumericCompare ignored -> false;
-            case ObservationPredicate.CategoryEquals ignored -> false;
+            case ObservationPredicate.BooleanEquals expected -> observation.value() instanceof ObservationValue.BooleanValue actual
+                    && actual.value() == expected.expected();
+            case ObservationPredicate.NumericCompare expected -> observation.value() instanceof ObservationValue.NumericValue actual
+                    && switch (expected.operator()) {
+                        case GT -> actual.value().compareTo(expected.expected()) > 0;
+                        case GTE -> actual.value().compareTo(expected.expected()) >= 0;
+                        case LT -> actual.value().compareTo(expected.expected()) < 0;
+                        case LTE -> actual.value().compareTo(expected.expected()) <= 0;
+                        case EQ -> actual.value().compareTo(expected.expected()) == 0;
+                    };
+            case ObservationPredicate.CategoryEquals expected -> observation.value() instanceof ObservationValue.CategoryValue actual
+                    && expected.expected().name().equals(actual.value());
         };
     }
 

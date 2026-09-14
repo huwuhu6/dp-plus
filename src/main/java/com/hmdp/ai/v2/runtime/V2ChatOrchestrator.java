@@ -17,6 +17,7 @@ import com.hmdp.ai.v2.plan.*;
 import com.hmdp.ai.v2.reducer.PostExecutionReducer;
 import com.hmdp.ai.v2.reducer.PreExecutionReducer;
 import com.hmdp.ai.v2.reducer.V2TaskState;
+import com.hmdp.ai.v2.reducer.TaskLifecycleReducer;
 import com.hmdp.ai.v2.semantic.*;
 import com.hmdp.ai.v2.verification.DeterministicResultVerifier;
 import com.hmdp.entity.Shop;
@@ -47,7 +48,7 @@ public class V2ChatOrchestrator {
             chatMemoryService.appendTurn(chatId, request.getMessage(), response.getAnswer(), response.getRoute(), null);
             return response;
         } catch (VersionConflictException conflict) {
-            if (attempt == 1) return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null,
+            if (attempt == 1) return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, null,
                     "对话状态刚刚更新，请重试这句话。"));
         }
         throw new IllegalStateException("unreachable");
@@ -56,17 +57,25 @@ public class V2ChatOrchestrator {
     private ChatMessageResponse run(String chatId, String message, TurnSemantics semantics) {
         VersionedMemory loaded = load(chatId);
         ConversationWorkingMemory memory = loaded.memory();
-        DecisionTaskState task = task(memory, semantics.taskDirective());
         List<TaskView> views = taskViews(memory);
         EffectiveTaskContextResult contextResult = new EffectiveTaskContextResolver().resolveResult(memory.getActiveTaskId(), views, semantics);
         if (contextResult instanceof EffectiveTaskContextResult.NeedsClarification c)
-            return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, "请说明你指的是哪一个推荐任务：" + c.ambiguity().detail(), null));
+            return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, "请说明你指的是哪一个推荐任务：" + c.ambiguity().detail(), null));
         EffectiveTaskContext context = ((EffectiveTaskContextResult.Resolved) contextResult).context();
-        if (context.task() != null) task = findTask(memory, context.task().taskId());
+        String restoreTaskId = context.task() == null ? null : context.task().taskId();
+        TaskDirective lifecycleCommand = memory.activeTask() == null && semantics.taskDirective() == TaskDirective.CONTINUE
+                ? TaskDirective.START_NEW : semantics.taskDirective();
+        DecisionTaskState task = new TaskLifecycleReducer().apply(memory, lifecycleCommand, restoreTaskId);
+        if (semantics.taskDirective() == TaskDirective.ABANDON) {
+            versions.append(chatId, userId(), loaded.version(), memory, ConversationEventType.STATE_REDUCED,
+                    Map.of("phase", "V2_PRE"), Map.of("taskId", task.getTaskId(), "lifecycle", "ABANDONED"));
+            return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, "当前推荐任务已结束。", null));
+        }
+        context = new EffectiveTaskContext(view(task, memory.getTasks().indexOf(task)), context.restoredForThisTurn());
         GroundingResult grounding = new GroundingResolver().resolve(semantics,
                 context.task() == null ? new EffectiveTaskContext(view(task, 0), false) : context);
         if (grounding instanceof GroundingResult.NeedsClarification c)
-            return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, "请明确是哪一家：" + c.ambiguities().getFirst().detail(), null));
+            return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, "请明确是哪一家：" + c.ambiguities().getFirst().detail(), null));
         GroundedTurn grounded = ((GroundingResult.Grounded) grounding).turn();
         V2TaskState previous = state(task);
         V2TaskState reduced = new PreExecutionReducer().reduce(previous, semantics);
@@ -113,18 +122,18 @@ public class V2ChatOrchestrator {
             if (observation.generalAnswer() != null) { if (observation.requestId().startsWith("general")) general = observation.generalAnswer(); else fact = observation.generalAnswer(); }
             if (observation.status() == ExecutionObservation.Status.FAILURE) error = observation.detail();
         }
-        return new ResponseSpec(recommendations, fact, task.getV2SelectedShopId(), general, null, error);
+        Shop selected = task.getV2SelectedShopId() == null ? null : shopMapper.selectById(task.getV2SelectedShopId());
+        return new ResponseSpec(recommendations, fact, task.getV2SelectedShopId(), selected == null ? null : selected.getName(), general, null, error);
     }
     private void appendBatch(DecisionTaskState task, List<Long> ids) { RecommendationBatch batch = new RecommendationBatch();
         for (Long id : ids) { Shop shop = shopMapper.selectById(id); if (shop == null) continue; RecommendationCandidateRef candidate = new RecommendationCandidateRef(); candidate.setShopId(id); candidate.setShopName(shop.getName()); candidate.setPricePerPerson(shop.getAvgPrice()); batch.getCandidates().add(candidate); }
         if (!batch.getCandidates().isEmpty()) task.getRecommendationBatches().add(batch); }
     private void applyFeedback(DecisionTaskState task, GroundedTurn turn) { for (GroundedFeedback feedback : turn.feedback()) if (feedback.feedback() instanceof EntityFeedback.EntityFeedbackItem item && item.kind() == EntityFeedback.FeedbackKind.REJECT)
         feedback.operands().stream().filter(GroundedReference.ShopIdentity.class::isInstance).map(GroundedReference.ShopIdentity.class::cast).forEach(shop -> task.getV2RejectedShopIds().add(shop.shopId())); }
-    private PlanningSnapshot snapshot(DecisionTaskState task, int version) { return new PlanningSnapshot(version, task.getTaskId(), task.getV2Criteria(), task.getV2RelativePreferences(), task.getV2RejectedShopIds(), task.getV2Relaxable(), task.getV2Locked(), task.getV2SearchAnchor()); }
+    private PlanningSnapshot snapshot(DecisionTaskState task, int version) { return new PlanningSnapshot(version, task.getTaskId(), task.getV2Criteria(), task.getV2RelativePreferences(), task.getV2RejectedShopIds(), task.getV2Relaxable(), task.getV2Locked(), task.getV2SearchAnchor(), currentVisibleIds(task)); }
+    private Set<Long> currentVisibleIds(DecisionTaskState task) { if (task.getRecommendationBatches().isEmpty()) return Set.of(); return task.getRecommendationBatches().getLast().getCandidates().stream().map(RecommendationCandidateRef::getShopId).filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet()); }
     private V2TaskState state(DecisionTaskState task) { return new V2TaskState(task.getV2Criteria(), task.getV2RelativePreferences(), task.getV2Relaxable(), task.getV2Locked()); }
     private void persistState(DecisionTaskState task, V2TaskState state) { task.setV2Criteria(state.criteria()); task.setV2RelativePreferences(state.relativePreferences()); task.setV2Relaxable(state.relaxable()); task.setV2Locked(state.locked()); }
-    private DecisionTaskState task(ConversationWorkingMemory memory, TaskDirective directive) { if (directive == TaskDirective.START_NEW || memory.activeTask() == null) return memory.ensureActiveTask(); return memory.activeTask(); }
-    private DecisionTaskState findTask(ConversationWorkingMemory memory, String id) { return memory.getTasks().stream().filter(t -> id.equals(t.getTaskId())).findFirst().orElseThrow(); }
     private List<TaskView> taskViews(ConversationWorkingMemory memory) { List<TaskView> result = new ArrayList<>(); for (int i = 0; i < memory.getTasks().size(); i++) result.add(view(memory.getTasks().get(i), i)); return result; }
     private TaskView view(DecisionTaskState task, int index) { RecommendationBatch batch = task.getRecommendationBatches().isEmpty() ? null : task.getRecommendationBatches().getLast(); TaskView.RecommendationBatchView visible = batch == null ? null : new TaskView.RecommendationBatchView("batch-" + task.getRecommendationBatches().size(), batch.getCandidates().stream().filter(c -> c.getShopId() != null).map(c -> new TaskView.ShopView(c.getShopId(), c.getShopName())).toList()); return new TaskView(task.getTaskId(), index, "DINING", task.getV2Criteria().location() == null ? null : task.getV2Criteria().location().city(), visible, task.getV2SelectedShopId()); }
     private VersionedMemory load(String chatId) { AiWorkingMemory row = versions.latest(chatId); try { return row == null ? new VersionedMemory(0, new ConversationWorkingMemory()) : new VersionedMemory(row.getVersion(), objectMapper.readValue(row.getMemoryJson(), ConversationWorkingMemory.class)); } catch (Exception e) { throw new IllegalStateException("V2 working memory cannot be read", e); } }
