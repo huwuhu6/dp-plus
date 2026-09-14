@@ -103,6 +103,7 @@ public class ConversationEvaluationDatasetLoader {
         c.setExpectedTurnStatesJson(writeJson(dto.getExpectedTurnStates()));
         c.setExpectedToolsByTurnJson(writeJson(dto.getExpectedToolsByTurn()));
         c.setExpectedRelationsJson(writeJson(dto.getExpectedRelations()));
+        c.setExpectedV2OutcomesJson(writeJson(dto.getExpectedV2Outcomes()));
         c.setNotes(dto.getNotes());
         return c;
     }

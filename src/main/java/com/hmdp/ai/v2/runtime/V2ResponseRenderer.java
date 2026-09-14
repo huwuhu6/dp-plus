@@ -11,7 +11,10 @@ public class V2ResponseRenderer {
         ChatMessageResponse response = new ChatMessageResponse();
         response.setChatId(chatId); response.setRoute("V2"); response.setUsedModel(false);
         DecisionResponse decision = new DecisionResponse();
-        decision.setRecommendations(spec.recommendations()); decision.setStatus(spec.partialError() == null ? "COMPLETED" : "PARTIAL");
+        decision.setRecommendations(spec.recommendations());
+        decision.setStatus(spec.staleSuppressed() ? "STALE_SUPPRESSED"
+                : spec.unsupported() ? "UNSUPPORTED" : spec.clarification() != null ? "CLARIFICATION"
+                : spec.partialError() == null ? "COMPLETED" : "PARTIAL");
         if (!spec.recommendations().isEmpty()) response.setAnswer("已为你找到 " + spec.recommendations().size() + " 家可选餐厅。");
         else if (spec.factAnswer() != null) response.setAnswer(spec.factAnswer());
         else if (spec.selectedShopId() != null) response.setAnswer(spec.selectedShopName() == null ? "已选定该商户。" : "已为你选定：" + spec.selectedShopName());

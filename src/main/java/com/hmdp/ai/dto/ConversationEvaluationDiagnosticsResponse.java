@@ -26,6 +26,7 @@ public class ConversationEvaluationDiagnosticsResponse {
         private Integer expectedErrorCount;
         private String expectedRecoveryRoutesJson;
         private String expectedMemoryJson;
+        private String expectedV2OutcomesJson;
         private Integer expectedUnseenFromTurn;
         private String expectedUnseenPairsJson;
         private String actualRoutesJson;
@@ -35,6 +36,10 @@ public class ConversationEvaluationDiagnosticsResponse {
         private String actualRecommendationSnapshotsJson;
         private String actualFinalStatus;
         private String recommendedShopIds;
+        private String actualV2OutcomesJson;
+        private Integer expectedV2OutcomeCount;
+        private Integer matchedV2OutcomeCount;
+        private Boolean v2OutcomeMatched;
         private Boolean routeMatched;
         private Boolean contextRewriteMatched;
         private Boolean toolMatched;

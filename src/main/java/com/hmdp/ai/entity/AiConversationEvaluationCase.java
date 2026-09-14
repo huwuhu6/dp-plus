@@ -38,6 +38,9 @@ public class AiConversationEvaluationCase {
     private String expectedToolsByTurnJson;
     @TableField(exist = false)
     private String expectedRelationsJson;
+    /** New V2 business-outcome assertions, loaded from versioned JSONL datasets. */
+    @TableField(exist = false)
+    private String expectedV2OutcomesJson;
     private Boolean active;
     private String notes;
 }

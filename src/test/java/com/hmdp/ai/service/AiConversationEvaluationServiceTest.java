@@ -2,6 +2,7 @@ package com.hmdp.ai.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.dto.ChatMessageResponse;
 import com.hmdp.ai.dto.ContextRewriteResult;
@@ -138,6 +139,63 @@ class AiConversationEvaluationServiceTest {
         assertEquals(null, evaluationCase.getExpectedToolsByTurnJson());
         assertEquals(null, evaluationCase.getExpectedRelationsJson());
     }
+
+    @Test
+    void evaluatesV2OutcomesWithoutLegacyRouteExpectations() throws Exception {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
+        ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
+        AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
+        AiConversationEvaluationCaseResultMapper resultMapper = mock(AiConversationEvaluationCaseResultMapper.class);
+        AiAgentToolCallMapper toolCallMapper = mock(AiAgentToolCallMapper.class);
+        WorkingMemoryVersionService memoryVersions = mock(WorkingMemoryVersionService.class);
+        ReflectionTestUtils.setField(service, "chatOrchestrationService", chatService);
+        ReflectionTestUtils.setField(service, "datasetLoader", datasetLoader);
+        ReflectionTestUtils.setField(service, "runMapper", runMapper);
+        ReflectionTestUtils.setField(service, "resultMapper", resultMapper);
+        ReflectionTestUtils.setField(service, "toolCallMapper", toolCallMapper);
+        ReflectionTestUtils.setField(service, "workingMemoryVersionService", memoryVersions);
+        ObjectMapper evaluationMapper = new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        ReflectionTestUtils.setField(service, "objectMapper", evaluationMapper);
+        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+
+        AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
+        evaluationCase.setId(92L);
+        evaluationCase.setCaseCode("V2_OUTCOME_WITHOUT_LEGACY_ROUTE");
+        evaluationCase.setTurnsJson("[{\"message\":\"找附近餐厅\"}]");
+        evaluationCase.setExpectedFinalStatus("COMPLETED");
+        evaluationCase.setExpectedV2OutcomesJson("[{\"turn\":1,\"assertions\":{\"taskLifecycle\":\"ACTIVE\",\"decisionStatus\":\"COMPLETED\"}}]");
+        when(datasetLoader.loadCases(any())).thenReturn(List.of(evaluationCase));
+        doAnswer(invocation -> { invocation.<AiConversationEvaluationRun>getArgument(0).setId(92L); return 1; })
+                .when(runMapper).insert(any(AiConversationEvaluationRun.class));
+        when(chatService.chat(any(), isNull(), any())).thenReturn(response("START_DECISION", "COMPLETED"));
+        when(toolCallMapper.selectList(any(QueryWrapper.class))).thenReturn(Collections.emptyList());
+
+        com.hmdp.ai.dto.ConversationWorkingMemory memory = new com.hmdp.ai.dto.ConversationWorkingMemory();
+        com.hmdp.ai.dto.DecisionTaskState task = new com.hmdp.ai.dto.DecisionTaskState();
+        task.setTaskId("task-v2");
+        task.setV2Criteria(com.hmdp.ai.v2.semantic.DiningCriteria.empty());
+        task.setV2Lifecycle(com.hmdp.ai.v2.reducer.TaskLifecycle.ACTIVE);
+        memory.setActiveTaskId(task.getTaskId());
+        memory.setTasks(List.of(task));
+        com.hmdp.ai.entity.AiWorkingMemory memoryRow = new com.hmdp.ai.entity.AiWorkingMemory();
+        memoryRow.setId(1L);
+        memoryRow.setVersion(1);
+        memoryRow.setMemoryJson(evaluationMapper.writeValueAsString(memory));
+        when(memoryVersions.latest(any())).thenReturn(memoryRow);
+
+        ConversationEvaluationRunResponse run = service.runActiveCases();
+
+        AiConversationEvaluationCaseResult result = run.getCaseResults().get(0);
+        assertEquals("COMPLETED", run.getRun().getStatus(), run.getCaseResults().get(0).getErrorMessage()
+                + " :: " + run.getCaseResults().get(0).getTurnOutputsJson());
+        assertEquals(null, result.getRouteMatched(), "route is diagnostic-only when the V2 case does not define it");
+        assertEquals(true, result.getV2OutcomeMatched(), result.getTurnOutputsJson());
+        assertEquals(1, result.getExpectedV2OutcomeCount());
+        assertEquals(1, result.getMatchedV2OutcomeCount());
+        assertEquals(null, result.getErrorMessage());
+    }
+
     @Test
     void acceptsDeclaredSafeTerminalStatusAlternatives() {
         AiConversationEvaluationService service = new AiConversationEvaluationService();
@@ -456,6 +514,7 @@ class AiConversationEvaluationServiceTest {
         when(runMapper.selectById(1L)).thenReturn(run(1L, 100L, "conversation-v1", 2, 2, 1, 2, 2, 100L));
         AiConversationEvaluationCaseResult passed = caseResult(1L, true, true);
         AiConversationEvaluationCaseResult failed = caseResult(2L, true, false);
+        failed.setV2OutcomeMatched(false);
         failed.setTurnOutputsJson("{\"assertionFailures\":[{\"turnNo\":2,\"path\":\"activeCriteria.cuisine\",\"assertionType\":\"equals\",\"expected\":\"日料\",\"actual\":\"火锅\"}]}");
         when(resultMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(passed, failed));
         AiConversationEvaluationCase evaluationCase = new AiConversationEvaluationCase();
@@ -472,6 +531,7 @@ class AiConversationEvaluationServiceTest {
             assertEquals(2, response.getFailures().get(0).getTurnAssertionFailures().get(0).get("turnNo"));
             assertEquals(1, response.getFailureCounts().get("toolCoverage"));
             assertEquals(0, response.getFailureCounts().get("route"));
+            assertEquals(1, response.getFailureCounts().get("v2Outcomes"));
         } finally {
             UserHolder.removeUser();
         }

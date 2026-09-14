@@ -14,6 +14,9 @@ import com.hmdp.ai.dto.ConversationEvaluationRunComparisonResponse;
 import com.hmdp.ai.dto.ConversationEvaluationDiagnosticsResponse;
 import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.dto.ConversationWorkingMemory;
+import com.hmdp.ai.dto.DecisionTaskState;
+import com.hmdp.ai.dto.RecommendationBatch;
+import com.hmdp.ai.dto.RecommendationCandidateRef;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
@@ -21,6 +24,7 @@ import com.hmdp.ai.entity.AiChatSession;
 import com.hmdp.ai.entity.AiAgentToolCall;
 import com.hmdp.ai.entity.AiConversationEvent;
 import com.hmdp.ai.entity.AiDecisionMetric;
+import com.hmdp.ai.entity.AiWorkingMemory;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationCaseResultMapper;
 import com.hmdp.ai.mapper.AiConversationEvaluationRunMapper;
@@ -39,6 +43,7 @@ import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.Set;
 import java.util.concurrent.Executor;
@@ -60,6 +65,7 @@ public class AiConversationEvaluationService {
     @Resource private AiAgentToolCallMapper toolCallMapper;
     @Resource private AiDecisionMetricMapper decisionMetricMapper;
     @Resource private ConversationStateService conversationStateService;
+    @Resource private WorkingMemoryVersionService workingMemoryVersionService;
     @Resource private ShopMapper shopMapper;
     @Resource private ObjectMapper objectMapper;
     @Resource private AiProperties aiProperties;
@@ -250,6 +256,8 @@ public class AiConversationEvaluationService {
                 - rate(baseline.getFinalStatusMatchedCount(), baseline.getCaseCount())));
         deltas.put("unseenRecommendationMatchRate", round(rate(current.getUnseenRecommendationMatchedCount(), current.getUnseenRecommendationExpectedCount())
                 - rate(baseline.getUnseenRecommendationMatchedCount(), baseline.getUnseenRecommendationExpectedCount())));
+        deltas.put("v2OutcomeMatchRate", round(rate(current.getV2OutcomeMatchedCount(), current.getCaseCount())
+                - rate(baseline.getV2OutcomeMatchedCount(), baseline.getCaseCount())));
         deltas.put("completionRate", round(rate(current.getCompletedCount(), current.getCaseCount())
                 - rate(baseline.getCompletedCount(), baseline.getCaseCount())));
         deltas.put("avgDurationMs", round(value(current.getAvgDurationMs()) - value(baseline.getAvgDurationMs())));
@@ -285,6 +293,8 @@ public class AiConversationEvaluationService {
         failureCounts.put("workingMemory", (int) results.stream().filter(item -> Boolean.FALSE.equals(item.getMemoryMatched())).count());
         failureCounts.put("unseenRecommendations", (int) results.stream()
                 .filter(item -> Boolean.FALSE.equals(item.getUnseenRecommendationsMatched())).count());
+        failureCounts.put("v2Outcomes", (int) results.stream()
+                .filter(item -> Boolean.FALSE.equals(item.getV2OutcomeMatched())).count());
         failureCounts.put("execution", (int) results.stream().filter(this::unexpectedError).count());
         ConversationEvaluationDiagnosticsResponse response = new ConversationEvaluationDiagnosticsResponse();
         response.setRun(run);
@@ -381,12 +391,18 @@ public class AiConversationEvaluationService {
                 outputs.add(output);
                 clearModelObservation();
             }
-            List<String> expectedRoutes = objectMapper.readValue(evaluationCase.getExpectedRoutesJson(), new TypeReference<List<String>>() { });
             result.setActualRoutesJson(objectMapper.writeValueAsString(routes));
             result.setActualContextRewritesJson(objectMapper.writeValueAsString(compactContextRewrites(contextRewrites)));
             result.setActualFinalStatus(finalStatus);
             result.setRecommendedShopIds(finalShopIds.stream().distinct().map(String::valueOf).collect(Collectors.joining(",")));
-            result.setRouteMatched(expectedRoutes.equals(routes));
+            String expectedRoutesJson = evaluationCase.getExpectedRoutesJson();
+            if (expectedRoutesJson == null || expectedRoutesJson.isBlank()) {
+                // V2 datasets assert canonical state/outcomes; absent legacy route expectations stay diagnostic-only.
+                result.setRouteMatched(null);
+            } else {
+                List<String> expectedRoutes = objectMapper.readValue(expectedRoutesJson, new TypeReference<List<String>>() { });
+                result.setRouteMatched(expectedRoutes.equals(routes));
+            }
             result.setActualErrorCount(actualErrorCount);
             result.setRecoveryMatched(matchesRecovery(evaluationCase.getExpectedErrorCount(), actualErrorCount,
                     evaluationCase.getExpectedRecoveryRoutesJson(), recoveryRoutes));
@@ -419,6 +435,11 @@ public class AiConversationEvaluationService {
             boolean turnStatesMatched = matchesTurnStates(evaluationCase.getExpectedTurnStatesJson(), turnSnapshots, assertionFailures);
             boolean relationsMatched = matchesRelations(evaluationCase.getExpectedRelationsJson(), turnSnapshots, assertionFailures);
             result.setMemoryMatched(finalMemoryMatched && turnStatesMatched && relationsMatched);
+            V2OutcomeCoverage v2Coverage = matchesV2Outcomes(evaluationCase.getExpectedV2OutcomesJson(), turnSnapshots, assertionFailures);
+            result.setExpectedV2OutcomeCount(v2Coverage.expectedCount());
+            result.setMatchedV2OutcomeCount(v2Coverage.matchedCount());
+            result.setV2OutcomeMatched(v2Coverage.matched());
+            result.setActualV2OutcomesJson(objectMapper.writeValueAsString(compactV2Outcomes(turnSnapshots)));
             populateModelMetrics(result, decisionSessionIds);
             result.setLocalityMatched(matchesExpectedCity(evaluationCase.getExpectedCity(), finalShopIds));
             result.setFinalStatusMatched(equalsExpected(evaluationCase.getExpectedFinalStatus(), finalStatus));
@@ -426,6 +447,7 @@ public class AiConversationEvaluationService {
             Map<String, Object> turnTrace = new LinkedHashMap<>();
             turnTrace.put("turns", outputs);
             turnTrace.put("snapshots", compactTurnSnapshots(turnSnapshots));
+            turnTrace.put("v2Outcomes", compactV2Outcomes(turnSnapshots));
             turnTrace.put("assertionFailures", assertionFailures);
             result.setTurnOutputsJson(objectMapper.writeValueAsString(turnTrace));
         } catch (Exception e) {
@@ -437,8 +459,15 @@ public class AiConversationEvaluationService {
             result.setShopMatched(false);
             result.setRecoveryMatched(false);
             result.setMemoryMatched(false);
+            result.setV2OutcomeMatched(false);
+            result.setExpectedV2OutcomeCount(countV2Outcomes(evaluationCase.getExpectedV2OutcomesJson()));
+            result.setMatchedV2OutcomeCount(0);
             result.setUnseenRecommendationsMatched(false);
-            result.setErrorMessage(compact(e.getMessage()));
+            String diagnostic = e.getMessage();
+            if (e.getCause() != null && e.getCause().getMessage() != null) {
+                diagnostic = diagnostic + ": " + e.getCause().getMessage();
+            }
+            result.setErrorMessage(compact(diagnostic));
         }
         result.setDurationMs(System.currentTimeMillis() - startedAt);
         return result;
@@ -468,9 +497,50 @@ public class AiConversationEvaluationService {
         EvaluationTurnSnapshot snapshot = new EvaluationTurnSnapshot();
         snapshot.turnNo = turnNo;
         snapshot.route = response == null ? null : response.getRoute();
-        snapshot.finalStatus = response == null ? null : response.getDecisionStatus();
+        snapshot.finalStatus = response == null ? null : response.getDecision() == null
+                ? response.getDecisionStatus() : response.getDecision().getStatus();
         snapshot.recommendations = recommendationIds(recommendations);
         snapshot.decisionSessionId = response == null ? null : response.getDecisionSessionId();
+        if (workingMemoryVersionService != null) {
+            AiWorkingMemory row = workingMemoryVersionService.latest(chatId);
+            if (row != null && row.getMemoryJson() != null) {
+                try {
+                    ConversationWorkingMemory memory = objectMapper.readValue(row.getMemoryJson(), ConversationWorkingMemory.class);
+                    snapshot.workingMemoryVersion = row.getVersion();
+                    snapshot.activeTaskId = memory.getActiveTaskId();
+                    snapshot.taskCount = memory.getTasks() == null ? 0 : memory.getTasks().size();
+                    DecisionTaskState task = memory.activeTask();
+                    if (task != null) {
+                        snapshot.taskLifecycle = task.getV2Lifecycle() == null ? null : task.getV2Lifecycle().name();
+                        snapshot.activeCriteria = objectMapper.convertValue(task.getV2Criteria(), new TypeReference<Map<String, Object>>() { });
+                        snapshot.relativePreferences = objectMapper.convertValue(task.getV2RelativePreferences(), new TypeReference<List<Object>>() { });
+                        snapshot.relaxable = objectMapper.convertValue(task.getV2Relaxable(), new TypeReference<List<Object>>() { });
+                        snapshot.locked = objectMapper.convertValue(task.getV2Locked(), new TypeReference<List<Object>>() { });
+                        snapshot.rejectedShopIds = task.getV2RejectedShopIds() == null ? new ArrayList<>() : new ArrayList<>(task.getV2RejectedShopIds());
+                        snapshot.feedbackLedger = objectMapper.convertValue(task.getV2FeedbackLedger(), new TypeReference<List<Object>>() { });
+                        snapshot.selectedShopId = task.getV2SelectedShopId();
+                        snapshot.searchAnchor = task.getV2SearchAnchor() == null ? null
+                                : objectMapper.convertValue(task.getV2SearchAnchor(), new TypeReference<Map<String, Object>>() { });
+                        List<RecommendationBatch> batches = task.getRecommendationBatches() == null ? List.of() : task.getRecommendationBatches();
+                        snapshot.batchCount = batches.size();
+                        if (!batches.isEmpty()) snapshot.currentVisibleShopIds = candidateIds(batches.getLast());
+                        snapshot.candidatePool = new ArrayList<>(snapshot.currentVisibleShopIds);
+                        snapshot.latestBatchShopIds = new ArrayList<>(snapshot.currentVisibleShopIds);
+                        snapshot.shownShopIds = batches.stream().flatMap(batch -> batch.getCandidates().stream())
+                                .map(RecommendationCandidateRef::getShopId).filter(Objects::nonNull).distinct().toList();
+                        snapshot.searchCity = task.getV2Criteria() == null || task.getV2Criteria().location() == null
+                                ? null : task.getV2Criteria().location().city();
+                    }
+                    snapshot.decisionStatus = snapshot.finalStatus;
+                    snapshot.staleSuppressed = "STALE_SUPPRESSED".equals(snapshot.finalStatus);
+                    snapshot.finalCandidates = new ArrayList<>(snapshot.recommendations);
+                    readLatestV2Execution(chatId, row, snapshot);
+                    return snapshot;
+                } catch (Exception e) {
+                    throw new IllegalStateException("V2 evaluation snapshot cannot be read", e);
+                }
+            }
+        }
         if (conversationStateService == null) return snapshot;
         AiChatSession state = conversationStateService.getOrCreate(chatId);
         ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
@@ -490,6 +560,46 @@ public class AiConversationEvaluationService {
         snapshot.sourceDecisionSessionId = conversationStateService.latestSourceDecisionSessionId(memory);
         snapshot.dialogPhase = memory.getDialogPhase();
         return snapshot;
+    }
+
+    private List<Long> candidateIds(RecommendationBatch batch) {
+        if (batch == null || batch.getCandidates() == null) return new ArrayList<>();
+        return batch.getCandidates().stream().map(RecommendationCandidateRef::getShopId).filter(Objects::nonNull).toList();
+    }
+
+    private void readLatestV2Execution(String chatId, AiWorkingMemory row, EvaluationTurnSnapshot snapshot) throws Exception {
+        if (conversationEventMapper == null || row.getId() == null) return;
+        AiConversationEvent event = conversationEventMapper.selectOne(new QueryWrapper<AiConversationEvent>()
+                .eq("chat_id", chatId).eq("working_memory_id", row.getId()).eq("event_type", "STATE_REDUCED")
+                .orderByDesc("sequence_no").last("limit 1"));
+        if (event == null || event.getEventResult() == null || event.getEventResult().isBlank()) return;
+        Map<String, Object> result = objectMapper.readValue(event.getEventResult(), new TypeReference<Map<String, Object>>() { });
+        snapshot.executedActions = asList(result.get("executedActions"));
+        snapshot.groundedEntities = asList(result.get("groundedEntities"));
+        snapshot.verificationFailures = asStringList(result.get("verificationFailures"));
+        snapshot.conditionalCriteriaApplied = Boolean.TRUE.equals(result.get("conditionalCriteriaApplied"));
+        snapshot.replanned = Boolean.TRUE.equals(result.get("replanned"));
+        snapshot.verifiedCandidateIds = asLongList(result.get("verifiedCandidateIds"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> asList(Object value) {
+        if (!(value instanceof List<?> list)) return new ArrayList<>();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object item : list) if (item instanceof Map<?, ?> map) {
+            Map<String, Object> converted = new LinkedHashMap<>();
+            map.forEach((key, nested) -> converted.put(String.valueOf(key), nested)); result.add(converted);
+        }
+        return result;
+    }
+    private List<Long> asLongList(Object value) {
+        if (!(value instanceof List<?> list)) return new ArrayList<>();
+        return list.stream().filter(Objects::nonNull).map(item -> item instanceof Number number
+                ? number.longValue() : Long.valueOf(String.valueOf(item))).toList();
+    }
+    private List<String> asStringList(Object value) {
+        if (!(value instanceof List<?> list)) return new ArrayList<>();
+        return list.stream().filter(Objects::nonNull).map(String::valueOf).toList();
     }
 
     private List<Long> recommendationIds(List<DecisionRecommendation> recommendations) {
@@ -562,6 +672,58 @@ public class AiConversationEvaluationService {
             }
         }
         return matched;
+    }
+
+    /** New evaluation contract is expressed against V2 state and execution outcomes, not legacy routes. */
+    private V2OutcomeCoverage matchesV2Outcomes(String expectedJson, List<EvaluationTurnSnapshot> snapshots,
+                                                 List<Map<String, Object>> failures) throws Exception {
+        int expectedCount = countV2Outcomes(expectedJson);
+        if (expectedCount == 0) return new V2OutcomeCoverage(0, 0, null);
+        List<Map<String, Object>> expectations = objectMapper.readValue(expectedJson,
+                new TypeReference<List<Map<String, Object>>>() { });
+        int matchedCount = 0;
+        for (Map<String, Object> expectation : expectations) {
+            Integer turn = integerValue(expectation.get("turn"));
+            EvaluationTurnSnapshot snapshot = snapshotAt(snapshots, turn);
+            Object rawAssertions = expectation.get("assertions");
+            Map<?, ?> assertions;
+            if (rawAssertions instanceof Map<?, ?> map) assertions = map;
+            else {
+                Map<String, Object> inline = new LinkedHashMap<>(expectation); inline.remove("turn"); assertions = inline;
+            }
+            if (turn == null || snapshot == null) {
+                failures.add(assertionFailure(turn, "v2Outcomes", "v2Outcome", assertions, null, "TURN_SNAPSHOT_UNAVAILABLE"));
+                continue;
+            }
+            boolean turnMatched = true;
+            Map<String, Object> actual = snapshot.v2Projection();
+            for (Map.Entry<?, ?> entry : assertions.entrySet()) {
+                String path = String.valueOf(entry.getKey());
+                PathValue value = resolvePath(actual, path);
+                if (!matchesPathAssertion(entry.getValue(), value)) {
+                    failures.add(assertionFailure(turn, path, "v2Outcome", entry.getValue(),
+                            value.present ? value.value : null, value.present ? null : "PATH_ABSENT"));
+                    turnMatched = false;
+                }
+            }
+            if (turnMatched) matchedCount++;
+        }
+        return new V2OutcomeCoverage(expectedCount, matchedCount, matchedCount == expectedCount);
+    }
+
+    private int countV2Outcomes(String expectedJson) {
+        if (expectedJson == null || expectedJson.isBlank()) return 0;
+        try { return objectMapper.readValue(expectedJson, new TypeReference<List<Map<String, Object>>>() { }).size(); }
+        catch (Exception e) { throw new IllegalArgumentException("expectedV2Outcomes must be a JSON array", e); }
+    }
+
+    private List<Map<String, Object>> compactV2Outcomes(List<EvaluationTurnSnapshot> snapshots) {
+        List<Map<String, Object>> actual = new ArrayList<>();
+        for (EvaluationTurnSnapshot snapshot : snapshots) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("turn", snapshot.turnNo); item.put("assertions", snapshot.v2Projection()); actual.add(item);
+        }
+        return actual;
     }
 
     private boolean matchesToolsByTurn(String expectedJson, List<EvaluationTurnSnapshot> snapshots,
@@ -704,6 +866,7 @@ public class AiConversationEvaluationService {
         if (Boolean.TRUE.equals(expression.get("null"))) return actual.present && actual.value == null;
         if (Boolean.TRUE.equals(expression.get("absent"))) return !actual.present;
         if (Boolean.TRUE.equals(expression.get("empty"))) return actual.present && isEmpty(actual.value);
+        if (Boolean.TRUE.equals(expression.get("nonEmpty"))) return actual.present && !isEmpty(actual.value);
         if (expression.containsKey("contains")) return actual.present && containsValue(actual.value, expression.get("contains"));
         if (expression.containsKey("size")) return actual.present
                 && java.util.Objects.equals(sizeOf(actual.value), integerValue(expression.get("size")));
@@ -739,7 +902,7 @@ public class AiConversationEvaluationService {
 
     private String assertionType(Object expected) {
         if (!(expected instanceof Map)) return "equals";
-        for (String operation : java.util.Arrays.asList("equals", "null", "absent", "empty", "contains", "size")) {
+        for (String operation : java.util.Arrays.asList("equals", "null", "absent", "empty", "nonEmpty", "contains", "size")) {
             if (((Map<?, ?>) expected).containsKey(operation)) return operation;
         }
         return "invalid";
@@ -796,16 +959,13 @@ public class AiConversationEvaluationService {
     }
 
     private boolean hasFailure(AiConversationEvaluationCaseResult result) {
-        return !Boolean.TRUE.equals(result.getRouteMatched())
-                || !Boolean.TRUE.equals(result.getContextRewriteMatched())
-                || !Boolean.TRUE.equals(result.getToolMatched())
-                || Boolean.FALSE.equals(result.getToolArgumentsMatched())
-                || !Boolean.TRUE.equals(result.getLocalityMatched())
+        // Route labels, prompt rewrites and legacy tool names are diagnostics only after the V2 cutover.
+        return !Boolean.TRUE.equals(result.getLocalityMatched())
                 || !Boolean.TRUE.equals(result.getFinalStatusMatched())
                 || !Boolean.TRUE.equals(result.getShopMatched())
                 || Boolean.FALSE.equals(result.getRecoveryMatched())
-                || Boolean.FALSE.equals(result.getMemoryMatched())
                 || Boolean.FALSE.equals(result.getUnseenRecommendationsMatched())
+                || Boolean.FALSE.equals(result.getV2OutcomeMatched())
                 || unexpectedError(result);
     }
 
@@ -829,7 +989,8 @@ public class AiConversationEvaluationService {
             diagnostic.setExpectedCity(evaluationCase.getExpectedCity());
             diagnostic.setExpectedErrorCount(evaluationCase.getExpectedErrorCount());
             diagnostic.setExpectedRecoveryRoutesJson(evaluationCase.getExpectedRecoveryRoutesJson());
-            diagnostic.setExpectedMemoryJson(evaluationCase.getExpectedMemoryJson());
+        diagnostic.setExpectedMemoryJson(evaluationCase.getExpectedMemoryJson());
+            diagnostic.setExpectedV2OutcomesJson(evaluationCase.getExpectedV2OutcomesJson());
             diagnostic.setExpectedUnseenFromTurn(evaluationCase.getExpectedUnseenFromTurn());
             diagnostic.setExpectedUnseenPairsJson(evaluationCase.getExpectedUnseenPairsJson());
         }
@@ -851,6 +1012,10 @@ public class AiConversationEvaluationService {
         diagnostic.setRecoveryMatched(result.getRecoveryMatched());
         diagnostic.setMemoryMatched(result.getMemoryMatched());
         diagnostic.setUnseenRecommendationsMatched(result.getUnseenRecommendationsMatched());
+        diagnostic.setActualV2OutcomesJson(result.getActualV2OutcomesJson());
+        diagnostic.setExpectedV2OutcomeCount(result.getExpectedV2OutcomeCount());
+        diagnostic.setMatchedV2OutcomeCount(result.getMatchedV2OutcomeCount());
+        diagnostic.setV2OutcomeMatched(result.getV2OutcomeMatched());
         diagnostic.setTurnAssertionFailures(turnAssertionFailures(result.getTurnOutputsJson()));
         diagnostic.setDurationMs(result.getDurationMs());
         diagnostic.setErrorMessage(result.getErrorMessage());
@@ -1101,6 +1266,8 @@ public class AiConversationEvaluationService {
                 .filter(item -> item.getUnseenRecommendationsMatched() != null).count());
         run.setUnseenRecommendationMatchedCount((int) results.stream()
                 .filter(item -> Boolean.TRUE.equals(item.getUnseenRecommendationsMatched())).count());
+        run.setV2OutcomeMatchedCount((int) results.stream()
+                .filter(item -> Boolean.TRUE.equals(item.getV2OutcomeMatched())).count());
         run.setCompletedCount((int) (results.size() - failed));
         run.setAvgDurationMs(results.isEmpty() ? 0L : Math.round(results.stream().mapToLong(AiConversationEvaluationCaseResult::getDurationMs).average().orElse(0D)));
         List<Long> durations = results.stream().map(AiConversationEvaluationCaseResult::getDurationMs).sorted().collect(Collectors.toList());
@@ -1303,6 +1470,24 @@ public class AiConversationEvaluationService {
         private String activeTaskId;
         private Integer taskCount;
         private Integer batchCount;
+        private String taskLifecycle;
+        private String decisionStatus;
+        private Map<String, Object> searchAnchor;
+        private List<Object> relativePreferences = new ArrayList<>();
+        private List<Object> relaxable = new ArrayList<>();
+        private List<Object> locked = new ArrayList<>();
+        private List<Long> rejectedShopIds = new ArrayList<>();
+        private List<Object> feedbackLedger = new ArrayList<>();
+        private Long selectedShopId;
+        private List<Long> currentVisibleShopIds = new ArrayList<>();
+        private List<Long> finalCandidates = new ArrayList<>();
+        private List<Long> verifiedCandidateIds = new ArrayList<>();
+        private List<String> verificationFailures = new ArrayList<>();
+        private List<Map<String, Object>> executedActions = new ArrayList<>();
+        private List<Map<String, Object>> groundedEntities = new ArrayList<>();
+        private boolean conditionalCriteriaApplied;
+        private boolean replanned;
+        private boolean staleSuppressed;
         private List<Map<String, Object>> toolCalls = new ArrayList<>();
         private List<Long> recommendations = new ArrayList<>();
 
@@ -1338,14 +1523,33 @@ public class AiConversationEvaluationService {
             return result;
         }
 
+        private Map<String, Object> v2Projection() {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("taskId", activeTaskId); result.put("taskLifecycle", taskLifecycle);
+            result.put("criteria", activeCriteria); result.put("relativePreferences", relativePreferences);
+            result.put("searchAnchor", searchAnchor); result.put("currentVisibleShopIds", currentVisibleShopIds);
+            result.put("groundedEntities", groundedEntities); result.put("feedbackLedger", feedbackLedger);
+            result.put("rejectedShopIds", rejectedShopIds); result.put("relaxable", relaxable); result.put("locked", locked);
+            result.put("selectedShopId", selectedShopId); result.put("executedActions", executedActions);
+            result.put("conditionalCriteriaApplied", conditionalCriteriaApplied);
+            result.put("finalCandidates", finalCandidates); result.put("verifiedCandidateIds", verifiedCandidateIds);
+            result.put("hardConstraintsVerified", verificationFailures.isEmpty());
+            result.put("verificationFailures", verificationFailures); result.put("replanned", replanned);
+            result.put("staleSuppressed", staleSuppressed); result.put("decisionStatus", decisionStatus);
+            return result;
+        }
+
         private Map<String, Object> diagnosticProjection() {
             Map<String, Object> result = memoryProjection();
             result.put("turnNo", turnNo); result.put("route", route); result.put("finalStatus", finalStatus);
             result.put("workingMemoryVersion", workingMemoryVersion); result.put("toolCalls", toolCalls);
             result.put("recommendations", recommendations); result.put("decisionSessionId", decisionSessionId);
+            result.put("v2", v2Projection());
             return result;
         }
     }
+
+    private record V2OutcomeCoverage(int expectedCount, int matchedCount, Boolean matched) { }
 
     private static final class ContextRewriteCoverage {
         private final int expectedCount;

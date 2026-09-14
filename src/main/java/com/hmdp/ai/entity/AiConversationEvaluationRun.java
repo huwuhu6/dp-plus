@@ -26,6 +26,7 @@ private String gitCommit;
     private Integer shopMatchedCount;
     private Integer unseenRecommendationExpectedCount;
     private Integer unseenRecommendationMatchedCount;
+    private Integer v2OutcomeMatchedCount;
     private Integer completedCount;
     private Long avgDurationMs;
     private Long p50DurationMs;

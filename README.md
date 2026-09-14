@@ -174,6 +174,8 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8081/ai/retrieval/indexes/r
 | 对比两次多轮评测 | `GET /ai/evaluations/conversation-runs/{runId}/compare/{baselineRunId}` |
 | 查看多轮失败诊断 | `GET /ai/evaluations/conversation-runs/{runId}/diagnostics` |
 
+多轮主评测默认数据集为 `conversation-v2-runtime-v1`，通过每轮 `expectedV2Outcomes` 检查 V2 Task、criteria、SearchAnchor 与执行结果；旧 route、context rewrite 和 legacy tool 断言仅作诊断，不再作为 V2 用例的业务成功门槛。运行仍需已登录的本地前端会话。
+
 `/ai/retrieval/indexes/rebuild` 当前为本地调试便利开放；部署前应增加认证和管理员权限校验。
 
 最近一次本地 `structured-profile-evidence-vector-v3` 主评测基线：15 条用例全部完成，Recall@K `0.8333`、MRR `0.5833`、证据覆盖率 `1.0`、硬约束违规数 `0`、模型调用成功率 `100%`、P95 总延迟约 `5.8s`。这些值会随本地数据、模型和检索参数变化，应以运行记录而非 README 数字作为最终结论。

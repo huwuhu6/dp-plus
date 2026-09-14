@@ -43,5 +43,9 @@ public class AiConversationEvaluationCaseResult {
     private Boolean memoryMatched;
     private Boolean unseenRecommendationsMatched;
     private String turnOutputsJson;
+    private String actualV2OutcomesJson;
+    private Integer expectedV2OutcomeCount;
+    private Integer matchedV2OutcomeCount;
+    private Boolean v2OutcomeMatched;
     private String errorMessage;
 }

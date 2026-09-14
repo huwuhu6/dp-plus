@@ -1,5 +1,17 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-14：V2 Runtime Hardening 第二阶段
+
+`ShopRetrievalEngine` 恢复为无 durable side effect 的共享检索路径：MySQL 先按结构化硬条件取 shop 候选，再按候选 ID 读取 profile/review，并调用原 `SemanticShopRetriever` 的 Milvus PROFILE/REVIEW 召回及现有确定性 rerank；不再全量扫描 profile。V2 不创建 `AiDecisionSession`。PRICE LOWER 只作为本次排序信号；Alternatives 合并 task reject 与当前可见批次的临时排除。SIMILAR 使用 anchor profile 生成语义查询并要求真实语义召回；缺少可靠 anchor/召回时明确 unsupported，不退化为普通推荐。
+
+`V2ChatOrchestrator` 收敛为 Pre / Execute / Post：Pre OCC 最多从最新状态重新 grounding 并重放一次；Pre 提交后不会因 Post 冲突重跑 lifecycle、PreReducer 或用户反馈。Post conflict 先比较 causal inputs；相关输入变化才从最新快照 replan、execute、verify 一次，第二次冲突 controlled degrade，任何未提交候选不渲染。Durable feedback 与 lifecycle 统一由 gateway/reducer 写入：REJECT 是 task 级永久排除，CRITIQUE/POSITIVE 和 batch negative 分别留在 typed ledger，batch negative 不扩散成多个 reject。
+
+新增 `V2LocationResolver` 将设备坐标、显式行政位置、命名 POI 与旧 SearchAnchor 分开解析；需要位置却没有可靠 anchor 或 POI 歧义时返回 typed clarification，不静默扩大成全城搜索。`DeterministicResultVerifier` 在 PostReducer 前过滤硬预算、拒绝实体、重复候选和可判定的距离违例，数据不足不猜；仅 verified candidates 能进入 durable visible batch。GeneralKnowledge、Compare 与 Adaptive 暂以 controlled unsupported 收口。
+
+Conversation Evaluation 默认切换至 `conversation-v2-runtime-v1`，按轮断言 V2 task、criteria、relative preference、anchor、执行状态和候选；旧 route/context rewrite/tool 字段保留为诊断而非 V2 用例的成功门槛。补充评测器执行路径测试，并修复可选 legacy route expectation 与 nullable SearchAnchor 快照读取。
+
+定向测试、OCC 冲突测试及全量 `mvn -q clean test` 通过（386 tests，0 failures，0 errors，2 skipped）。真实 conversation-run 评测未运行：本地 `docker ps` 无法连接 Docker Desktop Linux engine，且该评测入口要求登录前端会话。故 RetrievalEngine/Resolver/Verifier/Reducer 的自动化测试已绿，但实际运行时评测门禁仍未满足；本轮保留 V1 Chat Semantic Chain，不做物理删除。
+
 ## 2026-09-14：V2 Runtime 第一轮加固
 
 修复 START_NEW 未新建 Task、RESTORE 未 durable 切换 activeTaskId、ABANDON 未实现的断链。新增

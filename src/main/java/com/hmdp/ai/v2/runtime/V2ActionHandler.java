@@ -1,5 +1,6 @@
 package com.hmdp.ai.v2.runtime;
 
+import com.hmdp.ai.dto.DecisionRecommendation;
 import com.hmdp.ai.tool.AgentToolRegistry;
 import com.hmdp.ai.tool.AgentToolResult;
 import com.hmdp.ai.v2.plan.ExecutionAction;
@@ -20,18 +21,21 @@ public class V2ActionHandler implements ActionExecutor {
         return switch (action) {
             case ExecutionAction.SearchAction search -> search(search);
             case ExecutionAction.ToolAction tool -> tool(tool);
-            case ExecutionAction.CompareAction compare -> new ExecutionObservation(compare.requestId(), ExecutionObservation.Status.FAILURE,
-                    List.of(), null, List.of(), null, "V2 compare is not available yet");
-            case ExecutionAction.GeneralAnswerAction general -> new ExecutionObservation(general.requestId(), ExecutionObservation.Status.SUCCESS,
-                    List.of(), null, List.of(), general.topic(), null);
+            case ExecutionAction.CompareAction compare -> new ExecutionObservation(compare.requestId(), ExecutionObservation.Status.UNSUPPORTED,
+                    List.of(), null, List.of(), null, "目前暂不支持商户对比。");
+            case ExecutionAction.GeneralAnswerAction general -> new ExecutionObservation(general.requestId(), ExecutionObservation.Status.UNSUPPORTED,
+                    List.of(), null, List.of(), null, "目前暂不支持开放式知识问答。");
             case ExecutionAction.EmitDomainEffectAction effect -> new ExecutionObservation(effect.requestId(), ExecutionObservation.Status.SUCCESS,
                     List.of(), null, List.of(effect.effect()), null, null);
         };
     }
     private ExecutionObservation search(ExecutionAction.SearchAction action) {
-        List<Long> ids = shopRetrievalEngine.retrieve(action.spec());
+        ShopRetrievalEngine.RetrievalResult result = shopRetrievalEngine.retrieve(action.spec());
+        if (!result.supported()) return new ExecutionObservation(action.requestId(), ExecutionObservation.Status.UNSUPPORTED,
+                List.of(), null, List.of(), null, result.detail());
+        List<Long> ids = result.candidates().stream().map(DecisionRecommendation::getShopId).filter(java.util.Objects::nonNull).toList();
         return new ExecutionObservation(action.requestId(), ids.isEmpty() ? ExecutionObservation.Status.EMPTY : ExecutionObservation.Status.SUCCESS,
-                ids, null, List.of(), null, null);
+                ids, null, List.of(), null, null, null, result.candidates());
     }
     private ExecutionObservation tool(ExecutionAction.ToolAction action) {
         String name = switch (action.fact()) {

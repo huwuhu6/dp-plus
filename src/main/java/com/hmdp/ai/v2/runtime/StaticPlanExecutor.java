@@ -44,7 +44,8 @@ public class StaticPlanExecutor {
                 }
             }
             GroupStatus status = observations.stream().anyMatch(item -> item.status() == ExecutionObservation.Status.FAILURE
-                    || item.status() == ExecutionObservation.Status.TIMEOUT || item.status() == ExecutionObservation.Status.CANCELLED)
+                    || item.status() == ExecutionObservation.Status.TIMEOUT || item.status() == ExecutionObservation.Status.CANCELLED
+                    || item.status() == ExecutionObservation.Status.UNSUPPORTED)
                     ? GroupStatus.FAILURE : GroupStatus.SUCCESS;
             GroupResult result = new GroupResult(status, observations);
             groups.put(group.groupId(), result); all.addAll(observations);

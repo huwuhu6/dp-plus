@@ -8,6 +8,12 @@ import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.client.SpringAiTextClient;
 import com.hmdp.ai.config.AiProperties;
 import com.hmdp.ai.util.CuisineCanonicalizer;
+import com.hmdp.ai.v2.runtime.ShopRetrievalEngine;
+import com.hmdp.ai.v2.runtime.ShopRetrievalRequest;
+import com.hmdp.ai.v2.plan.SearchAnchor;
+import com.hmdp.ai.v2.plan.ExecutionAction;
+import com.hmdp.ai.v2.semantic.DiningCriteria;
+import com.hmdp.ai.v2.semantic.RequirementChange;
 import com.hmdp.ai.dto.DecisionConstraints;
 import com.hmdp.ai.dto.DecisionFollowUpRequest;
 import com.hmdp.ai.dto.DecisionMetrics;
@@ -49,10 +55,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -87,6 +95,7 @@ public class ConsumptionDecisionService {
     // Spring injects the domain component in production; the default keeps isolated
     // unit fixtures compatible without changing their construction pattern.
     @Resource private DecisionTransitionService transitionService = new DecisionTransitionService();
+    @Resource private ShopRetrievalEngine shopRetrievalEngine;
 
     public DecisionResponse decide(DecisionRequest request) {
         return decide(request, null);
@@ -746,78 +755,46 @@ public class ConsumptionDecisionService {
 
     private List<DecisionRecommendation> retrieveAndRank(DecisionRequest request, DecisionConstraints constraints,
                                                           DecisionResponse response, DecisionMetrics metrics) {
-        long retrievingStart = System.currentTimeMillis();
-        QueryWrapper<Shop> shopQuery = new QueryWrapper<Shop>();
-        if (hasText(request.getProvince())) shopQuery.eq("province", request.getProvince());
-        if (hasText(request.getCity())) shopQuery.in("city", administrativeNameAliases(request.getCity()));
-        if (hasText(request.getDistrict())) shopQuery.eq("district", request.getDistrict());
-        if (request.getExcludeShopIds() != null && !request.getExcludeShopIds().isEmpty()) {
-            shopQuery.notIn("id", request.getExcludeShopIds());
+        DiningCriteria criteria = legacyCriteria(constraints);
+        SearchAnchor anchor = null;
+        if (request.getLatitude() != null && request.getLongitude() != null) {
+            SearchAnchor.AnchorSource source = hasText(request.getLocationName()) ? SearchAnchor.AnchorSource.NAMED_LOCATION : SearchAnchor.AnchorSource.DEVICE;
+            anchor = new SearchAnchor(null, request.getLocationName(), request.getLatitude(), request.getLongitude(),
+                    request.getProvince(), request.getCity(), request.getDistrict(), source);
+        } else if (hasText(request.getProvince()) || hasText(request.getCity()) || hasText(request.getDistrict())) {
+            anchor = new SearchAnchor(null, null, null, null, request.getProvince(), request.getCity(), request.getDistrict(), SearchAnchor.AnchorSource.NAMED_LOCATION);
         }
-        List<Shop> shops = shopMapper.selectList(shopQuery);
-        if (hasAdministrativeScope(request)) {
-            log.info("[AI][session={}] state=RETRIEVING action=ADMIN_SCOPE_FILTER province={} city={} district={} candidates={}",
-                    response.getSessionId(), request.getProvince(), request.getCity(), request.getDistrict(), shops.size());
-        }
-        metrics.setInitialCandidateCount(shops.size());
-        List<AiShopProfile> profiles = profileMapper.selectList(null);
-        Map<Long, AiShopProfile> profileByShopId = profiles.stream().collect(Collectors.toMap(
-                AiShopProfile::getShopId, item -> item, (left, right) -> left));
+        String semanticQuery = semanticRetrievalQuery(request, constraints);
+        ShopRetrievalRequest retrieval = new ShopRetrievalRequest(criteria, List.of(), ExecutionAction.SearchKind.RECOMMENDATIONS,
+                request.getExcludeShopIds() == null ? Set.of() : new HashSet<>(request.getExcludeShopIds()), null, anchor,
+                request.getMaxCandidates() == null ? 3 : request.getMaxCandidates(), semanticQuery);
+        ShopRetrievalEngine.RetrievalResult result = shopRetrievalEngine.retrieve(retrieval);
+        metrics.setInitialCandidateCount(result.metrics().initialCandidates());
+        metrics.setHardMatchedCandidateCount(result.metrics().hardMatchedCandidates());
+        metrics.setFinalCandidateCount(result.metrics().finalCandidates());
+        metrics.setSemanticRetrievalUsed(result.metrics().semanticRetrievalUsed());
+        metrics.setRetrievingDurationMs(result.metrics().durationMs());
+        metrics.setSemanticRetrievingDurationMs(result.metrics().semanticDurationMs());
+        metrics.setEvidenceCoveredCandidateCount((int) result.candidates().stream().filter(c -> !c.getEvidence().isEmpty()).count());
+        metrics.setEvidenceCoverageRate(result.candidates().isEmpty() ? 0D : round((double) metrics.getEvidenceCoveredCandidateCount() / result.candidates().size()));
+        if (!result.supported()) log.info("[AI][session={}] state=RETRIEVING action=CONTROLLED_UNSUPPORTED detail={}", response.getSessionId(), result.detail());
+        return result.candidates();
+    }
 
-        List<Shop> hardMatched = shops.stream().filter(shop -> matchesHardConstraints(shop, profileByShopId.get(shop.getId()), request, constraints))
-                .collect(Collectors.toList());
-        if (requiresLightTasteEvidence(constraints)) {
-            List<Long> shopIds = hardMatched.stream().map(Shop::getId).collect(Collectors.toList());
-            Map<Long, List<AiReviewDocument>> preferenceDocuments = loadReviewsByShopId(shopIds);
-            hardMatched = hardMatched.stream().filter(shop -> hasLightTasteEvidence(preferenceDocuments.get(shop.getId())))
-                    .collect(Collectors.toList());
-            log.info("[AI][session={}] state=RETRIEVING action=EVIDENCE_PREFERENCE_FILTER preference=LIGHT_TASTE matched={}",
-                    response.getSessionId(), hardMatched.size());
-        }
-        metrics.setHardMatchedCandidateCount(hardMatched.size());
-        log.info("[AI][session={}] state=RETRIEVING action=HARD_FILTER initial={} hardMatched={}",
-                response.getSessionId(), shops.size(), hardMatched.size());
-
-        List<Long> shopIds = hardMatched.stream().map(Shop::getId).collect(Collectors.toList());
-        Map<Long, List<AiReviewDocument>> reviewsByShopId = loadReviewsByShopId(shopIds);
-        metrics.setRetrievingDurationMs(System.currentTimeMillis() - retrievingStart);
-
-        SemanticRecallResult semanticResult = SemanticRecallResult.unavailable();
-        if (semanticShopRetriever != null) {
-            String semanticQuery = semanticRetrievalQuery(request, constraints);
-            log.info("[AI][session={}] state=SEMANTIC_RETRIEVING action=GEO_TOKENS_PRUNED originalQuery={} semanticQuery={}",
-                    response.getSessionId(), compact(request.getQuery()), compact(semanticQuery));
-            semanticResult = semanticShopRetriever.recall(semanticQuery, hardMatched, profileByShopId, reviewsByShopId);
-            metrics.setSemanticRetrievalUsed(semanticResult.isAvailable());
-            metrics.setSemanticRetrievingDurationMs(semanticResult.getDurationMs());
-        }
-
-        long rerankingStart = System.currentTimeMillis();
-        List<DecisionRecommendation> recommendations = new ArrayList<>();
-        for (Shop shop : hardMatched) {
-            DecisionRecommendation item = toRecommendation(shop, profileByShopId.get(shop.getId()),
-                    reviewsByShopId.get(shop.getId()), request, constraints);
-            Double semanticScore = semanticResult.getShopScores().get(shop.getId());
-            if (semanticScore != null) {
-                item.setSemanticScore(round(semanticScore));
-                item.setScore(round(Math.min(100D, item.getScore() + semanticScore * semanticWeight)));
-                item.getMatchedReasons().add("语义证据与本轮需求相关");
-            }
-            recommendations.add(item);
-        }
-        recommendations.sort(Comparator.comparing(DecisionRecommendation::getScore).reversed());
-        int maxCandidates = request.getMaxCandidates() == null ? 3 : Math.max(1, Math.min(request.getMaxCandidates(), 5));
-        List<DecisionRecommendation> result = recommendations.size() > maxCandidates
-                ? new ArrayList<>(recommendations.subList(0, maxCandidates)) : recommendations;
-        int evidenceCovered = 0;
-        for (DecisionRecommendation item : result) {
-            if (!item.getEvidence().isEmpty()) evidenceCovered++;
-        }
-        metrics.setFinalCandidateCount(result.size());
-        metrics.setEvidenceCoveredCandidateCount(evidenceCovered);
-        metrics.setEvidenceCoverageRate(result.isEmpty() ? 0D : round((double) evidenceCovered / result.size()));
-        metrics.setRerankingDurationMs(System.currentTimeMillis() - rerankingStart);
-        return result;
+    private DiningCriteria legacyCriteria(DecisionConstraints source) {
+        DiningCriteria.LocationCriteria location = hasText(source.getTargetCity()) || hasText(source.getTargetDistrict()) || hasText(source.getTargetArea())
+                ? new DiningCriteria.LocationCriteria(source.getTargetCity(), source.getTargetDistrict(), source.getTargetArea()) : null;
+        DiningCriteria.CuisineCriteria cuisine = hasText(source.getCuisine()) || source.getExcludedCuisines() != null && !source.getExcludedCuisines().isEmpty()
+                ? new DiningCriteria.CuisineCriteria(hasText(source.getCuisine()) ? source.getCuisine() : null, source.getExcludedCuisines()) : null;
+        DiningCriteria.BudgetCriteria budget = source.getBudgetPerPerson() != null && source.getBudgetPerPerson() > 0
+                ? new DiningCriteria.BudgetCriteria(null, java.math.BigDecimal.valueOf(source.getBudgetPerPerson())) : null;
+        DiningCriteria.DistanceCriteria distance = source.getRadiusKm() != null && source.getRadiusKm() > 0
+                ? new DiningCriteria.DistanceCriteria(java.math.BigDecimal.valueOf(source.getRadiusKm())) : null;
+        DiningCriteria.DiningTimeCriteria time = hasText(source.getArrivalTime()) ? new DiningCriteria.DiningTimeCriteria(source.getArrivalTime()) : null;
+        List<DiningCriteria.SemanticPreference> preferences = source.getPreferences() == null ? List.of() : source.getPreferences().stream()
+                .map(value -> new DiningCriteria.SemanticPreference(value,
+                        "清淡".equals(value) ? DiningCriteria.Importance.MUST : DiningCriteria.Importance.PREFER)).toList();
+        return new DiningCriteria(location, cuisine, budget, distance, time, new DiningCriteria.SemanticPreferences(preferences, List.of()));
     }
 
     private Map<Long, List<AiReviewDocument>> loadReviewsByShopId(List<Long> shopIds) {

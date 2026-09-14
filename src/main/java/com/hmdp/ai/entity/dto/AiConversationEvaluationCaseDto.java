@@ -33,5 +33,7 @@ public class AiConversationEvaluationCaseDto {
     private List<Map<String, Object>> expectedToolsByTurn;
     /** Optional relations between two captured evaluation turns. */
     private List<Map<String, Object>> expectedRelations;
+    /** Per-turn V2 canonical state and execution outcome assertions. */
+    private List<Map<String, Object>> expectedV2Outcomes;
     private String notes;
 }

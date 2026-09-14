@@ -1,12 +1,7 @@
 package com.hmdp.ai.v2.runtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hmdp.ai.dto.ChatMessageRequest;
-import com.hmdp.ai.dto.ChatMessageResponse;
-import com.hmdp.ai.dto.ConversationWorkingMemory;
-import com.hmdp.ai.dto.DecisionTaskState;
-import com.hmdp.ai.dto.RecommendationBatch;
-import com.hmdp.ai.dto.RecommendationCandidateRef;
+import com.hmdp.ai.dto.*;
 import com.hmdp.ai.entity.AiWorkingMemory;
 import com.hmdp.ai.runtime.ConversationEventType;
 import com.hmdp.ai.service.ChatMemoryService;
@@ -14,20 +9,20 @@ import com.hmdp.ai.service.VersionConflictException;
 import com.hmdp.ai.service.WorkingMemoryVersionService;
 import com.hmdp.ai.v2.grounding.*;
 import com.hmdp.ai.v2.plan.*;
-import com.hmdp.ai.v2.reducer.PostExecutionReducer;
-import com.hmdp.ai.v2.reducer.PreExecutionReducer;
-import com.hmdp.ai.v2.reducer.V2TaskState;
-import com.hmdp.ai.v2.reducer.TaskLifecycleReducer;
-import com.hmdp.ai.v2.semantic.*;
+import com.hmdp.ai.v2.reducer.*;
+import com.hmdp.ai.v2.semantic.TaskDirective;
+import com.hmdp.ai.v2.semantic.TurnSemantics;
 import com.hmdp.ai.v2.verification.DeterministicResultVerifier;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.utils.UserHolder;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
-import java.util.*;
 
-/** Production V2 turn boundary: both durable mutations use the existing append OCC contract. */
+import java.util.*;
+import java.util.stream.Collectors;
+
+/** The V2 turn boundary: PRE semantics are committed once; execution and POST have a separate retry policy. */
 @Service
 public class V2ChatOrchestrator {
     @Resource private SemanticInterpreter semanticInterpreter;
@@ -38,105 +33,324 @@ public class V2ChatOrchestrator {
     @Resource private V2ActionHandler actions;
     @Resource private V2ResponseRenderer renderer;
     @Resource private ShopMapper shopMapper;
+    @Resource private V2LocationResolver locationResolver;
+
+    private final TaskLifecycleReducer lifecycleReducer = new TaskLifecycleReducer();
+    private final PreExecutionReducer preReducer = new PreExecutionReducer();
+    private final PostExecutionReducer postReducer = new PostExecutionReducer();
+    private final V2TaskStateGateway stateGateway = new V2TaskStateGateway();
+    private final EffectiveTaskContextResolver taskContextResolver = new EffectiveTaskContextResolver();
+    private final GroundingResolver groundingResolver = new GroundingResolver();
+    private final ExecutionPlanCompiler compiler = new ExecutionPlanCompiler();
+    private final DeterministicResultVerifier verifier = new DeterministicResultVerifier();
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
-        if (request == null || request.getMessage() == null || request.getMessage().isBlank()) throw new IllegalArgumentException("message cannot be blank");
-        String chatId = chatMemoryService.resolveChatId(request.getChatId()); request.setChatId(chatId);
-        TurnSemantics semantics = semanticInterpreter.interpret(request.getMessage().trim());
-        for (int attempt = 0; attempt < 2; attempt++) try {
-            ChatMessageResponse response = run(chatId, request.getMessage().trim(), semantics);
-            chatMemoryService.appendTurn(chatId, request.getMessage(), response.getAnswer(), response.getRoute(), null);
-            return response;
-        } catch (VersionConflictException conflict) {
-            if (attempt == 1) return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, null,
-                    "对话状态刚刚更新，请重试这句话。"));
+        if (request == null || request.getMessage() == null || request.getMessage().isBlank())
+            throw new IllegalArgumentException("message cannot be blank");
+        String chatId = chatMemoryService.resolveChatId(request.getChatId());
+        request.setChatId(chatId);
+        String message = request.getMessage().trim();
+        TurnSemantics semantics = semanticInterpreter.interpret(message);
+
+        PreOutcome pre = prePhase(request, chatId, semantics);
+        ChatMessageResponse response;
+        if (pre.response() != null) {
+            response = pre.response();
+        } else {
+            response = postPhase(chatId, pre.prepared());
         }
-        throw new IllegalStateException("unreachable");
+        chatMemoryService.appendTurn(chatId, request.getMessage(), response.getAnswer(), response.getRoute(), null);
+        return response;
     }
 
-    private ChatMessageResponse run(String chatId, String message, TurnSemantics semantics) {
-        VersionedMemory loaded = load(chatId);
-        ConversationWorkingMemory memory = loaded.memory();
+    /** PRE conflict reloads and regrounds at most once. No POST path calls this method again. */
+    private PreOutcome prePhase(ChatMessageRequest request, String chatId, TurnSemantics semantics) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            VersionedMemory loaded = load(chatId);
+            PreBuild built = preparePre(request, loaded.memory(), semantics);
+            if (built.response() != null) return new PreOutcome(null, built.response());
+            try {
+                AiWorkingMemory committed = versions.append(chatId, userId(), loaded.version(), loaded.memory(),
+                        ConversationEventType.STATE_REDUCED, Map.of("phase", "V2_PRE"),
+                        Map.of("taskId", built.taskId()));
+                if (built.abandon()) return new PreOutcome(null, renderer.render(chatId,
+                        new ResponseSpec(List.of(), null, null, null, null, "当前推荐任务已结束。", null)));
+                PlanningSnapshot snapshot = snapshot(built.task(), loaded.memory(), committed.getVersion());
+                return new PreOutcome(new PreparedTurn(loaded.memory(), committed.getVersion(), built.taskId(),
+                        loaded.memory().getActiveTaskId(), semantics, built.grounded(), snapshot), null);
+            } catch (VersionConflictException conflict) {
+                if (attempt == 1) return new PreOutcome(null, retryResponse(chatId));
+            }
+        }
+        return new PreOutcome(null, retryResponse(chatId));
+    }
+
+    private PreBuild preparePre(ChatMessageRequest request, ConversationWorkingMemory memory, TurnSemantics semantics) {
         List<TaskView> views = taskViews(memory);
-        EffectiveTaskContextResult contextResult = new EffectiveTaskContextResolver().resolveResult(memory.getActiveTaskId(), views, semantics);
-        if (contextResult instanceof EffectiveTaskContextResult.NeedsClarification c)
-            return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, "请说明你指的是哪一个推荐任务：" + c.ambiguity().detail(), null));
+        EffectiveTaskContextResult contextResult = taskContextResolver.resolveResult(memory.getActiveTaskId(), views, semantics);
+        if (contextResult instanceof EffectiveTaskContextResult.NeedsClarification clarification)
+            return PreBuild.response(clarification(chatId(request), "请说明你指的是哪一个推荐任务：" + clarification.ambiguity().detail()));
+
         EffectiveTaskContext context = ((EffectiveTaskContextResult.Resolved) contextResult).context();
         String restoreTaskId = context.task() == null ? null : context.task().taskId();
-        TaskDirective lifecycleCommand = memory.activeTask() == null && semantics.taskDirective() == TaskDirective.CONTINUE
-                ? TaskDirective.START_NEW : semantics.taskDirective();
-        DecisionTaskState task = new TaskLifecycleReducer().apply(memory, lifecycleCommand, restoreTaskId);
-        if (semantics.taskDirective() == TaskDirective.ABANDON) {
-            versions.append(chatId, userId(), loaded.version(), memory, ConversationEventType.STATE_REDUCED,
-                    Map.of("phase", "V2_PRE"), Map.of("taskId", task.getTaskId(), "lifecycle", "ABANDONED"));
-            return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, "当前推荐任务已结束。", null));
+        TaskDirective directive = semantics.taskDirective();
+        if (memory.activeTask() == null && directive == TaskDirective.CONTINUE) directive = TaskDirective.START_NEW;
+        final DecisionTaskState task;
+        try {
+            task = lifecycleReducer.apply(memory, directive, restoreTaskId);
+        } catch (IllegalArgumentException invalidLifecycle) {
+            return PreBuild.response(clarification(chatId(request), "无法按当前任务状态继续，请重新说明要继续、恢复或结束哪个任务。"));
         }
-        context = new EffectiveTaskContext(view(task, memory.getTasks().indexOf(task)), context.restoredForThisTurn());
-        GroundingResult grounding = new GroundingResolver().resolve(semantics,
-                context.task() == null ? new EffectiveTaskContext(view(task, 0), false) : context);
-        if (grounding instanceof GroundingResult.NeedsClarification c)
-            return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, "请明确是哪一家：" + c.ambiguities().getFirst().detail(), null));
+        if (directive == TaskDirective.ABANDON) return PreBuild.abandon(task.getTaskId());
+
+        EffectiveTaskContext currentContext = new EffectiveTaskContext(view(task, memory.getTasks().indexOf(task)),
+                context.restoredForThisTurn());
+        GroundingResult grounding = groundingResolver.resolve(semantics, currentContext);
+        if (grounding instanceof GroundingResult.NeedsClarification clarification)
+            return PreBuild.response(clarification(chatId(request), "请明确是哪一家或哪一批推荐：" + clarification.ambiguities().getFirst().detail()));
         GroundedTurn grounded = ((GroundingResult.Grounded) grounding).turn();
-        V2TaskState previous = state(task);
-        V2TaskState reduced = new PreExecutionReducer().reduce(previous, semantics);
-        persistState(task, reduced);
-        applyFeedback(task, grounded);
-        AiWorkingMemory pre = versions.append(chatId, userId(), loaded.version(), memory, ConversationEventType.STATE_REDUCED,
-                Map.of("phase", "V2_PRE"), Map.of("taskId", task.getTaskId()));
-        PlanningSnapshot snapshot = snapshot(task, pre.getVersion());
-        CompilationResult compiled = new ExecutionPlanCompiler().compile(grounded, snapshot);
-        StaticPlanExecutor.ExecutionResult execution = execute(compiled);
-        new DeterministicResultVerifier().verify(execution.observations().stream().filter(o -> o.status() == ExecutionObservation.Status.FAILURE)
-                .map(ExecutionObservation::detail).toList(), List.of());
-        applyEffects(task, execution);
-        ResponseSpec response = response(task, execution);
-        // A recommendation is visible only after this append wins. A conflict retries from the latest committed state.
-        versions.append(chatId, userId(), pre.getVersion(), memory, ConversationEventType.STATE_REDUCED,
-                Map.of("phase", "V2_POST"), Map.of("taskId", task.getTaskId()));
-        return renderer.render(chatId, response);
+
+        V2TaskState reduced = preReducer.reduce(stateGateway.read(task), semantics, grounded);
+        V2LocationResolver.Resolution location = locationResolver.resolve(reduced.criteria(), request.getLocation(), reduced.searchAnchor());
+        if (location instanceof V2LocationResolver.Resolution.NeedsClarification clarification)
+            return PreBuild.response(clarification(chatId(request), clarification.message()));
+        reduced = reduced.withSearchAnchor(((V2LocationResolver.Resolution.Resolved) location).anchor());
+        stateGateway.write(task, reduced);
+        return PreBuild.ready(task.getTaskId(), task, grounded);
     }
 
-    private StaticPlanExecutor.ExecutionResult execute(CompilationResult compilation) {
-        if (compilation instanceof CompilationResult.StaticPlan staticPlan) return executor.execute(staticPlan.plan(), actions);
+    /** POST may reapply only POST effects. On a causal conflict it recompiles/reexecutes once from latest state. */
+    private ChatMessageResponse postPhase(String chatId, PreparedTurn prepared) {
+        PlanRun firstRun = compileExecuteVerify(prepared.grounded(), prepared.snapshot());
+        try {
+            DecisionTaskState task = applyPost(prepared.preMemory(), prepared.taskId(), firstRun.execution());
+            versions.append(chatId, userId(), prepared.preVersion(), prepared.preMemory(), ConversationEventType.STATE_REDUCED,
+                    postEvent(prepared, firstRun, "V2_POST", false), Map.of("taskId", prepared.taskId()));
+            return response(chatId, task, firstRun.execution());
+        } catch (VersionConflictException postConflict) {
+            VersionedMemory latest = load(chatId);
+            DecisionTaskState latestTask = findTask(latest.memory(), prepared.taskId());
+            if (latestTask == null || latestTask.getV2Lifecycle() == TaskLifecycle.ABANDONED)
+                return retryResponse(chatId);
+            PlanningSnapshot latestSnapshot = snapshot(latestTask, latest.memory(), latest.version());
+            boolean inputsUnchanged = Objects.equals(prepared.activeTaskId(), latest.memory().getActiveTaskId())
+                    && sameCausalInputs(prepared.snapshot(), latestSnapshot);
+            PlanRun chosenRun = inputsUnchanged ? firstRun : compileExecuteVerify(prepared.grounded(), latestSnapshot);
+            try {
+                DecisionTaskState task = applyPost(latest.memory(), prepared.taskId(), chosenRun.execution());
+                versions.append(chatId, userId(), latest.version(), latest.memory(), ConversationEventType.STATE_REDUCED,
+                        postEvent(prepared, chosenRun, "V2_POST_RETRY", !inputsUnchanged),
+                        Map.of("taskId", prepared.taskId(), "replanned", !inputsUnchanged));
+                return response(chatId, task, chosenRun.execution());
+            } catch (VersionConflictException retryConflict) {
+                // A candidate-producing result is never rendered unless its post-state commit won.
+                return retryResponse(chatId);
+            }
+        }
+    }
+
+    private PlanRun compileExecuteVerify(GroundedTurn grounded, PlanningSnapshot snapshot) {
+        try {
+            CompilationResult compilation = compiler.compile(grounded, snapshot);
+            Map<String, SearchSpec> searches = searchSpecs(compilation);
+            StaticPlanExecutor.ExecutionResult execution = execute(compilation);
+            VerifiedExecution verified = verify(execution, searches);
+            return new PlanRun(verified.execution(), searches, verified.failures());
+        } catch (RuntimeException failure) {
+            ExecutionObservation observation = new ExecutionObservation("v2-runtime", ExecutionObservation.Status.FAILURE,
+                    List.of(), null, List.of(), null, "本轮计划无法安全执行，请调整条件后重试。");
+            return new PlanRun(new StaticPlanExecutor.ExecutionResult(Map.of(), List.of(observation)), Map.of(), List.of());
+        }
+    }
+
+    StaticPlanExecutor.ExecutionResult execute(CompilationResult compilation) {
+        if (compilation instanceof CompilationResult.StaticPlan staticPlan)
+            return executor.execute(staticPlan.plan(), actions);
         if (compilation instanceof CompilationResult.Direct direct) {
             ExecutionObservation observation = actions.execute(direct.action());
             return new StaticPlanExecutor.ExecutionResult(Map.of(), List.of(observation));
         }
-        return new StaticPlanExecutor.ExecutionResult(Map.of(), List.of(new ExecutionObservation("adaptive", ExecutionObservation.Status.FAILURE,
-                List.of(), null, List.of(), null, "V2 adaptive research is not available yet")));
+        return new StaticPlanExecutor.ExecutionResult(Map.of(), List.of(new ExecutionObservation("adaptive",
+                ExecutionObservation.Status.UNSUPPORTED, List.of(), null, List.of(), null,
+                "目前暂不支持自适应研究。")));
     }
-    private void applyEffects(DecisionTaskState task, StaticPlanExecutor.ExecutionResult execution) {
-        V2TaskState state = state(task); PostExecutionReducer reducer = new PostExecutionReducer();
-        for (ExecutionObservation observation : execution.observations()) for (ExecutionAction.DomainEffect effect : observation.effects()) {
-            state = reducer.apply(state, effect);
-            if (effect instanceof ExecutionAction.DomainEffect.CandidateSelected selected) task.setV2SelectedShopId(selected.shopId());
+
+    private Map<String, SearchSpec> searchSpecs(CompilationResult compilation) {
+        List<ExecutionAction> actions = new ArrayList<>();
+        if (compilation instanceof CompilationResult.Direct direct) actions.add(direct.action());
+        if (compilation instanceof CompilationResult.StaticPlan plan)
+            plan.plan().groups().forEach(group -> actions.addAll(group.actions()));
+        return actions.stream().filter(ExecutionAction.SearchAction.class::isInstance)
+                .map(ExecutionAction.SearchAction.class::cast)
+                .collect(Collectors.toUnmodifiableMap(ExecutionAction.SearchAction::requestId,
+                        ExecutionAction.SearchAction::spec, (first, ignored) -> first));
+    }
+
+    private VerifiedExecution verify(StaticPlanExecutor.ExecutionResult execution, Map<String, SearchSpec> searches) {
+        List<ExecutionObservation> observations = new ArrayList<>();
+        List<String> failures = new ArrayList<>();
+        for (ExecutionObservation observation : execution.observations()) {
+            SearchSpec spec = searches.get(observation.requestId());
+            if (spec == null || observation.recommendations().isEmpty()) {
+                if (!observation.candidateShopIds().isEmpty() && spec == null) {
+                    observations.add(new ExecutionObservation(observation.requestId(), ExecutionObservation.Status.EMPTY,
+                            List.of(), observation.evidence(), List.of(), observation.generalAnswer(),
+                            "候选缺少可验证的检索契约。", observation.value()));
+                } else observations.add(observation);
+                continue;
+            }
+            var report = verifier.verify(spec, observation.recommendations());
+            failures.addAll(report.failedHardChecks());
+            List<DecisionRecommendation> safe = report.verifiedCandidates();
+            ExecutionObservation.Status status = safe.isEmpty() ? ExecutionObservation.Status.EMPTY : ExecutionObservation.Status.SUCCESS;
+            observations.add(new ExecutionObservation(observation.requestId(), status,
+                    safe.stream().map(DecisionRecommendation::getShopId).filter(Objects::nonNull).toList(),
+                    observation.evidence(), observation.effects(), observation.generalAnswer(), observation.detail(),
+                    observation.value(), safe));
         }
-        persistState(task, state);
-        for (ExecutionObservation observation : execution.observations()) if (!observation.candidateShopIds().isEmpty()) appendBatch(task, observation.candidateShopIds());
+        return new VerifiedExecution(new StaticPlanExecutor.ExecutionResult(execution.groups(), List.copyOf(observations)),
+                List.copyOf(failures));
     }
-    private ResponseSpec response(DecisionTaskState task, StaticPlanExecutor.ExecutionResult result) {
-        List<com.hmdp.ai.dto.DecisionRecommendation> recommendations = new ArrayList<>(); String fact = null; String general = null; String error = null;
-        for (ExecutionObservation observation : result.observations()) {
-            if (!observation.candidateShopIds().isEmpty()) for (Long id : observation.candidateShopIds()) { Shop shop = shopMapper.selectById(id); if (shop != null) {
-                com.hmdp.ai.dto.DecisionRecommendation item = new com.hmdp.ai.dto.DecisionRecommendation(); item.setShopId(shop.getId()); item.setShopName(shop.getName()); item.setAvgPrice(shop.getAvgPrice()); item.setAddress(shop.getAddress()); recommendations.add(item); }}
-            if (observation.generalAnswer() != null) { if (observation.requestId().startsWith("general")) general = observation.generalAnswer(); else fact = observation.generalAnswer(); }
-            if (observation.status() == ExecutionObservation.Status.FAILURE) error = observation.detail();
+
+    private DecisionTaskState applyPost(ConversationWorkingMemory memory, String taskId,
+                                        StaticPlanExecutor.ExecutionResult execution) {
+        DecisionTaskState task = findTask(memory, taskId);
+        if (task == null) throw new IllegalStateException("V2 task disappeared before post commit");
+        V2TaskState reduced = postReducer.apply(stateGateway.read(task), execution);
+        stateGateway.write(task, reduced);
+        return task;
+    }
+
+    private ChatMessageResponse response(String chatId, DecisionTaskState task,
+                                        StaticPlanExecutor.ExecutionResult execution) {
+        List<DecisionRecommendation> recommendations = new ArrayList<>();
+        String fact = null, general = null, error = null;
+        boolean unsupported = false;
+        Long selectedId = null;
+        for (ExecutionObservation observation : execution.observations()) {
+            recommendations.addAll(observation.recommendations());
+            if (observation.generalAnswer() != null) {
+                if (observation.requestId().startsWith("general")) general = observation.generalAnswer();
+                else fact = observation.generalAnswer();
+            }
+            if (observation.status() == ExecutionObservation.Status.FAILURE
+                    || observation.status() == ExecutionObservation.Status.TIMEOUT
+                    || observation.status() == ExecutionObservation.Status.CANCELLED
+                    || observation.status() == ExecutionObservation.Status.UNSUPPORTED) {
+                error = observation.detail() == null ? "本轮请求暂时无法完成。" : observation.detail();
+                unsupported |= observation.status() == ExecutionObservation.Status.UNSUPPORTED;
+            }
+            for (ExecutionAction.DomainEffect effect : observation.effects())
+                if (effect instanceof ExecutionAction.DomainEffect.CandidateSelected selected) selectedId = selected.shopId();
         }
-        Shop selected = task.getV2SelectedShopId() == null ? null : shopMapper.selectById(task.getV2SelectedShopId());
-        return new ResponseSpec(recommendations, fact, task.getV2SelectedShopId(), selected == null ? null : selected.getName(), general, null, error);
+        String selectedName = selectedId == null ? null : candidateName(task, selectedId);
+        ResponseSpec spec = new ResponseSpec(recommendations, fact, selectedId, selectedName, general, null, error, unsupported);
+        return renderer.render(chatId, spec);
     }
-    private void appendBatch(DecisionTaskState task, List<Long> ids) { RecommendationBatch batch = new RecommendationBatch();
-        for (Long id : ids) { Shop shop = shopMapper.selectById(id); if (shop == null) continue; RecommendationCandidateRef candidate = new RecommendationCandidateRef(); candidate.setShopId(id); candidate.setShopName(shop.getName()); candidate.setPricePerPerson(shop.getAvgPrice()); batch.getCandidates().add(candidate); }
-        if (!batch.getCandidates().isEmpty()) task.getRecommendationBatches().add(batch); }
-    private void applyFeedback(DecisionTaskState task, GroundedTurn turn) { for (GroundedFeedback feedback : turn.feedback()) if (feedback.feedback() instanceof EntityFeedback.EntityFeedbackItem item && item.kind() == EntityFeedback.FeedbackKind.REJECT)
-        feedback.operands().stream().filter(GroundedReference.ShopIdentity.class::isInstance).map(GroundedReference.ShopIdentity.class::cast).forEach(shop -> task.getV2RejectedShopIds().add(shop.shopId())); }
-    private PlanningSnapshot snapshot(DecisionTaskState task, int version) { return new PlanningSnapshot(version, task.getTaskId(), task.getV2Criteria(), task.getV2RelativePreferences(), task.getV2RejectedShopIds(), task.getV2Relaxable(), task.getV2Locked(), task.getV2SearchAnchor(), currentVisibleIds(task)); }
-    private Set<Long> currentVisibleIds(DecisionTaskState task) { if (task.getRecommendationBatches().isEmpty()) return Set.of(); return task.getRecommendationBatches().getLast().getCandidates().stream().map(RecommendationCandidateRef::getShopId).filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet()); }
-    private V2TaskState state(DecisionTaskState task) { return new V2TaskState(task.getV2Criteria(), task.getV2RelativePreferences(), task.getV2Relaxable(), task.getV2Locked()); }
-    private void persistState(DecisionTaskState task, V2TaskState state) { task.setV2Criteria(state.criteria()); task.setV2RelativePreferences(state.relativePreferences()); task.setV2Relaxable(state.relaxable()); task.setV2Locked(state.locked()); }
-    private List<TaskView> taskViews(ConversationWorkingMemory memory) { List<TaskView> result = new ArrayList<>(); for (int i = 0; i < memory.getTasks().size(); i++) result.add(view(memory.getTasks().get(i), i)); return result; }
-    private TaskView view(DecisionTaskState task, int index) { RecommendationBatch batch = task.getRecommendationBatches().isEmpty() ? null : task.getRecommendationBatches().getLast(); TaskView.RecommendationBatchView visible = batch == null ? null : new TaskView.RecommendationBatchView("batch-" + task.getRecommendationBatches().size(), batch.getCandidates().stream().filter(c -> c.getShopId() != null).map(c -> new TaskView.ShopView(c.getShopId(), c.getShopName())).toList()); return new TaskView(task.getTaskId(), index, "DINING", task.getV2Criteria().location() == null ? null : task.getV2Criteria().location().city(), visible, task.getV2SelectedShopId()); }
-    private VersionedMemory load(String chatId) { AiWorkingMemory row = versions.latest(chatId); try { return row == null ? new VersionedMemory(0, new ConversationWorkingMemory()) : new VersionedMemory(row.getVersion(), objectMapper.readValue(row.getMemoryJson(), ConversationWorkingMemory.class)); } catch (Exception e) { throw new IllegalStateException("V2 working memory cannot be read", e); } }
+
+    private String candidateName(DecisionTaskState task, Long shopId) {
+        for (RecommendationBatch batch : task.getRecommendationBatches())
+            for (RecommendationCandidateRef candidate : batch.getCandidates())
+                if (Objects.equals(candidate.getShopId(), shopId)) return candidate.getShopName();
+        Shop shop = shopMapper.selectById(shopId);
+        return shop == null ? null : shop.getName();
+    }
+
+    private PlanningSnapshot snapshot(DecisionTaskState task, ConversationWorkingMemory memory, int version) {
+        V2TaskState state = stateGateway.read(task);
+        return new PlanningSnapshot(version, task.getTaskId(), state.criteria(), state.relativePreferences(),
+                state.rejectedShopIds(), state.relaxable(), state.locked(), state.searchAnchor(), currentVisibleIds(task));
+    }
+
+    private boolean sameCausalInputs(PlanningSnapshot left, PlanningSnapshot right) {
+        return Objects.equals(left.taskId(), right.taskId()) && Objects.equals(left.criteria(), right.criteria())
+                && Objects.equals(left.relativePreferences(), right.relativePreferences())
+                && Objects.equals(left.rejectedShopIds(), right.rejectedShopIds())
+                && Objects.equals(left.currentVisibleShopIds(), right.currentVisibleShopIds())
+                && Objects.equals(left.searchAnchor(), right.searchAnchor())
+                && Objects.equals(left.relaxable(), right.relaxable()) && Objects.equals(left.locked(), right.locked());
+    }
+
+    private Set<Long> currentVisibleIds(DecisionTaskState task) {
+        if (task.getRecommendationBatches() == null || task.getRecommendationBatches().isEmpty()) return Set.of();
+        return task.getRecommendationBatches().getLast().getCandidates().stream().map(RecommendationCandidateRef::getShopId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+    }
+
+    private List<TaskView> taskViews(ConversationWorkingMemory memory) {
+        List<TaskView> result = new ArrayList<>();
+        for (int i = 0; i < memory.getTasks().size(); i++) result.add(view(memory.getTasks().get(i), i));
+        return result;
+    }
+
+    private TaskView view(DecisionTaskState task, int index) {
+        RecommendationBatch batch = task.getRecommendationBatches().isEmpty() ? null : task.getRecommendationBatches().getLast();
+        String batchId = batch == null ? null : batch.getBatchId();
+        if (batch != null && (batchId == null || batchId.isBlank())) batchId = "batch-" + task.getRecommendationBatches().size();
+        TaskView.RecommendationBatchView visible = batch == null ? null : new TaskView.RecommendationBatchView(batchId,
+                batch.getCandidates().stream().filter(c -> c.getShopId() != null)
+                        .map(c -> new TaskView.ShopView(c.getShopId(), c.getShopName())).toList());
+        return new TaskView(task.getTaskId(), index, "DINING",
+                task.getV2Criteria().location() == null ? null : task.getV2Criteria().location().city(), visible,
+                task.getV2SelectedShopId());
+    }
+
+    private DecisionTaskState findTask(ConversationWorkingMemory memory, String taskId) {
+        return memory.getTasks().stream().filter(task -> Objects.equals(task.getTaskId(), taskId)).findFirst().orElse(null);
+    }
+
+    private VersionedMemory load(String chatId) {
+        AiWorkingMemory row = versions.latest(chatId);
+        try {
+            return row == null ? new VersionedMemory(0, new ConversationWorkingMemory())
+                    : new VersionedMemory(row.getVersion(), objectMapper.readValue(row.getMemoryJson(), ConversationWorkingMemory.class));
+        } catch (Exception e) {
+            throw new IllegalStateException("V2 working memory cannot be read", e);
+        }
+    }
+
+    private ChatMessageResponse clarification(String chatId, String message) {
+        return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, message, null));
+    }
+
+    private ChatMessageResponse retryResponse(String chatId) {
+        return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, null,
+                "对话状态刚刚更新，本轮结果未展示，请重试这句话。", false, true));
+    }
+
+    private Map<String, Object> postEvent(PreparedTurn prepared, PlanRun run, String phase, boolean replanned) {
+        List<Map<String, Object>> executed = run.execution().observations().stream().map(observation -> {
+            Map<String, Object> action = new LinkedHashMap<>();
+            action.put("requestId", observation.requestId()); action.put("status", observation.status().name());
+            return action;
+        }).toList();
+        List<Long> candidateIds = run.execution().observations().stream().flatMap(observation -> observation.candidateShopIds().stream()).distinct().toList();
+        List<Map<String, Object>> groundedEntities = prepared.grounded().requests().stream().flatMap(request -> request.operands().stream())
+                .filter(GroundedReference.ShopIdentity.class::isInstance).map(GroundedReference.ShopIdentity.class::cast)
+                .map(shop -> Map.<String, Object>of("shopId", shop.shopId(), "batchId", shop.batchId() == null ? "" : shop.batchId(), "ordinal", shop.ordinal())).toList();
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("phase", phase); event.put("taskId", prepared.taskId()); event.put("replanned", replanned);
+        event.put("executedActions", executed); event.put("verifiedCandidateIds", candidateIds);
+        event.put("verificationFailures", run.verificationFailures()); event.put("groundedEntities", groundedEntities);
+        event.put("conditionalCriteriaApplied", run.execution().observations().stream().flatMap(o -> o.effects().stream())
+                .anyMatch(ExecutionAction.DomainEffect.ConditionalCriteriaApplied.class::isInstance));
+        return event;
+    }
+
+    private String chatId(ChatMessageRequest request) { return request.getChatId(); }
     private Long userId() { return UserHolder.getUser() == null ? null : UserHolder.getUser().getId(); }
+
     private record VersionedMemory(int version, ConversationWorkingMemory memory) { }
+    private record PreOutcome(PreparedTurn prepared, ChatMessageResponse response) { }
+    private record PreBuild(String taskId, DecisionTaskState task, GroundedTurn grounded,
+                            ChatMessageResponse response, boolean abandon) {
+        static PreBuild ready(String id, DecisionTaskState task, GroundedTurn grounded) { return new PreBuild(id, task, grounded, null, false); }
+        static PreBuild response(ChatMessageResponse response) { return new PreBuild(null, null, null, response, false); }
+        static PreBuild abandon(String id) { return new PreBuild(id, null, null, null, true); }
+    }
+    private record PreparedTurn(ConversationWorkingMemory preMemory, int preVersion, String taskId, String activeTaskId,
+                                TurnSemantics semantics, GroundedTurn grounded, PlanningSnapshot snapshot) { }
+    private record VerifiedExecution(StaticPlanExecutor.ExecutionResult execution, List<String> failures) { }
+    private record PlanRun(StaticPlanExecutor.ExecutionResult execution, Map<String, SearchSpec> searches,
+                           List<String> verificationFailures) { }
 }
