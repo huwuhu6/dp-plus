@@ -1,5 +1,21 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-14：V2 主链首次切换
+
+V2 runtime 已接入 `ChatOrchestrationService` 的唯一生产入口，因此 `/ai/chat/messages`、SSE 与
+`AiConversationEvaluationService` 共享 `V2ChatOrchestrator`。运行顺序固定为语义解释、task/reference
+grounding、PreReducer + OCC、冻结 PlanningSnapshot、ExecutionPlanCompiler、StaticPlanExecutor、
+PostReducer + OCC、ResponseSpec renderer；不再从 facade 调用 V1 ContextRewrite、IntentRouting、
+CriteriaReduction 或 PolicyGuard。
+
+Task 新增 V2 canonical 字段，V2 的条件状态不回写 `DecisionConstraints`；为了复用既有检索实现，
+仅在 SearchAction 执行边界把 `DiningCriteria` 单向投影为基础设施请求。推荐批次在 post OCC 成功
+后才从 SearchObservation 持久化/展示；post conflict 会 reload/replan 一次，第二次冲突返回可重试
+降级结果。事实查询经类型到现有只读 Tool 的确定性绑定，不由 renderer 或 LLM 补造商户事实。
+
+本次定向验证：`mvn -q clean -Dtest='com.hmdp.ai.v2.*Test' test` 通过。V2 compare 与 adaptive
+research 仍明确返回 unsupported；完整评测和全量 Maven 回归待入口替换后的测试迁移完成。
+
 ## 2026-09-14：V2 Core Contract Red Team 收敛
 
 三份独立架构审查共同指出 Phase 1 的“类型已建、契约未闭合”问题：SELECT 同时作为 feedback/request，clear 依赖布尔字段，guard 使用 String，TaskRef 和 ordinal 在 grounding 中重解自然语言/猜测 batch，Adaptive 又通过空 plan 暗示。修正后，SELECT 仅为 request，BatchFeedback 通过语义 BatchRef 绑定；clear、typed predicate、TaskSelector、currentVisibleBatch、typed clarification 和显式 CompilationResult 均被固定。

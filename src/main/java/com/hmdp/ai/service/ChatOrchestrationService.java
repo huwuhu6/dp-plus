@@ -44,6 +44,7 @@ import com.hmdp.ai.service.pipeline.CriteriaReductionNode;
 import com.hmdp.ai.service.pipeline.ExecutionNode;
 import com.hmdp.ai.service.pipeline.IntentRoutingNode;
 import com.hmdp.ai.service.pipeline.PolicyGuardNode;
+import com.hmdp.ai.v2.runtime.V2ChatOrchestrator;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,6 +79,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
     @Resource private AdministrativeRegionResolver administrativeRegionResolver;
     @Resource private DecisionContextQueryService decisionContextQueryService;
     @Resource private TurnUnderstandingService turnUnderstandingService;
+    @Resource private V2ChatOrchestrator v2ChatOrchestrator;
 
     public ChatMessageResponse chat(ChatMessageRequest request) {
         return chat(request, null);
@@ -101,6 +103,10 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
 
     public ChatMessageResponse chat(ChatMessageRequest request, Consumer<String> textDeltaConsumer,
                                     Consumer<ChatStreamEventData> eventConsumer) {
+        // V2 owns semantics, grounding, planning and both OCC mutations.  This facade
+        // remains solely to preserve the HTTP/application signature during cut-over.
+        return v2ChatOrchestrator.chat(request);
+        /*
         ChatProcessingContext context = new ChatProcessingContext(request, textDeltaConsumer);
         context.setEventConsumer(eventConsumer);
         chatPipeline().process(context);
@@ -108,6 +114,7 @@ public class ChatOrchestrationService implements ChatPipelineOperations {
             throw new IllegalStateException("chat pipeline completed without a response");
         }
         return context.getResponse();
+        */
     }
 
     /**

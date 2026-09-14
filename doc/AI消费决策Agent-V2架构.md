@@ -55,6 +55,22 @@ V2 runtime 复用既有 `IdempotencyService` 与 `ai_idempotency_record` 的 `(u
 - multi-agent；
 - generic workflow engine。
 
+## 运行主链切换
+
+`ChatOrchestrationService` 现在仅保留 HTTP/application 兼容签名，实际请求无条件进入
+`V2ChatOrchestrator`；同步、SSE 和 conversation evaluation 因而使用同一入口。V2 编排以
+`WorkingMemoryVersionService.append` 完成 pre/post 两次 OCC：pre commit 后产生冻结的
+`PlanningSnapshot`，post commit 成功前不得渲染新 RecommendationBatch。post conflict 会从最新
+版本完整 replan 一次；再次冲突只返回可重试的降级结果，绝不泄露未提交候选。
+
+持久 Task 中的 `v2Criteria`、relative preferences、relaxable/locked、rejected entities、selection
+和 SearchAnchor 为 V2 写路径的 canonical state。旧 `DecisionConstraints` 只通过
+`V2CriteriaProjection` 向尚未迁移的确定性检索基础设施作单向投影；V2 runtime 不读取或写回它。
+
+`V2ActionHandler` 是 SearchSpec 到既有 MySQL/Milvus 决策检索和实体事实工具的受限适配层。
+它不接收 raw user text、WorkingMemory 或 durable writer。`ResponseSpec` 是 closed-world 输出，
+renderer 只做展示投影。
+
 ## Evaluation 与迁移
 
 领域核 golden tests 不依赖模型、数据库或时间，覆盖复合 critique/fact/alternatives、条件选店、static/adaptive、历史 Task grounding、batch feedback、critique/reject、预算和相对偏好、松弛/锁定。主链切换后将 fixture 接入 JSONL conversation evaluation，并运行 `mvn -q test` 和已登录轨迹评测。
