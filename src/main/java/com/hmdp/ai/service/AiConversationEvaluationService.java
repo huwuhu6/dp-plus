@@ -495,15 +495,6 @@ public class AiConversationEvaluationService {
                     snapshot.activeTaskId = memory.getActiveTaskId();
                     snapshot.taskCount = memory.getTasks() == null ? 0 : memory.getTasks().size();
                     DecisionTaskState task = memory.activeTask();
-                    if (task == null && memory.getTasks() != null) {
-                        task = memory.getTasks().stream()
-                                .filter(candidate -> candidate.getV2Lifecycle() == com.hmdp.ai.v2.reducer.TaskLifecycle.ABANDONED)
-                                .reduce((older, newer) -> newer).orElse(null);
-                        if (task != null) {
-                            snapshot.affectedTaskId = task.getTaskId();
-                            snapshot.affectedTaskLifecycle = task.getV2Lifecycle().name();
-                        }
-                    }
                     if (task != null) {
                         snapshot.taskLifecycle = task.getV2Lifecycle() == null ? null : task.getV2Lifecycle().name();
                         snapshot.activeCriteria = objectMapper.convertValue(task.getV2Criteria(), new TypeReference<Map<String, Object>>() { });
@@ -529,6 +520,7 @@ public class AiConversationEvaluationService {
                     snapshot.staleSuppressed = "STALE_SUPPRESSED".equals(snapshot.finalStatus);
                     snapshot.finalCandidates = new ArrayList<>(snapshot.recommendations);
                     readLatestV2Execution(chatId, row, snapshot);
+                    readAffectedTask(row, memory, snapshot);
                     readLatestV2Semantics(chatId, snapshot);
                     return snapshot;
                 } catch (Exception e) {
@@ -575,6 +567,22 @@ public class AiConversationEvaluationService {
         snapshot.conditionalCriteriaApplied = Boolean.TRUE.equals(result.get("conditionalCriteriaApplied"));
         snapshot.replanned = Boolean.TRUE.equals(result.get("replanned"));
         snapshot.verifiedCandidateIds = asLongList(result.get("verifiedCandidateIds"));
+    }
+
+    /** STATE_REDUCED metadata identifies the mutation target; it never changes the active-task projection. */
+    private void readAffectedTask(AiWorkingMemory row, ConversationWorkingMemory memory, EvaluationTurnSnapshot snapshot) throws Exception {
+        if (conversationEventMapper == null || row.getId() == null || memory.getTasks() == null) return;
+        AiConversationEvent event = conversationEventMapper.selectOne(new QueryWrapper<AiConversationEvent>()
+                .eq("working_memory_id", row.getId()).eq("event_type", "STATE_REDUCED")
+                .orderByDesc("sequence_no").last("limit 1"));
+        if (event == null || event.getMetadata() == null || event.getMetadata().isBlank()) return;
+        Map<String, Object> metadata = objectMapper.readValue(event.getMetadata(), new TypeReference<Map<String, Object>>() { });
+        String taskId = String.valueOf(metadata.get("taskId"));
+        if (taskId == null || "null".equals(taskId)) return;
+        memory.getTasks().stream().filter(task -> taskId.equals(task.getTaskId())).findFirst().ifPresent(task -> {
+            snapshot.affectedTaskId = task.getTaskId();
+            snapshot.affectedTaskLifecycle = task.getV2Lifecycle() == null ? null : task.getV2Lifecycle().name();
+        });
     }
 
     private void readLatestV2Semantics(String chatId, EvaluationTurnSnapshot snapshot) throws Exception {
