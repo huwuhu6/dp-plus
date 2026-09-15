@@ -13,7 +13,7 @@ public class V2ResponseRenderer {
         DecisionResponse decision = new DecisionResponse();
         decision.setRecommendations(spec.recommendations());
         decision.setStatus(spec.staleSuppressed() ? "STALE_SUPPRESSED"
-                : spec.unsupported() ? "UNSUPPORTED" : spec.clarification() != null ? "CLARIFICATION"
+                : spec.unsupported() ? "UNSUPPORTED" : spec.clarification() != null ? "CLARIFYING"
                 : spec.partialError() == null ? "COMPLETED" : "PARTIAL");
         if (!spec.recommendations().isEmpty()) response.setAnswer("已为你找到 " + spec.recommendations().size() + " 家可选餐厅。");
         else if (spec.factAnswer() != null) response.setAnswer(spec.factAnswer());

@@ -495,6 +495,15 @@ public class AiConversationEvaluationService {
                     snapshot.activeTaskId = memory.getActiveTaskId();
                     snapshot.taskCount = memory.getTasks() == null ? 0 : memory.getTasks().size();
                     DecisionTaskState task = memory.activeTask();
+                    if (task == null && memory.getTasks() != null) {
+                        task = memory.getTasks().stream()
+                                .filter(candidate -> candidate.getV2Lifecycle() == com.hmdp.ai.v2.reducer.TaskLifecycle.ABANDONED)
+                                .reduce((older, newer) -> newer).orElse(null);
+                        if (task != null) {
+                            snapshot.affectedTaskId = task.getTaskId();
+                            snapshot.affectedTaskLifecycle = task.getV2Lifecycle().name();
+                        }
+                    }
                     if (task != null) {
                         snapshot.taskLifecycle = task.getV2Lifecycle() == null ? null : task.getV2Lifecycle().name();
                         snapshot.activeCriteria = objectMapper.convertValue(task.getV2Criteria(), new TypeReference<Map<String, Object>>() { });
@@ -866,9 +875,10 @@ public class AiConversationEvaluationService {
         if (!(expected instanceof Map)) return actual.present && valuesEqual(expected, actual.value);
         Map<?, ?> expression = (Map<?, ?>) expected;
         if (expression.containsKey("equals")) return actual.present && valuesEqual(expression.get("equals"), actual.value);
-        // V2 state projections deliberately omit unset optional fields. At the contract boundary,
-        // an omitted optional field and an explicit JSON null both mean that no domain value exists.
-        if (Boolean.TRUE.equals(expression.get("null"))) return !actual.present || actual.value == null;
+        // `null` is strict so a misspelled projection path cannot pass accidentally. `notSet`
+        // is the explicit domain assertion for optional state that may be omitted by projection.
+        if (Boolean.TRUE.equals(expression.get("null"))) return actual.present && actual.value == null;
+        if (Boolean.TRUE.equals(expression.get("notSet"))) return !actual.present || actual.value == null;
         if (Boolean.TRUE.equals(expression.get("absent"))) return !actual.present;
         if (Boolean.TRUE.equals(expression.get("empty"))) return actual.present && isEmpty(actual.value);
         if (Boolean.TRUE.equals(expression.get("nonEmpty"))) return actual.present && !isEmpty(actual.value);
@@ -907,7 +917,7 @@ public class AiConversationEvaluationService {
 
     private String assertionType(Object expected) {
         if (!(expected instanceof Map)) return "equals";
-        for (String operation : java.util.Arrays.asList("equals", "null", "absent", "empty", "nonEmpty", "contains", "size")) {
+        for (String operation : java.util.Arrays.asList("equals", "null", "notSet", "absent", "empty", "nonEmpty", "contains", "size")) {
             if (((Map<?, ?>) expected).containsKey(operation)) return operation;
         }
         return "invalid";
@@ -1406,6 +1416,8 @@ public class AiConversationEvaluationService {
         private Long decisionSessionId;
         private String dialogPhase;
         private String activeTaskId;
+        private String affectedTaskId;
+        private String affectedTaskLifecycle;
         private Integer taskCount;
         private Integer batchCount;
         private String taskLifecycle;
@@ -1465,6 +1477,7 @@ public class AiConversationEvaluationService {
         private Map<String, Object> v2Projection() {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("taskId", activeTaskId); result.put("taskLifecycle", taskLifecycle);
+            result.put("affectedTaskId", affectedTaskId); result.put("affectedTaskLifecycle", affectedTaskLifecycle);
             result.put("criteria", activeCriteria); result.put("relativePreferences", relativePreferences);
             result.put("searchAnchor", searchAnchor); result.put("currentVisibleShopIds", currentVisibleShopIds);
             result.put("groundedEntities", groundedEntities); result.put("feedbackLedger", feedbackLedger);

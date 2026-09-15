@@ -42,6 +42,7 @@ public class ConversationEvaluationDatasetLoader {
     public List<AiConversationEvaluationCase> loadCases(String datasetVersion) {
         List<AiConversationEvaluationCase> fromFile = loadFromClasspath(datasetVersion);
         if (fromFile != null) {
+            V2DatasetValidator.validate(datasetVersion, fromFile, objectMapper);
             log.info("[AI][eval] dataset={} loaded from JSONL, {} cases", datasetVersion, fromFile.size());
             return fromFile;
         }
