@@ -1,5 +1,13 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-15：V2 评测校准——验证真值与跨轮 ordinal identity
+
+评测执行结果增加仅用于审计的 `VerificationStatus`：无检索为 `NOT_APPLICABLE`，检索执行失败或没有进入 verifier 为 `NOT_EXECUTED`，只有 verifier 实际检查过候选后才可能为 `VERIFIED_PASS` 或 `VERIFIED_FAIL`。`hardConstraintsVerified` 因而只在 `VERIFIED_PASS` 时为真，避免“空候选/运行时失败但 failure list 为空”被误报为硬约束通过；该状态只写入既有事件审计投影，不进入 Working Memory 或其他 durable domain state。
+
+跨轮 relation 新增 `groundedOrdinal = EQUALS_VISIBLE`：评测从来源轮 current visible batch 计算 ordinal 对应的 shopId，并要求目标轮的 grounded entity 指向同一 identity，而不依赖动态排序。V2 dataset lint 同步封闭 relation type/relation 组合，拒绝未知或不可能的跨轮关系。
+
+定向 clean 验证通过：`mvn -q clean -Dtest=V2DatasetValidatorTest,AiConversationEvaluationServiceTest,V2ChatOrchestratorOccTest,V2RuntimeHardeningTest test`。
+
 ## 2026-09-14：V2 验收收口与 V1 Chat Semantic Chain 物理删除
 
 真实评测 Run 161 使用 `conversation-v2-runtime-v1` 完成 3/3 case，V2 outcome 4/4（100%）；平均 12,361ms、p95 22,476ms。匿名 HTTP smoke 覆盖推荐、商户事实追问、拒绝后的 alternatives、Task RESTORE、设备定位及 OCC。Milvus 选用本机有数据的 `milvus-standalone`（19530），实际召回与 MySQL 硬过滤链路均被验证。

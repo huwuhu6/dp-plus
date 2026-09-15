@@ -567,6 +567,7 @@ public class AiConversationEvaluationService {
         snapshot.conditionalCriteriaApplied = Boolean.TRUE.equals(result.get("conditionalCriteriaApplied"));
         snapshot.replanned = Boolean.TRUE.equals(result.get("replanned"));
         snapshot.verifiedCandidateIds = asLongList(result.get("verifiedCandidateIds"));
+        snapshot.verificationStatus = result.get("verificationStatus") == null ? "NOT_EXECUTED" : String.valueOf(result.get("verificationStatus"));
     }
 
     /** STATE_REDUCED metadata identifies the mutation target; it never changes the active-task projection. */
@@ -831,7 +832,7 @@ public class AiConversationEvaluationService {
             String relation = stringValue(expectation.get("relation"));
             EvaluationTurnSnapshot from = snapshotAt(snapshots, fromTurn);
             EvaluationTurnSnapshot to = snapshotAt(snapshots, toTurn);
-            boolean relationMatched = from != null && to != null && relationMatches(type, relation, from, to);
+            boolean relationMatched = from != null && to != null && relationMatches(type, relation, expectation, from, to);
             if (!relationMatched) {
                 Map<String, Object> actual = new LinkedHashMap<>();
                 actual.put("from", from == null ? null : from.relationProjection());
@@ -844,7 +845,8 @@ public class AiConversationEvaluationService {
         return matched;
     }
 
-    private boolean relationMatches(String type, String relation, EvaluationTurnSnapshot from, EvaluationTurnSnapshot to) {
+    private boolean relationMatches(String type, String relation, Map<String, Object> expectation,
+                                    EvaluationTurnSnapshot from, EvaluationTurnSnapshot to) {
         if ("candidatePool".equals(type)) {
             if ("INVALIDATED".equals(relation)) return !from.candidatePool.isEmpty() && to.candidatePool.isEmpty();
             if ("PRESERVED".equals(relation)) return from.candidatePool.equals(to.candidatePool);
@@ -862,6 +864,13 @@ public class AiConversationEvaluationService {
             Long toId = to.activeDecisionSessionId == null ? to.decisionSessionId : to.activeDecisionSessionId;
             if ("SAME".equals(relation)) return java.util.Objects.equals(fromId, toId);
             if ("CHANGED".equals(relation)) return fromId != null && toId != null && !fromId.equals(toId);
+        }
+        if ("groundedOrdinal".equals(type) && "EQUALS_VISIBLE".equals(relation)) {
+            Integer ordinal = integerValue(expectation.get("ordinal"));
+            if (ordinal == null || ordinal < 1 || ordinal > from.currentVisibleShopIds.size()) return false;
+            Long expectedShopId = from.currentVisibleShopIds.get(ordinal - 1);
+            return to.groundedEntities.stream().map(item -> item.get("shopId")).filter(Number.class::isInstance)
+                    .map(Number.class::cast).map(Number::longValue).anyMatch(expectedShopId::equals);
         }
         return false;
     }
@@ -1441,6 +1450,7 @@ public class AiConversationEvaluationService {
         private List<Long> finalCandidates = new ArrayList<>();
         private List<Long> verifiedCandidateIds = new ArrayList<>();
         private List<String> verificationFailures = new ArrayList<>();
+        private String verificationStatus = "NOT_EXECUTED";
         private List<Map<String, Object>> executedActions = new ArrayList<>();
         private List<Map<String, Object>> groundedEntities = new ArrayList<>();
         private Map<String, Object> semantic = new LinkedHashMap<>();
@@ -1493,7 +1503,8 @@ public class AiConversationEvaluationService {
             result.put("selectedShopId", selectedShopId); result.put("executedActions", executedActions);
             result.put("conditionalCriteriaApplied", conditionalCriteriaApplied);
             result.put("finalCandidates", finalCandidates); result.put("verifiedCandidateIds", verifiedCandidateIds);
-            result.put("hardConstraintsVerified", verificationFailures.isEmpty());
+            result.put("verificationStatus", verificationStatus);
+            result.put("hardConstraintsVerified", "VERIFIED_PASS".equals(verificationStatus));
             result.put("verificationFailures", verificationFailures); result.put("replanned", replanned);
             result.put("staleSuppressed", staleSuppressed); result.put("decisionStatus", decisionStatus);
             result.put("semantic", semantic);

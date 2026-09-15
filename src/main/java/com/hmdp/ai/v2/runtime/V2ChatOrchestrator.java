@@ -166,11 +166,12 @@ public class V2ChatOrchestrator {
             Map<String, SearchSpec> searches = searchSpecs(compilation);
             StaticPlanExecutor.ExecutionResult execution = execute(compilation);
             VerifiedExecution verified = verify(execution, searches);
-            return new PlanRun(verified.execution(), searches, verified.failures());
+            return new PlanRun(verified.execution(), searches, verified.failures(), verified.status());
         } catch (RuntimeException failure) {
             ExecutionObservation observation = new ExecutionObservation("v2-runtime", ExecutionObservation.Status.FAILURE,
                     List.of(), null, List.of(), null, "本轮计划无法安全执行，请调整条件后重试。");
-            return new PlanRun(new StaticPlanExecutor.ExecutionResult(Map.of(), List.of(observation)), Map.of(), List.of());
+            return new PlanRun(new StaticPlanExecutor.ExecutionResult(Map.of(), List.of(observation)), Map.of(), List.of(),
+                    com.hmdp.ai.evaluation.VerificationStatus.NOT_EXECUTED);
         }
     }
 
@@ -200,6 +201,7 @@ public class V2ChatOrchestrator {
     private VerifiedExecution verify(StaticPlanExecutor.ExecutionResult execution, Map<String, SearchSpec> searches) {
         List<ExecutionObservation> observations = new ArrayList<>();
         List<String> failures = new ArrayList<>();
+        boolean verificationAttempted = false;
         for (ExecutionObservation observation : execution.observations()) {
             SearchSpec spec = searches.get(observation.requestId());
             if (spec == null || observation.recommendations().isEmpty()) {
@@ -210,6 +212,7 @@ public class V2ChatOrchestrator {
                 } else observations.add(observation);
                 continue;
             }
+            verificationAttempted = true;
             var report = verifier.verify(spec, observation.recommendations());
             failures.addAll(report.failedHardChecks());
             List<DecisionRecommendation> safe = report.verifiedCandidates();
@@ -219,8 +222,13 @@ public class V2ChatOrchestrator {
                     observation.evidence(), observation.effects(), observation.generalAnswer(), observation.detail(),
                     observation.value(), safe));
         }
+        com.hmdp.ai.evaluation.VerificationStatus status = searches.isEmpty()
+                ? com.hmdp.ai.evaluation.VerificationStatus.NOT_APPLICABLE
+                : !verificationAttempted ? com.hmdp.ai.evaluation.VerificationStatus.NOT_EXECUTED
+                : failures.isEmpty() ? com.hmdp.ai.evaluation.VerificationStatus.VERIFIED_PASS
+                : com.hmdp.ai.evaluation.VerificationStatus.VERIFIED_FAIL;
         return new VerifiedExecution(new StaticPlanExecutor.ExecutionResult(execution.groups(), List.copyOf(observations)),
-                List.copyOf(failures));
+                List.copyOf(failures), status);
     }
 
     private DecisionTaskState applyPost(ConversationWorkingMemory memory, String taskId,
@@ -343,6 +351,7 @@ public class V2ChatOrchestrator {
         event.put("phase", phase); event.put("taskId", prepared.taskId()); event.put("replanned", replanned);
         event.put("executedActions", executed); event.put("verifiedCandidateIds", candidateIds);
         event.put("verificationFailures", run.verificationFailures()); event.put("groundedEntities", groundedEntities);
+        event.put("verificationStatus", run.verificationStatus().name());
         event.put("conditionalCriteriaApplied", run.execution().observations().stream().flatMap(o -> o.effects().stream())
                 .anyMatch(ExecutionAction.DomainEffect.ConditionalCriteriaApplied.class::isInstance));
         return event;
@@ -417,7 +426,9 @@ public class V2ChatOrchestrator {
     }
     private record PreparedTurn(ConversationWorkingMemory preMemory, int preVersion, String taskId, String activeTaskId,
                                 TurnSemantics semantics, GroundedTurn grounded, PlanningSnapshot snapshot) { }
-    private record VerifiedExecution(StaticPlanExecutor.ExecutionResult execution, List<String> failures) { }
+    private record VerifiedExecution(StaticPlanExecutor.ExecutionResult execution, List<String> failures,
+                                     com.hmdp.ai.evaluation.VerificationStatus status) { }
     private record PlanRun(StaticPlanExecutor.ExecutionResult execution, Map<String, SearchSpec> searches,
-                           List<String> verificationFailures) { }
+                           List<String> verificationFailures,
+                           com.hmdp.ai.evaluation.VerificationStatus verificationStatus) { }
 }

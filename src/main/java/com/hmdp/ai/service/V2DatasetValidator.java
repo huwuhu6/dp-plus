@@ -11,6 +11,12 @@ import java.util.Set;
 /** Fail-fast structural contract for audited V2 datasets; it intentionally does not inspect holdout semantics. */
 public final class V2DatasetValidator {
     private static final Set<String> OPERATORS = Set.of("equals", "null", "notSet", "absent", "empty", "nonEmpty", "contains", "size");
+    private static final Map<String, Set<String>> RELATIONS = Map.of(
+            "candidatePool", Set.of("INVALIDATED", "PRESERVED"),
+            "recommendations", Set.of("DISJOINT"),
+            "focusedShop", Set.of("CHANGED", "PRESERVED"),
+            "decisionSession", Set.of("SAME", "CHANGED"),
+            "groundedOrdinal", Set.of("EQUALS_VISIBLE"));
     private static final Set<String> PATHS = Set.of("taskId", "taskLifecycle", "affectedTaskId", "affectedTaskLifecycle", "criteria", "relativePreferences", "searchAnchor", "currentVisibleShopIds", "groundedEntities", "feedbackLedger", "rejectedShopIds", "relaxable", "locked", "selectedShopId", "executedActions", "conditionalCriteriaApplied", "finalCandidates", "verifiedCandidateIds", "verificationFailures", "replanned", "staleSuppressed", "decisionStatus", "semantic");
     private V2DatasetValidator() { }
 
@@ -36,6 +42,20 @@ public final class V2DatasetValidator {
                             if (expression.size() != 1 || !OPERATORS.contains(String.valueOf(expression.keySet().iterator().next())))
                                 throw new IllegalArgumentException("invalid assertion operator");
                         }
+                    }
+                }
+                if (item.getExpectedRelationsJson() != null) for (Map<String, Object> relation : mapper.readValue(item.getExpectedRelationsJson(), new TypeReference<List<Map<String, Object>>>() { })) {
+                    Number from = (Number) relation.get("fromTurn"); Number to = (Number) relation.get("toTurn");
+                    if (from == null || to == null || from.intValue() < 1 || to.intValue() < 1 || from.intValue() >= to.intValue() || to.intValue() > turns.size())
+                        throw new IllegalArgumentException("invalid cross-turn relation");
+                    String type = String.valueOf(relation.get("type"));
+                    String expected = String.valueOf(relation.get("relation"));
+                    if (!RELATIONS.getOrDefault(type, Set.of()).contains(expected))
+                        throw new IllegalArgumentException("unknown cross-turn relation");
+                    if ("groundedOrdinal".equals(relation.get("type"))) {
+                        Number ordinal = (Number) relation.get("ordinal");
+                        if (!"EQUALS_VISIBLE".equals(relation.get("relation")) || ordinal == null || ordinal.intValue() < 1)
+                            throw new IllegalArgumentException("invalid grounded ordinal relation");
                     }
                 }
             } catch (Exception e) { throw new IllegalArgumentException("invalid V2 dataset case: " + item.getCaseCode(), e); }
