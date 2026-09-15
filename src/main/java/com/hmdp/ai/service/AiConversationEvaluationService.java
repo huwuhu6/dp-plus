@@ -520,6 +520,7 @@ public class AiConversationEvaluationService {
                     snapshot.staleSuppressed = "STALE_SUPPRESSED".equals(snapshot.finalStatus);
                     snapshot.finalCandidates = new ArrayList<>(snapshot.recommendations);
                     readLatestV2Execution(chatId, row, snapshot);
+                    readLatestV2Semantics(chatId, snapshot);
                     return snapshot;
                 } catch (Exception e) {
                     throw new IllegalStateException("V2 evaluation snapshot cannot be read", e);
@@ -565,6 +566,23 @@ public class AiConversationEvaluationService {
         snapshot.conditionalCriteriaApplied = Boolean.TRUE.equals(result.get("conditionalCriteriaApplied"));
         snapshot.replanned = Boolean.TRUE.equals(result.get("replanned"));
         snapshot.verifiedCandidateIds = asLongList(result.get("verifiedCandidateIds"));
+    }
+
+    private void readLatestV2Semantics(String chatId, EvaluationTurnSnapshot snapshot) throws Exception {
+        if (conversationEventMapper == null) return;
+        List<AiConversationEvent> events = conversationEventMapper.selectList(new QueryWrapper<AiConversationEvent>()
+                .eq("chat_id", chatId).eq("turn_no", snapshot.turnNo).eq("event_type", "SEMANTIC_INTERPRETATION")
+                .orderByDesc("sequence_no").last("limit 8"));
+        for (AiConversationEvent event : events) {
+            if (event.getEventResult() == null || event.getEventResult().isBlank()) continue;
+            Map<String, Object> result = objectMapper.readValue(event.getEventResult(), new TypeReference<Map<String, Object>>() { });
+            Object semantic = result.get("semantic");
+            if (semantic instanceof Map<?, ?> map) {
+                snapshot.semantic = new LinkedHashMap<>();
+                map.forEach((key, value) -> snapshot.semantic.put(String.valueOf(key), value));
+            }
+            return;
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -848,7 +866,9 @@ public class AiConversationEvaluationService {
         if (!(expected instanceof Map)) return actual.present && valuesEqual(expected, actual.value);
         Map<?, ?> expression = (Map<?, ?>) expected;
         if (expression.containsKey("equals")) return actual.present && valuesEqual(expression.get("equals"), actual.value);
-        if (Boolean.TRUE.equals(expression.get("null"))) return actual.present && actual.value == null;
+        // V2 state projections deliberately omit unset optional fields. At the contract boundary,
+        // an omitted optional field and an explicit JSON null both mean that no domain value exists.
+        if (Boolean.TRUE.equals(expression.get("null"))) return !actual.present || actual.value == null;
         if (Boolean.TRUE.equals(expression.get("absent"))) return !actual.present;
         if (Boolean.TRUE.equals(expression.get("empty"))) return actual.present && isEmpty(actual.value);
         if (Boolean.TRUE.equals(expression.get("nonEmpty"))) return actual.present && !isEmpty(actual.value);
@@ -1403,6 +1423,7 @@ public class AiConversationEvaluationService {
         private List<String> verificationFailures = new ArrayList<>();
         private List<Map<String, Object>> executedActions = new ArrayList<>();
         private List<Map<String, Object>> groundedEntities = new ArrayList<>();
+        private Map<String, Object> semantic = new LinkedHashMap<>();
         private boolean conditionalCriteriaApplied;
         private boolean replanned;
         private boolean staleSuppressed;
@@ -1454,6 +1475,7 @@ public class AiConversationEvaluationService {
             result.put("hardConstraintsVerified", verificationFailures.isEmpty());
             result.put("verificationFailures", verificationFailures); result.put("replanned", replanned);
             result.put("staleSuppressed", staleSuppressed); result.put("decisionStatus", decisionStatus);
+            result.put("semantic", semantic);
             return result;
         }
 

@@ -77,6 +77,9 @@ public class SemanticInterpreter {
     public TurnSemantics parse(JsonNode root) {
         if (root == null || !root.isObject()) throw new IllegalArgumentException("semantic output must be an object");
         TaskDirective directive = enumValue(TaskDirective.class, root.path("taskDirective").asText("CONTINUE"));
+        var directiveEvidence = enumValue(com.hmdp.ai.v2.semantic.TaskDirectiveEvidence.class,
+                root.path("taskDirectiveEvidence").asText("NONE"));
+        validateDirectiveEvidence(directive, directiveEvidence);
         List<RequirementChange> changes = new ArrayList<>();
         JsonNode criteria = root.path("criteria");
         Set<RequirementChange.ClearedCriterion> cleared = enumSet(RequirementChange.ClearedCriterion.class, root.path("cleared"));
@@ -100,8 +103,19 @@ public class SemanticInterpreter {
         List<SemanticRelation> relations = new ArrayList<>();
         for (JsonNode item : root.path("relations")) relations.add(new SemanticRelation(requiredText(item, "observedRequestId"),
                 predicate(item.path("predicate")), requiredText(item, "dependentRequestId")));
-        return new TurnSemantics(directive, changes, feedback(root.path("feedback")),
+        return new TurnSemantics(directive, directiveEvidence, changes, feedback(root.path("feedback")),
                 requests(root.path("requests")), relations, references(root.path("references")));
+    }
+
+    /** A task operation must be an explicit user semantic, never an inference from a search request. */
+    private void validateDirectiveEvidence(TaskDirective directive, com.hmdp.ai.v2.semantic.TaskDirectiveEvidence evidence) {
+        var expected = switch (directive) {
+            case CONTINUE -> com.hmdp.ai.v2.semantic.TaskDirectiveEvidence.NONE;
+            case START_NEW -> com.hmdp.ai.v2.semantic.TaskDirectiveEvidence.EXPLICIT_NEW_TASK;
+            case RESTORE -> com.hmdp.ai.v2.semantic.TaskDirectiveEvidence.EXPLICIT_RESTORE;
+            case ABANDON -> com.hmdp.ai.v2.semantic.TaskDirectiveEvidence.EXPLICIT_ABANDON;
+        };
+        if (expected != evidence) throw new IllegalArgumentException("taskDirective lacks matching explicit evidence");
     }
 
     private JsonNode call(String userTurn, boolean repair) {
@@ -113,23 +127,29 @@ public class SemanticInterpreter {
         Map<String, Object> choice = Map.of("type", "function", "function", Map.of("name", FUNCTION));
         String system = "You are a semantic parser for a dining assistant. Output only the function call. "
                 + "Use exact uppercase enum values from the schema; do not replace them with natural-language labels such as find or fact. "
-                + "taskDirective is CONTINUE unless the user clearly starts, restores, or abandons a task. "
+                + "taskDirectiveEvidence is NONE for CONTINUE. START_NEW is permitted only for an explicitly independent new decision task and then taskDirectiveEvidence must be EXPLICIT_NEW_TASK; RESTORE/ABANDON likewise require EXPLICIT_RESTORE/EXPLICIT_ABANDON. A constraint edit, clear, feedback, ordinal follow-up, alternatives request, similar request, or conditional fallback is CONTINUE with NONE, never START_NEW. "
                 + "A dining recommendation request must use type RECOMMENDATION; a general-information question must use type GENERAL with its topic, never FACT. "
                 + "Every request needs requestId, type, and topic; topic must be non-empty for GENERAL and empty for other request types. "
                 + "When taskDirective is RESTORE, references must contain exactly one task selector; never emit RESTORE without a selector. Use EARLIEST only when the user explicitly asks for the earliest task, ACTIVE only for the active task, and MATCH_CONTEXT only when category/city identify a unique task. "
                 + "Every request must include target and fact: use a valid reference for FACT, SELECT, SIMILAR, and EXPLORE; use {} and fact DETAIL for other types. "
                 + "For FACT, fact must describe the requested fact using its enum. "
                 + "Every feedback item must include target, kind, aspect, batch, and polarity. For a single entity use its reference, batch false, and polarity NEGATIVE as an ignored placeholder; for a batch use target {}, kind REJECT as an ignored placeholder, batch true, and the requested polarity. "
-                + "Examples: ‘找附近的餐厅’ -> START_NEW plus requests [{requestId: r1, type: RECOMMENDATION, topic: '', target: {}, fact: DETAIL}]; "
-                + "‘第一家几点营业？’ -> CONTINUE plus requests [{requestId: r1, type: FACT, topic: '', target: {ordinal: 1}, fact: DETAIL}]; "
+                + "Examples: ‘找附近的餐厅’ -> CONTINUE/NONE plus requests [{requestId: r1, type: RECOMMENDATION, topic: '', target: {}, fact: DETAIL}]; runtime creates a task only when no active task exists. ‘新开一个任务找日料’ -> START_NEW/EXPLICIT_NEW_TASK. "
+                + "‘第一家几点营业？’ -> CONTINUE/NONE plus requests [{requestId: r1, type: FACT, topic: '', target: {ordinal: 1}, fact: DETAIL}]; "
                 + "‘第一家我不想要，排除掉’ -> CONTINUE plus feedback [{target: {ordinal: 1}, kind: REJECT, aspect: UNSPECIFIED, batch: false, polarity: NEGATIVE}]; "
-                + "‘恢复最早的推荐任务’ -> RESTORE plus references [{taskSelector: EARLIEST}] and requests []; "
+                + "‘预算不限’ -> CONTINUE plus cleared [BUDGET] and requests [{requestId: r1, type: RECOMMENDATION, topic: '', target: {}, fact: DETAIL}]; "
+                + "‘第一家太贵了’ -> CONTINUE plus feedback [{target: {ordinal: 1}, kind: CRITIQUE, aspect: PRICE, batch: false, polarity: NEGATIVE}] and requests []; "
+                + "‘第二家不错’ -> CONTINUE plus feedback [{target: {ordinal: 2}, kind: POSITIVE, aspect: UNSPECIFIED, batch: false, polarity: NEGATIVE}] and requests []; "
+                + "‘这几家都不喜欢’ -> CONTINUE plus feedback [{target: {}, kind: REJECT, aspect: UNSPECIFIED, batch: true, polarity: NEGATIVE}] and requests []; "
+                + "‘换一批’ -> CONTINUE plus requests [{requestId: r1, type: ALTERNATIVES, topic: '', target: {}, fact: DETAIL}]; "
+                + "‘恢复最早的推荐任务’ -> RESTORE/EXPLICIT_RESTORE plus references [{taskSelector: EARLIEST}] and requests []; "
                 + "‘再便宜一点’ -> CONTINUE plus relativePreferences [{dimension: PRICE, direction: LOWER}] and a RECOMMENDATION request with topic '', target {}, and fact DETAIL; "
                 + "For a conditional fallback such as ‘如果3公里内没有藏式火锅，就改找烧烤’, emit the initial criteria and exactly one RECOMMENDATION request, then conditionalRequirementChanges [{observedRequestId: r1, predicate: {type: RESULT_STATE, expected: EMPTY}, criteria: {cuisine: 烧烤}, cleared: []}]. The fallback criteria belongs only in conditionalRequirementChanges; it must not replace the initial criteria. "
-                + "‘介绍一下火锅历史’ -> START_NEW plus requests [{requestId: r1, type: GENERAL, topic: 火锅历史, target: {}, fact: DETAIL}]. "
+                + "‘介绍一下火锅历史’ -> CONTINUE/NONE plus requests [{requestId: r1, type: GENERAL, topic: 火锅历史, target: {}, fact: DETAIL}]. "
                 + "References may only be ordinal, focused, named, or task selector; never invent database ids. "
                 + "Return every root field required by the schema; use empty arrays when there is no value. "
                 + "Use null/omission for untouched criteria and cleared for explicit removal. "
+                + "A numeric budget stated as ‘以内’, ‘不超过’, or an unqualified replacement such as ‘预算改成150’ is a hard maximum: emit budgetHard. Use budgetSoft only when the user explicitly expresses a preference such as ‘大约’ or ‘最好在…左右’; never weaken a stated cap into budgetSoft. "
                 + (repair ? "Your previous output was invalid. For a conditional fallback, include its non-empty criteria and cleared fields. Return a complete function call and obey every enum and required field exactly." : "");
         JsonNode response = aiClient.chatCompletion(List.of(
                 Map.of("role", "system", "content", system),
@@ -231,7 +251,9 @@ public class SemanticInterpreter {
         Map<String, Object> criteria = Map.of("type", "object", "properties", Map.of(
                 "city", string, "district", string, "poi", string, "cuisine", string,
                 "excludedCuisines", Map.of("type", "array", "items", string),
-                "budgetSoft", number, "budgetHard", number, "distanceKm", number));
+                "budgetSoft", Map.of("type", "number", "description", "Preference target only; requires explicit approximate/preferred wording"),
+                "budgetHard", Map.of("type", "number", "description", "Mandatory maximum for stated budgets and all ‘以内/不超过/改成N’ constraints"),
+                "distanceKm", number));
         Map<String, Object> predicate = objectSchema(Map.of("type", enumString("RESULT_STATE", "BOOLEAN", "NUMERIC", "CATEGORY"),
                 "expected", string, "operator", enumString(ObservationPredicate.NumericOperator.values())), "type", "expected");
         Map<String, Object> relation = objectSchema(Map.of("observedRequestId", string,
@@ -255,6 +277,7 @@ public class SemanticInterpreter {
                 "target", "kind", "aspect", "batch", "polarity");
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("taskDirective", enumString(TaskDirective.values()));
+        properties.put("taskDirectiveEvidence", enumString("NONE", "EXPLICIT_NEW_TASK", "EXPLICIT_RESTORE", "EXPLICIT_ABANDON"));
         properties.put("criteria", criteria);
         properties.put("cleared", Map.of("type", "array", "items", enumString(RequirementChange.ClearedCriterion.values())));
         properties.put("relativePreferences", Map.of("type", "array", "items", relativePreference));
@@ -265,7 +288,7 @@ public class SemanticInterpreter {
         properties.put("relations", Map.of("type", "array", "items", relation));
         properties.put("conditionalRequirementChanges", Map.of("type", "array", "items", conditional));
         properties.put("references", Map.of("type", "array", "items", target));
-        return objectSchema(properties, "taskDirective", "cleared", "relativePreferences", "relaxationAuthorizations",
+        return objectSchema(properties, "taskDirective", "taskDirectiveEvidence", "cleared", "relativePreferences", "relaxationAuthorizations",
                 "requirementLocks", "feedback", "requests", "relations", "conditionalRequirementChanges", "references");
     }
 

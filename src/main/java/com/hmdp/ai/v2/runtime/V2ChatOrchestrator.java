@@ -56,6 +56,8 @@ public class V2ChatOrchestrator {
         conversationEventService.begin(chatId, (history == null ? 0 : history.size()) / 2 + 1);
         try {
             TurnSemantics semantics = semanticInterpreter.interpret(message);
+            conversationEventService.recordBestEffort(ConversationEventType.SEMANTIC_INTERPRETATION,
+                    com.hmdp.ai.runtime.ConversationEventStatus.SUCCESS, null, null, preEvent(semantics), null);
 
             PreOutcome pre = prePhase(request, chatId, semantics);
             ChatMessageResponse response;
@@ -80,7 +82,7 @@ public class V2ChatOrchestrator {
             if (built.response() != null) return new PreOutcome(null, built.response());
             try {
                 AiWorkingMemory committed = versions.append(chatId, userId(), loaded.version(), loaded.memory(),
-                        ConversationEventType.STATE_REDUCED, Map.of("phase", "V2_PRE"),
+                        ConversationEventType.STATE_REDUCED, preEvent(semantics),
                         Map.of("taskId", built.taskId()));
                 if (built.abandon()) return new PreOutcome(null, renderer.render(chatId,
                         new ResponseSpec(List.of(), null, null, null, null, "当前推荐任务已结束。", null)));
@@ -344,6 +346,62 @@ public class V2ChatOrchestrator {
         event.put("conditionalCriteriaApplied", run.execution().observations().stream().flatMap(o -> o.effects().stream())
                 .anyMatch(ExecutionAction.DomainEffect.ConditionalCriteriaApplied.class::isInstance));
         return event;
+    }
+
+    /** Trace-only semantic projection for evaluation; execution still consumes the typed TurnSemantics object. */
+    private Map<String, Object> preEvent(TurnSemantics semantics) {
+        Map<String, Object> semantic = new LinkedHashMap<>();
+        semantic.put("taskDirective", semantics.taskDirective().name());
+        semantic.put("taskDirectiveEvidence", semantics.taskDirectiveEvidence().name());
+        semantic.put("criteriaPatchCount", semantics.requirementChanges().stream()
+                .filter(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch.class::isInstance).count());
+        semantic.put("criteriaPatchDimensions", semantics.requirementChanges().stream()
+                .filter(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch.class::isInstance)
+                .map(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch.class::cast)
+                .flatMap(change -> changedDimensions(change).stream()).distinct().toList());
+        semantic.put("cleared", semantics.requirementChanges().stream()
+                .filter(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch.class::isInstance)
+                .map(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch.class::cast)
+                .flatMap(change -> change.cleared().stream()).map(Enum::name).toList());
+        semantic.put("relativePreferences", semantics.requirementChanges().stream()
+                .filter(com.hmdp.ai.v2.semantic.RequirementChange.RelativePreference.class::isInstance)
+                .map(com.hmdp.ai.v2.semantic.RequirementChange.RelativePreference.class::cast)
+                .map(change -> Map.of("dimension", change.dimension().name(), "direction", change.direction().name())).toList());
+        semantic.put("feedbackKinds", semantics.entityFeedback().stream()
+                .map(item -> item instanceof com.hmdp.ai.v2.semantic.EntityFeedback.EntityFeedbackItem entity
+                        ? entity.kind().name() : "BATCH_" + ((com.hmdp.ai.v2.semantic.EntityFeedback.BatchFeedback) item).polarity().name()).toList());
+        semantic.put("feedback", semantics.entityFeedback().stream().map(item -> {
+            if (item instanceof com.hmdp.ai.v2.semantic.EntityFeedback.EntityFeedbackItem entity)
+                return Map.of("scope", "ENTITY", "kind", entity.kind().name(), "aspect", entity.aspect().name(), "reference", entity.target().getClass().getSimpleName());
+            var batch = (com.hmdp.ai.v2.semantic.EntityFeedback.BatchFeedback) item;
+            return Map.of("scope", "BATCH", "polarity", batch.polarity().name(), "aspect", batch.aspect().name());
+        }).toList());
+        semantic.put("requestKinds", semantics.requests().stream().map(request -> request.getClass().getSimpleName()).toList());
+        semantic.put("referenceKinds", semanticReferences(semantics).stream().map(reference -> reference.getClass().getSimpleName()).toList());
+        semantic.put("relationCount", semantics.relations().size());
+        semantic.put("conditionalChangeCount", semantics.requirementChanges().stream()
+                .filter(com.hmdp.ai.v2.semantic.RequirementChange.ConditionalRequirementChange.class::isInstance).count());
+        return Map.of("phase", "V2_PRE", "semantic", semantic);
+    }
+
+    private List<String> changedDimensions(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch change) {
+        var patch = change.patch(); List<String> dimensions = new ArrayList<>();
+        if (patch.location() != null) dimensions.add("LOCATION"); if (patch.cuisine() != null) dimensions.add("CUISINE");
+        if (patch.budget() != null) dimensions.add("BUDGET"); if (patch.distance() != null) dimensions.add("DISTANCE");
+        if (patch.diningTime() != null) dimensions.add("DINING_TIME"); if (patch.semanticPreferences() != null) dimensions.add("SEMANTIC_PREFERENCES");
+        return dimensions;
+    }
+
+    private List<com.hmdp.ai.v2.semantic.EntityReference> semanticReferences(TurnSemantics semantics) {
+        List<com.hmdp.ai.v2.semantic.EntityReference> result = new ArrayList<>(semantics.references());
+        for (var feedback : semantics.entityFeedback()) if (feedback instanceof com.hmdp.ai.v2.semantic.EntityFeedback.EntityFeedbackItem entity) result.add(entity.target());
+        for (var request : semantics.requests()) {
+            if (request instanceof com.hmdp.ai.v2.semantic.UserRequest.FactQueryRequest fact) result.add(fact.target());
+            if (request instanceof com.hmdp.ai.v2.semantic.UserRequest.SelectRequest select) result.add(select.target());
+            if (request instanceof com.hmdp.ai.v2.semantic.UserRequest.SimilarRequest similar) result.add(similar.anchor());
+            if (request instanceof com.hmdp.ai.v2.semantic.UserRequest.ExploreRequest explore) result.add(explore.target());
+        }
+        return result;
     }
 
     private String chatId(ChatMessageRequest request) { return request.getChatId(); }

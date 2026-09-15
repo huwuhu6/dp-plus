@@ -110,3 +110,5 @@ ai:
   retrieval-strategy-version: structured-profile-evidence-vector-v3
   evaluation-dataset-version: seed-v2
   holdout-dataset-version: holdout-v1
+  conversation-evaluation-dataset-version: ${AI_CONVERSATION_EVALUATION_DATASET_VERSION:conversation-v2-main-v1}
+  conversation-holdout-dataset-version: ${AI_CONVERSATION_HOLDOUT_DATASET_VERSION:conversation-v2-holdout-v1}

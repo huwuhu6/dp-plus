@@ -28,6 +28,7 @@ class SemanticInterpreterTest {
         var semantics = interpreter.parse(mapper.readTree("""
                 {
                   "taskDirective":"CONTINUE",
+                  "taskDirectiveEvidence":"NONE",
                   "criteria":{"city":"福州","cuisine":"烧烤","budgetHard":100},
                   "relativePreferences":[{"dimension":"DISTANCE","direction":"LOWER"}],
                   "feedback":[{"target":{"ordinal":2},"kind":"CRITIQUE","aspect":"PRICE","batch":false,"polarity":"NEGATIVE"}],
@@ -53,6 +54,7 @@ class SemanticInterpreterTest {
         var semantics = interpreter.parse(mapper.readTree("""
                 {
                   "taskDirective":"RESTORE",
+                  "taskDirectiveEvidence":"EXPLICIT_RESTORE",
                   "cleared":["BUDGET"],
                   "references":[{"taskSelector":"MATCH_CONTEXT","goalCategory":"DINING","city":"福州"}]
                 }
@@ -71,6 +73,7 @@ class SemanticInterpreterTest {
         var semantics = interpreter.parse(mapper.readTree("""
                 {
                   "taskDirective":"CONTINUE",
+                  "taskDirectiveEvidence":"NONE",
                   "criteria":{"cuisine":"藏式火锅","distanceKm":3},
                   "requests":[{"requestId":"r1","type":"RECOMMENDATION"}],
                   "conditionalRequirementChanges":[{
@@ -101,7 +104,7 @@ class SemanticInterpreterTest {
         SemanticInterpreter interpreter = new SemanticInterpreter();
         Map<String, Object> schema = (Map<String, Object>) ReflectionTestUtils.invokeMethod(interpreter, "schema");
         Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
-        assertEquals(List.of("taskDirective", "cleared", "relativePreferences", "relaxationAuthorizations",
+        assertEquals(List.of("taskDirective", "taskDirectiveEvidence", "cleared", "relativePreferences", "relaxationAuthorizations",
                 "requirementLocks", "feedback", "requests", "relations", "conditionalRequirementChanges", "references"),
                 schema.get("required"));
 
@@ -126,5 +129,13 @@ class SemanticInterpreterTest {
         Map<String, Object> conditionals = (Map<String, Object>) properties.get("conditionalRequirementChanges");
         Map<String, Object> conditionalItem = (Map<String, Object>) conditionals.get("items");
         assertEquals(List.of("observedRequestId", "predicate", "criteria", "cleared"), conditionalItem.get("required"));
+    }
+
+    @Test
+    void rejectsTaskDirectiveWithoutMatchingExplicitEvidence() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> interpreter.parse(mapper.readTree("""
+                {"taskDirective":"START_NEW","taskDirectiveEvidence":"NONE"}
+                """)));
     }
 }
