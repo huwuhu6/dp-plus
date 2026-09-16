@@ -17,7 +17,7 @@ public final class V2DatasetValidator {
             "focusedShop", Set.of("CHANGED", "PRESERVED"),
             "decisionSession", Set.of("SAME", "CHANGED"),
             "groundedOrdinal", Set.of("EQUALS_VISIBLE"));
-    private static final Set<String> PATHS = Set.of("taskId", "taskLifecycle", "affectedTaskId", "affectedTaskLifecycle", "criteria", "relativePreferences", "searchAnchor", "currentVisibleShopIds", "groundedEntities", "feedbackLedger", "rejectedShopIds", "relaxable", "locked", "selectedShopId", "executedActions", "conditionalCriteriaApplied", "finalCandidates", "verifiedCandidateIds", "verificationFailures", "replanned", "staleSuppressed", "decisionStatus", "semantic");
+    private static final Set<String> PATHS = Set.of("taskId", "taskLifecycle", "affectedTaskId", "affectedTaskLifecycle", "criteria", "relativePreferences", "searchAnchor", "currentVisibleShopIds", "groundedEntities", "feedbackLedger", "rejectedShopIds", "relaxable", "locked", "selectedShopId", "executedActions", "conditionalCriteriaApplied", "finalCandidates", "verifiedCandidateIds", "verificationStatus", "hardConstraintsVerified", "verificationFailures", "replanned", "staleSuppressed", "decisionStatus", "semantic");
     private V2DatasetValidator() { }
 
     public static void validate(String version, List<AiConversationEvaluationCase> cases, ObjectMapper mapper) {

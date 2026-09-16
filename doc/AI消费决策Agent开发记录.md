@@ -1,5 +1,13 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-16：补齐 audited Main V2 评测资产
+
+新增 `conversation-v2-main-v2`（23 条）作为开发期可见的 V2 contract regression benchmark，不从 MySQL 回退加载。它保留唯一 final-status，覆盖 criteria overwrite/clear/relative/multi patch、task restore/abandon、visible-batch ordinal identity、reject/critique/batch feedback、alternatives、location anchor/clarification、hard criteria、条件语义及 controlled unsupported。候选排序与具体 shopId 均不作为 gold。
+
+条件 fallback 的实际执行依赖 live world result，因此只将固定语义与原始 hard distance 计入 Main；fallback result 不进入 scored denominator。硬约束候选事实仍由确定性 verifier fixture 测试覆盖。跨轮 relation 和 turn-state mismatch 现在纳入 case failure，避免 Main 声明的 identity/invalidation 仅停留在 diagnostics。
+
+旧 `conversation-v2-holdout-v1` 已固定标记为 `CONTAMINATED / DIAGNOSTIC_ONLY`，不得作为最终 gate 或 Production 调整依据；最终 Production SHA 冻结后再创建全新的 `conversation-v2-holdout-v2`。定向 clean 验证通过：`V2DatasetValidatorTest`、`ConversationEvaluationDatasetLoaderV2Test`、`AiConversationEvaluationServiceTest`、V2 OCC/runtime/verifier 测试。
+
 ## 2026-09-15：V2 评测校准——验证真值与跨轮 ordinal identity
 
 评测执行结果增加仅用于审计的 `VerificationStatus`：无检索为 `NOT_APPLICABLE`，检索执行失败或没有进入 verifier 为 `NOT_EXECUTED`，只有 verifier 实际检查过候选后才可能为 `VERIFIED_PASS` 或 `VERIFIED_FAIL`。`hardConstraintsVerified` 因而只在 `VERIFIED_PASS` 时为真，避免“空候选/运行时失败但 failure list 为空”被误报为硬约束通过；该状态只写入既有事件审计投影，不进入 Working Memory 或其他 durable domain state。

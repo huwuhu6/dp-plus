@@ -21,4 +21,21 @@ class ConversationEvaluationDatasetLoaderV2Test {
         assertTrue(relativeCase.getExpectedV2OutcomesJson().contains("\"absent\":true"));
         assertFalse(relativeCase.getExpectedV2OutcomesJson().contains("\"null\":true"));
     }
+
+    @Test
+    void auditedMainDatasetIsLoadableAndContainsScoredIdentityAndVerificationContracts() {
+        ConversationEvaluationDatasetLoader loader = new ConversationEvaluationDatasetLoader();
+        ReflectionTestUtils.setField(loader, "objectMapper", new ObjectMapper());
+
+        var cases = loader.loadCases("conversation-v2-main-v2");
+
+        assertTrue(cases.size() >= 20);
+        assertTrue(cases.stream().noneMatch(item -> item.getExpectedFinalStatus() != null && item.getExpectedFinalStatus().contains("|")));
+        AiConversationEvaluationCase ordinal = cases.stream().filter(item -> item.getCaseCode().equals("MAIN_V2_REFERENCE_FIRST_IDENTITY"))
+                .findFirst().orElseThrow();
+        assertTrue(ordinal.getExpectedRelationsJson().contains("groundedOrdinal"));
+        AiConversationEvaluationCase verification = cases.stream().filter(item -> item.getCaseCode().equals("MAIN_V2_VERIFICATION_UNSUPPORTED"))
+                .findFirst().orElseThrow();
+        assertTrue(verification.getExpectedV2OutcomesJson().contains("verificationStatus"));
+    }
 }

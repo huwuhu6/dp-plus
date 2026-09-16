@@ -995,6 +995,7 @@ public class AiConversationEvaluationService {
         return !Boolean.TRUE.equals(result.getLocalityMatched())
                 || !Boolean.TRUE.equals(result.getFinalStatusMatched())
                 || !Boolean.TRUE.equals(result.getShopMatched())
+                || Boolean.FALSE.equals(result.getMemoryMatched())
                 || Boolean.FALSE.equals(result.getRecoveryMatched())
                 || Boolean.FALSE.equals(result.getUnseenRecommendationsMatched())
                 || Boolean.FALSE.equals(result.getV2OutcomeMatched())
