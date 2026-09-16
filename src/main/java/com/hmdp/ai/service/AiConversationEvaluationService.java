@@ -16,6 +16,7 @@ import com.hmdp.ai.dto.ConversationWorkingMemory;
 import com.hmdp.ai.dto.DecisionTaskState;
 import com.hmdp.ai.dto.RecommendationBatch;
 import com.hmdp.ai.dto.RecommendationCandidateRef;
+import com.hmdp.ai.v2.runtime.SemanticInterpreter;
 import com.hmdp.ai.entity.AiConversationEvaluationCase;
 import com.hmdp.ai.entity.AiConversationEvaluationCaseResult;
 import com.hmdp.ai.entity.AiConversationEvaluationRun;
@@ -54,6 +55,7 @@ import java.util.stream.Collectors;
 @Service
 public class AiConversationEvaluationService {
     @Resource private ChatOrchestrationService chatOrchestrationService;
+    @Resource private SemanticInterpreter semanticInterpreter;
     @Resource private AiConversationEvaluationCaseMapper caseMapper;
     @Resource private ConversationEvaluationDatasetLoader datasetLoader;
     @Resource private AiConversationEvaluationRunMapper runMapper;
@@ -99,11 +101,16 @@ public class AiConversationEvaluationService {
     /** Development-oriented subset run; case codes remain resolved from the versioned JSONL dataset. */
     public ConversationEvaluationRunResponse submitRobustnessCases(Set<String> caseCodes) {
         String datasetVersion = aiProperties.getConversationRobustnessDatasetVersion();
+        return submitDatasetCases(datasetVersion, caseCodes);
+    }
+
+    /** Evaluation-only subset runner; it reads the immutable versioned dataset and has no production state effect. */
+    public ConversationEvaluationRunResponse submitDatasetCases(String datasetVersion, Set<String> caseCodes) {
         if (caseCodes == null || caseCodes.isEmpty()) return submitCases(datasetVersion);
         List<AiConversationEvaluationCase> cases = activeCases(datasetVersion).stream()
                 .filter(item -> caseCodes.contains(item.getCaseCode()))
                 .collect(Collectors.toList());
-        if (cases.size() != caseCodes.size()) throw new IllegalArgumentException("存在未找到的 robustness caseCode");
+        if (cases.size() != caseCodes.size()) throw new IllegalArgumentException("存在未找到的 evaluation caseCode");
         AiConversationEvaluationRun run = createRun(datasetVersion, cases);
         UserDTOSnapshot submitter = UserDTOSnapshot.capture(UserHolder.getUser());
         evaluationExecutor.execute(() -> executeAsync(run, cases, submitter));
@@ -345,6 +352,7 @@ public class AiConversationEvaluationService {
                     Map<String, Object> output = new LinkedHashMap<>();
                     output.put("route", "ERROR");
                     output.put("error", compact(turnError.getMessage()));
+                    output.put("semanticAttempts", semanticInterpreter.takeEvaluationAttempts());
                     output.put("stages", stageTrace);
                     output.put("modelCalls", modelCallObservationSnapshot());
                     outputs.add(output);
@@ -378,6 +386,7 @@ public class AiConversationEvaluationService {
                 output.put("decisionStatus", response.getDecisionStatus());
                 output.put("answer", compact(response.getAnswer()));
                 output.put("traceIncomplete", Boolean.TRUE.equals(response.getTraceIncomplete()));
+                output.put("semanticAttempts", semanticInterpreter.takeEvaluationAttempts());
                 output.put("stages", stageTrace);
                 output.put("modelCalls", modelCallObservationSnapshot());
                 outputs.add(output);

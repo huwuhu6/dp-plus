@@ -58,6 +58,11 @@ public class AiEvaluationController {
         return Result.ok(conversationEvaluationService.submitRobustnessCases(caseCodes));
     }
 
+    @PostMapping("/conversation-runs/subset")
+    public Result runConversationSubset(@RequestParam String datasetVersion, @RequestParam java.util.Set<String> caseCodes) {
+        return Result.ok(conversationEvaluationService.submitDatasetCases(datasetVersion, caseCodes));
+    }
+
     @GetMapping("/conversation-runs/{runId}")
     public Result getConversationRun(@PathVariable Long runId) {
         return Result.ok(conversationEvaluationService.getRun(runId));

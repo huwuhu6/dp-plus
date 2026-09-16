@@ -24,6 +24,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The model is only allowed to describe user meaning.  It cannot name durable
@@ -35,9 +37,18 @@ public class SemanticInterpreter {
     private static final String FUNCTION = "submit_turn_semantics";
     @Resource private OpenAiCompatibleClient aiClient;
     @Resource private ObjectMapper objectMapper;
+    private final ThreadLocal<List<Map<String, Object>>> evaluationAttempts = ThreadLocal.withInitial(ArrayList::new);
+
+    /** Evaluation-only request trace; it is never reducer input or durable domain state. */
+    public List<Map<String, Object>> takeEvaluationAttempts() {
+        List<Map<String, Object>> attempts = List.copyOf(evaluationAttempts.get());
+        evaluationAttempts.remove();
+        return attempts;
+    }
 
     public TurnSemantics interpret(String userTurn) {
         if (userTurn == null || userTurn.isBlank()) throw new IllegalArgumentException("message cannot be blank");
+        evaluationAttempts.remove();
         try {
             return parseAndValidate(userTurn);
         } catch (RuntimeException firstFailure) {
@@ -54,7 +65,9 @@ public class SemanticInterpreter {
 
     private TurnSemantics parseAndValidate(String userTurn) { return parseAndValidate(userTurn, null); }
     private TurnSemantics parseAndValidate(String userTurn, Violation repair) {
-        TurnSemantics semantics = parse(call(userTurn, repair));
+        CallResult call = call(userTurn, repair);
+        try {
+        TurnSemantics semantics = normalizeDeterministicBudget(userTurn, parse(call.root()));
         if (requiresHardBudget(userTurn) && !hasHardBudget(semantics)) throw violation(Violation.HARD_BUDGET_REQUIRED);
         if (requiresBudgetClear(userTurn) && !hasBudgetClearWithoutReplacement(semantics)) throw violation(Violation.BUDGET_CLEAR_REQUIRED);
         if (requiresConditionalFallback(userTurn) && semantics.requirementChanges().stream()
@@ -65,7 +78,12 @@ public class SemanticInterpreter {
             // Treat it as invalid so the existing repair call can obtain a complete semantic contract.
             throw violation(Violation.CONDITIONAL_FALLBACK_REQUIRED);
         }
+        recordEvaluationAttempt(repair, call.arguments(), "VALID");
         return semantics;
+        } catch (RuntimeException failure) {
+            recordEvaluationAttempt(repair, call.arguments(), violationOf(failure).name());
+            throw failure;
+        }
     }
 
     private boolean requiresConditionalFallback(String userTurn) {
@@ -75,6 +93,36 @@ public class SemanticInterpreter {
         return userTurn.matches("(?s).*(?:人均|预算|消费)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?(?:以内|以下).*?")
                 || userTurn.matches("(?s).*(?:人均|预算|消费)[^\\d]{0,12}(?:不超过|最多|上限)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?.*")
                 || userTurn.matches("(?s).*预算[^\\d]{0,12}(?:改成|改为|调整为|设为|提高到|降到)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?.*");
+    }
+    /** High-confidence numeric budget forms are normalized before reduction; ambiguous price language remains model-owned. */
+    private TurnSemantics normalizeDeterministicBudget(String userTurn, TurnSemantics semantics) {
+        if (!requiresHardBudget(userTurn) && !requiresBudgetClear(userTurn)) return semantics;
+        List<RequirementChange> changes = new ArrayList<>();
+        for (RequirementChange change : semantics.requirementChanges()) {
+            if (change instanceof RequirementChange.CriteriaPatch criteria && requiresBudgetClear(userTurn)) {
+                DiningCriteriaPatch patch = criteria.patch();
+                changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(patch.location(), patch.cuisine(), null,
+                        patch.distance(), patch.diningTime(), patch.semanticPreferences()), unionBudgetClear(criteria.cleared())));
+            } else changes.add(change);
+        }
+        if (requiresBudgetClear(userTurn)) {
+            if (changes.stream().noneMatch(RequirementChange.CriteriaPatch.class::isInstance))
+                changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(null, null, null, null, null, null), Set.of(RequirementChange.ClearedCriterion.BUDGET)));
+        } else if (!hasHardBudget(semantics)) {
+            changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(null, null,
+                    new DiningCriteria.BudgetCriteria(null, hardBudgetValue(userTurn)), null, null, null), Set.of()));
+        }
+        return new TurnSemantics(semantics.taskDirective(), semantics.taskDirectiveEvidence(), changes, semantics.entityFeedback(), semantics.requests(), semantics.relations(), semantics.references());
+    }
+    private Set<RequirementChange.ClearedCriterion> unionBudgetClear(Set<RequirementChange.ClearedCriterion> cleared) {
+        java.util.EnumSet<RequirementChange.ClearedCriterion> result = java.util.EnumSet.noneOf(RequirementChange.ClearedCriterion.class);
+        result.addAll(cleared); result.add(RequirementChange.ClearedCriterion.BUDGET); return result;
+    }
+    private BigDecimal hardBudgetValue(String userTurn) {
+        Pattern pattern = Pattern.compile("(?:人均|预算|消费)[^\\d]{0,12}(?:不超过|最多|上限|改成|改为|调整为|设为|提高到|降到)?[^\\d]{0,12}(\\d+(?:\\.\\d+)?)");
+        Matcher matcher = pattern.matcher(userTurn);
+        if (!matcher.find()) throw new IllegalStateException("hard budget detector and extractor disagree");
+        return new BigDecimal(matcher.group(1));
     }
     private boolean requiresBudgetClear(String userTurn) {
         return userTurn.matches("(?s).*(?:预算不限|不限预算|不要预算限制|取消预算限制|去掉预算条件).*");
@@ -141,7 +189,7 @@ public class SemanticInterpreter {
         if (expected != evidence) throw new IllegalArgumentException("taskDirective lacks matching explicit evidence");
     }
 
-    private JsonNode call(String userTurn, Violation repair) {
+    private CallResult call(String userTurn, Violation repair) {
         Map<String, Object> function = new LinkedHashMap<>();
         function.put("name", FUNCTION);
         function.put("description", "Return canonical dining user semantics. Never return ids, plans, tools, SQL, or mutations.");
@@ -182,11 +230,16 @@ public class SemanticInterpreter {
                 .path(0).path("function").path("arguments").asText();
         if (arguments.isBlank()) throw new IllegalArgumentException("model returned no semantics");
         try {
-            return objectMapper.readTree(arguments);
+            return new CallResult(objectMapper.readTree(arguments), arguments);
         } catch (Exception e) {
             throw new IllegalArgumentException("model returned invalid semantic json", e);
         }
     }
+    private void recordEvaluationAttempt(Violation repair, String arguments, String validationResult) {
+        evaluationAttempts.get().add(Map.of("attempt", repair == null ? "FIRST" : "REPAIR", "violation", repair == null ? "NONE" : repair.name(),
+                "functionArguments", arguments, "validationResult", validationResult));
+    }
+    private record CallResult(JsonNode root, String arguments) { }
 
     private DiningCriteriaPatch criteriaPatch(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) return new DiningCriteriaPatch(null, null, null, null, null, null);
