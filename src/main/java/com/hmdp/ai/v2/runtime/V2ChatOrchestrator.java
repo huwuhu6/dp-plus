@@ -85,7 +85,7 @@ public class V2ChatOrchestrator {
                         ConversationEventType.STATE_REDUCED, preEvent(semantics),
                         Map.of("taskId", built.taskId()));
                 if (built.abandon()) return new PreOutcome(null, renderer.render(chatId,
-                        new ResponseSpec(List.of(), null, null, null, null, "当前推荐任务已结束。", null)));
+                        ResponseSpec.completed("当前推荐任务已结束。")));
                 PlanningSnapshot snapshot = snapshot(built.task(), loaded.memory(), committed.getVersion());
                 return new PreOutcome(new PreparedTurn(loaded.memory(), committed.getVersion(), built.taskId(),
                         loaded.memory().getActiveTaskId(), semantics, built.grounded(), snapshot), null);
@@ -334,7 +334,7 @@ public class V2ChatOrchestrator {
 
     private ChatMessageResponse retryResponse(String chatId) {
         return renderer.render(chatId, new ResponseSpec(List.of(), null, null, null, null, null,
-                "对话状态刚刚更新，本轮结果未展示，请重试这句话。", false, true));
+                "对话状态刚刚更新，本轮结果未展示，请重试这句话。", null, false, true));
     }
 
     private Map<String, Object> postEvent(PreparedTurn prepared, PlanRun run, String phase, boolean replanned) {

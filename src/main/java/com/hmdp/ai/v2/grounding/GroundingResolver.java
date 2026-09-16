@@ -43,6 +43,13 @@ public final class GroundingResolver {
             if (batch == null || batch.candidates().size() < ordinal.ordinal()) throw new ReferenceIssue(Ambiguity.Kind.UNRESOLVED_REFERENCE, "ordinal reference is not in current visible batch");
             return new GroundedReference.ShopIdentity(batch.candidates().get(ordinal.ordinal() - 1).shopId(), batch.batchId(), ordinal.ordinal());
         }
+        if (ref instanceof EntityReference.LastVisibleRef) {
+            TaskView.RecommendationBatchView batch = task.currentVisibleBatch();
+            if (batch == null || batch.candidates().isEmpty())
+                throw new ReferenceIssue(Ambiguity.Kind.UNRESOLVED_REFERENCE, "last visible reference has no current visible batch");
+            int ordinal = batch.candidates().size();
+            return new GroundedReference.ShopIdentity(batch.candidates().get(ordinal - 1).shopId(), batch.batchId(), ordinal);
+        }
         if (ref instanceof EntityReference.FocusedEntityRef && task.focusedShopId() != null)
             return new GroundedReference.ShopIdentity(task.focusedShopId(), null, 0);
         if (ref instanceof EntityReference.NamedEntityRef named) {

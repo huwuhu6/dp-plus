@@ -47,13 +47,31 @@ class V2LocationResolverTest {
 
     @Test
     void explicitAdministrativeScopeIsPreservedSeparatelyFromPreviousExecutionAnchor() {
-        V2LocationResolver resolver = new V2LocationResolver(null);
+        LocationResolutionProvider provider = mock(LocationResolutionProvider.class);
+        when(provider.isAvailable()).thenReturn(true);
+        ResolvedLocationCandidate district = candidate("district", "福州市鼓楼区", "福州市"); district.setDistrict("鼓楼区");
+        when(provider.resolve(any(LocationResolutionRequest.class))).thenReturn(List.of(district));
+        V2LocationResolver resolver = new V2LocationResolver(provider);
         SearchAnchor previous = new SearchAnchor("poi", "旧地点", 1D, 1D, null, "旧城市", null, SearchAnchor.AnchorSource.POI);
         var resolved = (V2LocationResolver.Resolution.Resolved) resolver.resolve(
                 criteria(new DiningCriteria.LocationCriteria("福州市", "鼓楼区", null), null), null, previous);
         assertNull(resolved.anchor().latitude());
         assertEquals("福州市", resolved.anchor().city());
         assertEquals("鼓楼区", resolved.anchor().district());
+    }
+
+    @Test
+    void unverifiedDistrictLabelClarifiesInsteadOfBecomingAdministrativeScope() {
+        LocationResolutionProvider provider = mock(LocationResolutionProvider.class);
+        when(provider.isAvailable()).thenReturn(true);
+        when(provider.resolve(any(LocationResolutionRequest.class))).thenReturn(List.of());
+        V2LocationResolver resolver = new V2LocationResolver(provider);
+        assertInstanceOf(V2LocationResolver.Resolution.NeedsClarification.class,
+                resolver.resolve(criteria(new DiningCriteria.LocationCriteria(null, "任意地点名", null), null), null, null));
+        ResolvedLocationCandidate wrongDistrict = candidate("p", "某个地点", "福州市"); wrongDistrict.setDistrict("鼓楼区");
+        when(provider.resolve(any(LocationResolutionRequest.class))).thenReturn(List.of(wrongDistrict));
+        assertInstanceOf(V2LocationResolver.Resolution.NeedsClarification.class,
+                resolver.resolve(criteria(new DiningCriteria.LocationCriteria(null, "仓山区", null), null), null, null));
     }
 
     private DiningCriteria criteria(DiningCriteria.LocationCriteria location, DiningCriteria.DistanceCriteria distance) {

@@ -28,6 +28,13 @@ import static org.mockito.Mockito.*;
 
 class V2ChatOrchestratorOccTest {
     @Test
+    void completedAcknowledgementDoesNotMasqueradeAsClarification() {
+        ChatMessageResponse response = new V2ResponseRenderer().render("chat", ResponseSpec.completed("任务已结束。"));
+        assertEquals("COMPLETED", response.getDecision().getStatus());
+        assertEquals("任务已结束。", response.getAnswer());
+    }
+
+    @Test
     void postConflictReplansWithoutRepeatingPreMutationAndHidesUncommittedCandidates() throws Exception {
         ObjectMapper json = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         SemanticInterpreter interpreter = mock(SemanticInterpreter.class);

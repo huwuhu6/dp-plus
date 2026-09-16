@@ -59,6 +59,8 @@ public class V2LocationResolver {
         }
 
         if (explicitArea) {
+            if (hasText(requested.district()) && !verifiedAdministrativeDistrict(requested, device))
+                return new Resolution.NeedsClarification("无法验证“" + requested.district() + "”是唯一的行政区，请补充城市或明确地点。");
             // An administrative scope is sufficient for city/district search; no guessed center point is created.
             if (validCoordinates(device))
                 return new Resolution.Resolved(new SearchAnchor(null, "当前位置", device.getLatitude(), device.getLongitude(),
@@ -81,6 +83,20 @@ public class V2LocationResolver {
 
     private boolean requiresDistance(DiningCriteria criteria) {
         return criteria != null && criteria.distance() != null && criteria.distance().hardMaxKm() != null;
+    }
+    /** A model label is not an administrative identity.  Trust a district only after the location provider resolves it uniquely. */
+    private boolean verifiedAdministrativeDistrict(DiningCriteria.LocationCriteria requested, ChatLocationInput device) {
+        if (locations == null || !locations.isAvailable()) return false;
+        LocationResolutionContext context = new LocationResolutionContext();
+        context.setActiveCity(requested.city());
+        if (validCoordinates(device)) {
+            context.setDeviceLatitude(device.getLatitude());
+            context.setDeviceLongitude(device.getLongitude());
+        }
+        String query = hasText(requested.city()) ? requested.city() + requested.district() : requested.district();
+        List<ResolvedLocationCandidate> candidates = locations.resolve(new LocationResolutionRequest(query, context, "DISTRICT"));
+        return candidates != null && candidates.size() == 1 && hasText(candidates.getFirst().getDistrict())
+                && candidates.getFirst().getDistrict().equals(requested.district());
     }
     private boolean validCoordinates(ChatLocationInput input) {
         return input != null && input.getLatitude() != null && input.getLongitude() != null

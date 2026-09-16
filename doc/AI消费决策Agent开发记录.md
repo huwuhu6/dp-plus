@@ -2458,3 +2458,11 @@ Run139/Run140 复核发现，Turn Semantics 已经能够对引用态事实问题
 在已有 Task 城市或设备位置时，命名 POI 的当前轮显式行政前缀必须覆盖旧地理 bias；否则“北京农大”可能沿用福州上下文。`ChatOrchestrationService` 现在只在结构化 `targetArea` 恰好等于城市前缀后的余缀时接受该前缀，并通过 `AdministrativeRegionResolver.resolveGeographicContextPrefix()` 校验城市/省份身份；因此“北京农大”可切换到北京市，而“福州大学”不会被拆成“福州”加“大学”。设备坐标仍只用于 POI 候选消歧，不覆盖命名 POI 搜索锚点。
 
 定向 Location/Orchestration 测试全部通过（409 tests，0 failures、0 errors、3 skipped；其中 `AmapPoiSearchProviderTest` 6、`AmapMcpLocationResolutionServiceTest` 4、`AdministrativeRegionResolverTest` 11、`ChatOrchestrationServiceTest` 52）。不泄露密钥的高德 HTTP smoke：福州限定 Text Search 命中福建理工大学多校区，福州坐标 Around Search 命中福建农林大学福州大学城校区；无上下文 Text Search 返回多校区候选，应用层应继续澄清。应用级启动因本机 Milvus `127.0.0.1:19530` 不可用而未完成，未运行三套 full regression。
+
+### V2 Final Main Run169 语义与 grounding correctness 收口（2026-09-16）
+
+Run169 的持久化 `MAIN_V2_REFERENCE_LAST_IDENTITY` ERROR 在 SemanticInterpreter 的 parse/repair 阶段发生，未生成 semantic event、grounded identity、execution observation 或 evaluation snapshot；因此不是 evaluator defect，也未改动冻结的 Main V2 asset、gold、assertion 或 denominator。引用模型新增结构化 `LastVisibleRef`，由 GroundingResolver 从当前 visible batch 的末项确定 shop identity 和 ordinal，模型不再猜测 batch 长度。
+
+同时收敛了四类 production contract：COMPARE 进入现有 CompareAction controlled-unsupported 路径，明确无界研究进入既有 Explore/Adaptive unsupported 路径；RESTORE 在用户未唯一指明历史任务时可保持无 selector，并由 EffectiveTaskContextResolver 返回 clarification；成功 ABANDON 使用 closed-world completion message，不再错误占用 clarification 字段。语义解析忽略空 location patch，并要求显式预算上限产出 `budgetHard`；地点解析不再把模型给出的任意 district 当行政身份，必须经 provider 唯一验证。新增 parser、visible-reference、location 和 renderer 的同类变体回归。
+
+`mvn -q clean -Dtest=SemanticInterpreterTest,V2DomainGoldenTest,V2LocationResolverTest,V2ChatOrchestratorOccTest,V2RuntimeHardeningTest,V2DatasetValidatorTest,ConversationEvaluationDatasetLoaderV2Test,AiConversationEvaluationServiceTest,DeterministicResultVerifierTest test` 与完整 `mvn -q clean test` 均通过。Final Main 尚未发起：本地 MySQL 当前拒绝既有空密码连接，项目 `.env` 也未提供实际 DB 值，同时 Docker Desktop 不可用；这是评测基础设施阻塞，未产生新的 Run 或读取 Holdout。

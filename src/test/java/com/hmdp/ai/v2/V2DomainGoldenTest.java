@@ -52,6 +52,17 @@ class V2DomainGoldenTest {
         assertEquals(102L, ((GroundedReference.ShopIdentity) new GroundingResolver().ground(turn, context).requests().getFirst().operands().getFirst()).shopId());
     }
 
+    @Test void lastVisibleReferenceGroundsFromProjectionRatherThanModelOrdinal() {
+        TaskView task = task("A", 1, "福州", 101, 102, 103);
+        TurnSemantics turn = turn(List.of(), List.of(), List.of(
+                new UserRequest.FactQueryRequest("last", new EntityReference.LastVisibleRef(), UserRequest.FactType.DISTANCE)));
+        GroundedReference.ShopIdentity grounded = (GroundedReference.ShopIdentity) ground(turn, task).requests().getFirst().operands().getFirst();
+        assertEquals(103L, grounded.shopId()); assertEquals(3, grounded.ordinal());
+        TaskView changedBatch = task("A", 1, "福州", 201, 202);
+        GroundedReference.ShopIdentity variant = (GroundedReference.ShopIdentity) ground(turn, changedBatch).requests().getFirst().operands().getFirst();
+        assertEquals(202L, variant.shopId()); assertEquals(2, variant.ordinal());
+    }
+
     @Test void batchFeedbackBindsCurrentVisibleBatchOnly() {
         TurnSemantics turn = turn(List.of(), List.of(new EntityFeedback.BatchFeedback(new BatchRef(BatchRef.BatchSelector.CURRENT_VISIBLE), EntityFeedback.BatchPolarity.NEGATIVE, EntityFeedback.FeedbackAspect.UNSPECIFIED)), List.of());
         GroundedTurn grounded = ground(turn, task("A", 1, "福州", 1, 2));

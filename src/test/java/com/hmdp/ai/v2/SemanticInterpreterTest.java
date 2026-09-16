@@ -68,6 +68,53 @@ class SemanticInterpreterTest {
     }
 
     @Test
+    void parsesCompareLastVisibleAndKeepsBlankLocationUntouched() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        var semantics = interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE",
+                 "criteria":{"city":"","poi":""},
+                 "requests":[{"requestId":"compare","type":"COMPARE","target":{},"fact":"DETAIL",
+                   "targets":[{"ordinal":1},{"lastVisible":true}],"dimensions":["DISTANCE","REVIEW"]}]}
+                """));
+        RequirementChange.CriteriaPatch patch = assertInstanceOf(RequirementChange.CriteriaPatch.class,
+                semantics.requirementChanges().getFirst());
+        assertEquals(null, patch.patch().location());
+        UserRequest.CompareRequest compare = assertInstanceOf(UserRequest.CompareRequest.class, semantics.requests().getFirst());
+        assertEquals(2, compare.targets().size());
+        assertInstanceOf(EntityReference.LastVisibleRef.class, compare.targets().get(1));
+        assertEquals(List.of(UserRequest.FactType.DISTANCE, UserRequest.FactType.REVIEW), compare.dimensions());
+    }
+
+    @Test
+    void preservesHardBudgetAndParsesUnboundedExploreContract() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        var budget = interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE",
+                 "criteria":{"budgetHard":150},"requests":[{"requestId":"r","type":"RECOMMENDATION","target":{},"fact":"DETAIL","topic":""}]}
+                """));
+        RequirementChange.CriteriaPatch budgetPatch = assertInstanceOf(RequirementChange.CriteriaPatch.class,
+                budget.requirementChanges().getFirst());
+        assertEquals(new BigDecimal("150"), budgetPatch.patch().budget().hardMax());
+        var explore = interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE",
+                 "requests":[{"requestId":"e","type":"EXPLORE","target":{"lastVisible":true},"fact":"EVIDENCE","topic":"","unboundedContinuation":true}]}
+                """));
+        UserRequest.ExploreRequest request = assertInstanceOf(UserRequest.ExploreRequest.class, explore.requests().getFirst());
+        assertTrue(request.unboundedContinuation());
+        assertInstanceOf(EntityReference.LastVisibleRef.class, request.target());
+    }
+
+    @Test
+    void allowsRestoreWithoutSelectorForRuntimeClarification() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        var semantics = interpreter.parse(mapper.readTree("""
+                {"taskDirective":"RESTORE","taskDirectiveEvidence":"EXPLICIT_RESTORE"}
+                """));
+        assertEquals(TaskDirective.RESTORE, semantics.taskDirective());
+        assertTrue(semantics.references().isEmpty());
+    }
+
+    @Test
     void parsesConditionalFallbackAsAnObservationBoundCriteriaChange() throws Exception {
         SemanticInterpreter interpreter = new SemanticInterpreter();
         var semantics = interpreter.parse(mapper.readTree("""
@@ -123,7 +170,7 @@ class SemanticInterpreterTest {
         Map<String, Object> requestItem = (Map<String, Object>) requests.get("items");
         assertEquals(List.of("requestId", "type", "topic", "target", "fact"), requestItem.get("required"));
         Map<String, Object> requestProperties = (Map<String, Object>) requestItem.get("properties");
-        assertEquals(List.of("RECOMMENDATION", "ALTERNATIVES", "FACT", "SELECT", "SIMILAR", "EXPLORE", "GENERAL"),
+        assertEquals(List.of("RECOMMENDATION", "ALTERNATIVES", "FACT", "COMPARE", "SELECT", "SIMILAR", "EXPLORE", "GENERAL"),
                 ((Map<String, Object>) requestProperties.get("type")).get("enum"));
 
         Map<String, Object> conditionals = (Map<String, Object>) properties.get("conditionalRequirementChanges");

@@ -20,6 +20,7 @@ public class V2ResponseRenderer {
         else if (spec.selectedShopId() != null) response.setAnswer(spec.selectedShopName() == null ? "已选定该商户。" : "已为你选定：" + spec.selectedShopName());
         else if (spec.generalAnswer() != null) response.setAnswer(spec.generalAnswer());
         else if (spec.clarification() != null) response.setAnswer(spec.clarification());
+        else if (spec.completionMessage() != null) response.setAnswer(spec.completionMessage());
         else response.setAnswer(spec.partialError() == null ? "暂时没有满足条件的结果。" : spec.partialError());
         decision.setAnswer(response.getAnswer()); response.setDecision(decision);
         return response;

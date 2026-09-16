@@ -18,7 +18,7 @@ public final class EffectiveTaskContextResolver {
         EntityReference.TaskRef reference = taskReference(semantics);
         if (reference == null) {
             if (semantics != null && semantics.taskDirective() == TaskDirective.RESTORE)
-                throw new TaskIssue(Ambiguity.Kind.UNRESOLVED_REFERENCE, "RESTORE requires an explicit task selector");
+                throw new TaskIssue(Ambiguity.Kind.UNRESOLVED_REFERENCE, "RESTORE target is not uniquely identified");
             return new EffectiveTaskContext(active, false);
         }
         TaskView resolved = resolve(reference.selector(), activeTaskId, safe);

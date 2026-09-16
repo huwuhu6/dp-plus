@@ -51,6 +51,11 @@ public class SemanticInterpreter {
 
     private TurnSemantics parseAndValidate(String userTurn, boolean repair) {
         TurnSemantics semantics = parse(call(userTurn, repair));
+        if (requiresHardBudget(userTurn) && semantics.requirementChanges().stream()
+                .filter(RequirementChange.CriteriaPatch.class::isInstance)
+                .map(RequirementChange.CriteriaPatch.class::cast)
+                .noneMatch(change -> change.patch().budget() != null && change.patch().budget().hardMax() != null))
+            throw new IllegalArgumentException("explicit budget cap requires budgetHard");
         if (requiresConditionalFallback(userTurn) && semantics.requirementChanges().stream()
                 .filter(RequirementChange.ConditionalRequirementChange.class::isInstance)
                 .map(RequirementChange.ConditionalRequirementChange.class::cast)
@@ -64,6 +69,9 @@ public class SemanticInterpreter {
 
     private boolean requiresConditionalFallback(String userTurn) {
         return userTurn.matches("(?s).*如果.*(?:没有|没|无).*(?:就|则|改|换).*?");
+    }
+    private boolean requiresHardBudget(String userTurn) {
+        return userTurn.matches("(?s).*(?:预算|人均|消费)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?(?:以内|不超过|最多|上限|改成).*?");
     }
 
     private boolean isEmpty(RequirementChange.CriteriaPatch change) {
@@ -130,8 +138,8 @@ public class SemanticInterpreter {
                 + "taskDirectiveEvidence is NONE for CONTINUE. START_NEW is permitted only for an explicitly independent new decision task and then taskDirectiveEvidence must be EXPLICIT_NEW_TASK; RESTORE/ABANDON likewise require EXPLICIT_RESTORE/EXPLICIT_ABANDON. A constraint edit, clear, feedback, ordinal follow-up, alternatives request, similar request, or conditional fallback is CONTINUE with NONE, never START_NEW. "
                 + "A dining recommendation request must use type RECOMMENDATION; a general-information question must use type GENERAL with its topic, never FACT. "
                 + "Every request needs requestId, type, and topic; topic must be non-empty for GENERAL and empty for other request types. "
-                + "When taskDirective is RESTORE, references must contain exactly one task selector; never emit RESTORE without a selector. Use EARLIEST only when the user explicitly asks for the earliest task, ACTIVE only for the active task, and MATCH_CONTEXT only when category/city identify a unique task. "
-                + "Every request must include target and fact: use a valid reference for FACT, SELECT, SIMILAR, and EXPLORE; use {} and fact DETAIL for other types. "
+                + "For RESTORE, emit a task selector only when the user explicitly specifies earliest, active, or a uniquely identifying context. If the target task is not uniquely specified, emit RESTORE with empty references so runtime asks for clarification; never default to EARLIEST. "
+                + "Every request must include target and fact: use a valid reference for FACT, SELECT, SIMILAR, EXPLORE, and COMPARE; use {} and fact DETAIL for other types. A reference with lastVisible:true means the final candidate in the current visible batch; never convert it to a guessed ordinal. "
                 + "For FACT, fact must describe the requested fact using its enum. "
                 + "Every feedback item must include target, kind, aspect, batch, and polarity. For a single entity use its reference, batch false, and polarity NEGATIVE as an ignored placeholder; for a batch use target {}, kind REJECT as an ignored placeholder, batch true, and the requested polarity. "
                 + "Examples: ‘找附近的餐厅’ -> CONTINUE/NONE plus requests [{requestId: r1, type: RECOMMENDATION, topic: '', target: {}, fact: DETAIL}]; runtime creates a task only when no active task exists. ‘新开一个任务找日料’ -> START_NEW/EXPLICIT_NEW_TASK. "
@@ -142,11 +150,12 @@ public class SemanticInterpreter {
                 + "‘第二家不错’ -> CONTINUE plus feedback [{target: {ordinal: 2}, kind: POSITIVE, aspect: UNSPECIFIED, batch: false, polarity: NEGATIVE}] and requests []; "
                 + "‘这几家都不喜欢’ -> CONTINUE plus feedback [{target: {}, kind: REJECT, aspect: UNSPECIFIED, batch: true, polarity: NEGATIVE}] and requests []; "
                 + "‘换一批’ -> CONTINUE plus requests [{requestId: r1, type: ALTERNATIVES, topic: '', target: {}, fact: DETAIL}]; "
+                + "A request to compare visible candidates must use COMPARE with targets and dimensions. A request to keep researching or investigate in depth without a bounded next step must use EXPLORE with unboundedContinuation true. "
                 + "‘恢复最早的推荐任务’ -> RESTORE/EXPLICIT_RESTORE plus references [{taskSelector: EARLIEST}] and requests []; "
                 + "‘再便宜一点’ -> CONTINUE plus relativePreferences [{dimension: PRICE, direction: LOWER}] and a RECOMMENDATION request with topic '', target {}, and fact DETAIL; "
                 + "For a conditional fallback such as ‘如果3公里内没有藏式火锅，就改找烧烤’, emit the initial criteria and exactly one RECOMMENDATION request, then conditionalRequirementChanges [{observedRequestId: r1, predicate: {type: RESULT_STATE, expected: EMPTY}, criteria: {cuisine: 烧烤}, cleared: []}]. The fallback criteria belongs only in conditionalRequirementChanges; it must not replace the initial criteria. "
                 + "‘介绍一下火锅历史’ -> CONTINUE/NONE plus requests [{requestId: r1, type: GENERAL, topic: 火锅历史, target: {}, fact: DETAIL}]. "
-                + "References may only be ordinal, focused, named, or task selector; never invent database ids. "
+                + "Never invent a city, district, POI, or device location. Leave location criteria untouched unless the user supplied it; device-relative wording is not a POI. References may only be ordinal, focused, named, lastVisible, or task selector; never invent database ids. "
                 + "Return every root field required by the schema; use empty arrays when there is no value. "
                 + "Use null/omission for untouched criteria and cleared for explicit removal. "
                 + "A numeric budget stated as ‘以内’, ‘不超过’, or an unqualified replacement such as ‘预算改成150’ is a hard maximum: emit budgetHard. Use budgetSoft only when the user explicitly expresses a preference such as ‘大约’ or ‘最好在…左右’; never weaken a stated cap into budgetSoft. "
@@ -166,8 +175,9 @@ public class SemanticInterpreter {
 
     private DiningCriteriaPatch criteriaPatch(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) return new DiningCriteriaPatch(null, null, null, null, null, null);
-        DiningCriteria.LocationCriteria location = any(node, "city", "district", "poi")
-                ? new DiningCriteria.LocationCriteria(text(node, "city"), text(node, "district"), text(node, "poi")) : null;
+        String city = nonBlankText(node, "city"), district = nonBlankText(node, "district"), poi = nonBlankText(node, "poi");
+        DiningCriteria.LocationCriteria location = city != null || district != null || poi != null
+                ? new DiningCriteria.LocationCriteria(city, district, poi) : null;
         DiningCriteria.CuisineCriteria cuisine = any(node, "cuisine", "excludedCuisines")
                 ? new DiningCriteria.CuisineCriteria(text(node, "cuisine"), strings(node.path("excludedCuisines"))) : null;
         DiningCriteria.BudgetCriteria budget = any(node, "budgetSoft", "budgetHard")
@@ -201,6 +211,8 @@ public class SemanticInterpreter {
                 case "ALTERNATIVES" -> result.add(new UserRequest.AlternativesRequest(id, item.path("count").asInt(2)));
                 case "FACT" -> result.add(new UserRequest.FactQueryRequest(id, reference(item.path("target")),
                         enumValue(UserRequest.FactType.class, requiredText(item, "fact"))));
+                case "COMPARE" -> result.add(new UserRequest.CompareRequest(id, references(item.path("targets")),
+                        factTypes(item.path("dimensions"))));
                 case "SELECT" -> result.add(new UserRequest.SelectRequest(id, reference(item.path("target"))));
                 case "SIMILAR" -> result.add(new UserRequest.SimilarRequest(id, reference(item.path("target"))));
                 case "EXPLORE" -> result.add(new UserRequest.ExploreRequest(id, reference(item.path("target")), item.path("unboundedContinuation").asBoolean()));
@@ -220,6 +232,7 @@ public class SemanticInterpreter {
     private EntityReference reference(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) throw new IllegalArgumentException("request target is required");
         if (node.has("ordinal")) return new EntityReference.OrdinalRef(node.path("ordinal").asInt());
+        if (node.path("lastVisible").asBoolean(false)) return new EntityReference.LastVisibleRef();
         if (node.path("focused").asBoolean(false)) return new EntityReference.FocusedEntityRef();
         if (node.hasNonNull("name")) return new EntityReference.NamedEntityRef(node.path("name").asText());
         String selector = node.path("taskSelector").asText();
@@ -245,7 +258,7 @@ public class SemanticInterpreter {
         Map<String, Object> string = Map.of("type", "string");
         Map<String, Object> number = Map.of("type", "number");
         Map<String, Object> target = objectSchema(Map.of(
-                "ordinal", Map.of("type", "integer"), "focused", Map.of("type", "boolean"),
+                "ordinal", Map.of("type", "integer"), "focused", Map.of("type", "boolean"), "lastVisible", Map.of("type", "boolean"),
                 "name", string, "taskSelector", enumString("EARLIEST", "ACTIVE", "MATCH_CONTEXT"),
                 "goalCategory", string, "city", string));
         Map<String, Object> criteria = Map.of("type", "object", "properties", Map.of(
@@ -262,9 +275,11 @@ public class SemanticInterpreter {
                 "cleared", Map.of("type", "array", "items", enumString(RequirementChange.ClearedCriterion.values()))),
                 "observedRequestId", "predicate", "criteria", "cleared");
         Map<String, Object> request = objectSchema(Map.of("requestId", string,
-                "type", enumString("RECOMMENDATION", "ALTERNATIVES", "FACT", "SELECT", "SIMILAR", "EXPLORE", "GENERAL"),
+                "type", enumString("RECOMMENDATION", "ALTERNATIVES", "FACT", "COMPARE", "SELECT", "SIMILAR", "EXPLORE", "GENERAL"),
                 "target", target, "count", Map.of("type", "integer"),
                 "fact", enumString(UserRequest.FactType.values()),
+                "targets", Map.of("type", "array", "items", target),
+                "dimensions", Map.of("type", "array", "items", enumString(UserRequest.FactType.values())),
                 "topic", Map.of("type", "string", "description", "Non-empty when type is GENERAL; empty string otherwise"),
                 "unboundedContinuation", Map.of("type", "boolean")), "requestId", "type", "topic", "target", "fact");
         Map<String, Object> relativePreference = objectSchema(Map.of(
@@ -325,7 +340,9 @@ public class SemanticInterpreter {
         return value;
     }
     private String text(JsonNode node, String field) { return node.hasNonNull(field) ? node.path(field).asText() : null; }
+    private String nonBlankText(JsonNode node, String field) { String value = text(node, field); return value == null || value.isBlank() ? null : value; }
     private boolean any(JsonNode node, String... fields) { for (String field : fields) if (node.hasNonNull(field)) return true; return false; }
     private List<String> strings(JsonNode node) { List<String> result = new ArrayList<>(); for (JsonNode item : node) result.add(item.asText()); return result; }
+    private List<UserRequest.FactType> factTypes(JsonNode node) { List<UserRequest.FactType> result = new ArrayList<>(); for (JsonNode item : node) result.add(enumValue(UserRequest.FactType.class, item.asText())); return result; }
     private BigDecimal decimal(JsonNode node, String field) { return node.hasNonNull(field) ? node.path(field).decimalValue() : null; }
 }
