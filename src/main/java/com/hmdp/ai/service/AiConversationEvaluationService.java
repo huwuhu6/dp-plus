@@ -866,7 +866,8 @@ public class AiConversationEvaluationService {
             if ("CHANGED".equals(relation)) return fromId != null && toId != null && !fromId.equals(toId);
         }
         if ("groundedOrdinal".equals(type) && "EQUALS_VISIBLE".equals(relation)) {
-            Integer ordinal = integerValue(expectation.get("ordinal"));
+            Integer ordinal = "LAST".equals(expectation.get("ordinal")) ? from.currentVisibleShopIds.size()
+                    : integerValue(expectation.get("ordinal"));
             if (ordinal == null || ordinal < 1 || ordinal > from.currentVisibleShopIds.size()) return false;
             Long expectedShopId = from.currentVisibleShopIds.get(ordinal - 1);
             return to.groundedEntities.stream().map(item -> item.get("shopId")).filter(Number.class::isInstance)

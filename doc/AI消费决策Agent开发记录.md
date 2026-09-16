@@ -2,7 +2,7 @@
 
 ## 2026-09-16：补齐 audited Main V2 评测资产
 
-新增 `conversation-v2-main-v2`（23 条）作为开发期可见的 V2 contract regression benchmark，不从 MySQL 回退加载。它保留唯一 final-status，覆盖 criteria overwrite/clear/relative/multi patch、task restore/abandon、visible-batch ordinal identity、reject/critique/batch feedback、alternatives、location anchor/clarification、hard criteria、条件语义及 controlled unsupported。候选排序与具体 shopId 均不作为 gold。
+新增 `conversation-v2-main-v2`（24 条）作为开发期可见的 V2 contract regression benchmark，不从 MySQL 回退加载。它保留唯一 final-status，覆盖 criteria overwrite/clear/relative/multi patch、task restore/abandon、visible-batch ordinal identity、reject/critique/batch feedback、alternatives、location anchor/clarification、hard criteria、条件语义及 controlled unsupported。候选排序与具体 shopId 均不作为 gold。
 
 条件 fallback 的实际执行依赖 live world result，因此只将固定语义与原始 hard distance 计入 Main；fallback result 不进入 scored denominator。硬约束候选事实仍由确定性 verifier fixture 测试覆盖。跨轮 relation 和 turn-state mismatch 现在纳入 case failure，避免 Main 声明的 identity/invalidation 仅停留在 diagnostics。
 

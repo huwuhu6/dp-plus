@@ -53,8 +53,10 @@ public final class V2DatasetValidator {
                     if (!RELATIONS.getOrDefault(type, Set.of()).contains(expected))
                         throw new IllegalArgumentException("unknown cross-turn relation");
                     if ("groundedOrdinal".equals(relation.get("type"))) {
-                        Number ordinal = (Number) relation.get("ordinal");
-                        if (!"EQUALS_VISIBLE".equals(relation.get("relation")) || ordinal == null || ordinal.intValue() < 1)
+                        Object ordinal = relation.get("ordinal");
+                        boolean validOrdinal = ordinal instanceof Number number && number.intValue() >= 1
+                                || "LAST".equals(ordinal);
+                        if (!"EQUALS_VISIBLE".equals(relation.get("relation")) || !validOrdinal)
                             throw new IllegalArgumentException("invalid grounded ordinal relation");
                     }
                 }
