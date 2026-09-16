@@ -408,7 +408,7 @@ public class V2ChatOrchestrator {
             if (request instanceof com.hmdp.ai.v2.semantic.UserRequest.FactQueryRequest fact) result.add(fact.target());
             if (request instanceof com.hmdp.ai.v2.semantic.UserRequest.SelectRequest select) result.add(select.target());
             if (request instanceof com.hmdp.ai.v2.semantic.UserRequest.SimilarRequest similar) result.add(similar.anchor());
-            if (request instanceof com.hmdp.ai.v2.semantic.UserRequest.ExploreRequest explore) result.add(explore.target());
+            if (request instanceof com.hmdp.ai.v2.semantic.UserRequest.ExploreRequest explore && explore.target() != null) result.add(explore.target());
         }
         return result;
     }

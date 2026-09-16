@@ -2466,3 +2466,9 @@ Run169 的持久化 `MAIN_V2_REFERENCE_LAST_IDENTITY` ERROR 在 SemanticInterpre
 同时收敛了四类 production contract：COMPARE 进入现有 CompareAction controlled-unsupported 路径，明确无界研究进入既有 Explore/Adaptive unsupported 路径；RESTORE 在用户未唯一指明历史任务时可保持无 selector，并由 EffectiveTaskContextResolver 返回 clarification；成功 ABANDON 使用 closed-world completion message，不再错误占用 clarification 字段。语义解析忽略空 location patch，并要求显式预算上限产出 `budgetHard`；地点解析不再把模型给出的任意 district 当行政身份，必须经 provider 唯一验证。新增 parser、visible-reference、location 和 renderer 的同类变体回归。
 
 `mvn -q clean -Dtest=SemanticInterpreterTest,V2DomainGoldenTest,V2LocationResolverTest,V2ChatOrchestratorOccTest,V2RuntimeHardeningTest,V2DatasetValidatorTest,ConversationEvaluationDatasetLoaderV2Test,AiConversationEvaluationServiceTest,DeterministicResultVerifierTest test` 与完整 `mvn -q clean test` 均通过。Final Main 尚未发起：本地 MySQL 当前拒绝既有空密码连接，项目 `.env` 也未提供实际 DB 值，同时 Docker Desktop 不可用；这是评测基础设施阻塞，未产生新的 Run 或读取 Holdout。
+
+### V2 semantic repair 的封闭违反码（2026-09-16）
+
+Run171 表明固定的 conditional-fallback repair 文案不能纠正预算语义或 unbounded research。SemanticInterpreter 改为把第一次解析/验证失败映射到封闭 violation enum：`HARD_BUDGET_REQUIRED`、`BUDGET_CLEAR_REQUIRED`、`CONDITIONAL_FALLBACK_REQUIRED` 或 generic contract；第二次调用只接收对应固定指令，不拼接异常或模型输出。二次失败保留 second failure 为 cause，first failure 作为 suppressed diagnostics。
+
+硬预算 detector 覆盖“维度+数值+以内/以下”“维度+不超过/最多/上限+数值”和“预算+改成/改为/调整为/设为/提高到/降到+数值”；预算显式取消另以 invariant 要求 `cleared:[BUDGET]` 且不生成 replacement budget。开放式 `EXPLORE(unboundedContinuation=true)` 可没有 entity target，grounding/task-context 忽略空 operand 并保持现有 Adaptive → controlled UNSUPPORTED 运行时边界；bounded Explore 仍拒绝空 target。冻结 Main asset 未改。定向 clean 回归通过：SemanticInterpreter、V2DomainGolden、V2RuntimeHardening。

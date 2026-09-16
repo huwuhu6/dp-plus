@@ -28,7 +28,7 @@ public final class GroundingResolver {
             case UserRequest.CompareRequest r -> r.targets();
             case UserRequest.SimilarRequest r -> List.of(r.anchor());
             case UserRequest.SelectRequest r -> List.of(r.target());
-            case UserRequest.ExploreRequest r -> List.of(r.target());
+            case UserRequest.ExploreRequest r -> r.target() == null ? List.of() : List.of(r.target());
             default -> List.of();
         };
         List<GroundedReference> result = new ArrayList<>();

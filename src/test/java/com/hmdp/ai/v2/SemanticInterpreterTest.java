@@ -2,12 +2,15 @@ package com.hmdp.ai.v2;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.v2.runtime.SemanticInterpreter;
+import com.hmdp.ai.v2.runtime.SemanticInterpretationException;
+import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.v2.semantic.EntityFeedback;
 import com.hmdp.ai.v2.semantic.EntityReference;
 import com.hmdp.ai.v2.semantic.RequirementChange;
 import com.hmdp.ai.v2.semantic.TaskDirective;
 import com.hmdp.ai.v2.semantic.UserRequest;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -16,8 +19,12 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
 class SemanticInterpreterTest {
     private final ObjectMapper mapper = new ObjectMapper();
@@ -102,6 +109,58 @@ class SemanticInterpreterTest {
         UserRequest.ExploreRequest request = assertInstanceOf(UserRequest.ExploreRequest.class, explore.requests().getFirst());
         assertTrue(request.unboundedContinuation());
         assertInstanceOf(EntityReference.LastVisibleRef.class, request.target());
+    }
+
+    @Test
+    void detectsBudgetCapsAndExplicitClearsAcrossSemanticForms() {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        for (String message : List.of("预算改成150", "预算不超过120", "人均80以内", "消费最多90元"))
+            assertTrue((Boolean) ReflectionTestUtils.invokeMethod(interpreter, "requiresHardBudget", message), message);
+        for (String message : List.of("不要预算限制", "去掉预算条件"))
+            assertTrue((Boolean) ReflectionTestUtils.invokeMethod(interpreter, "requiresBudgetClear", message), message);
+    }
+
+    @Test
+    void unboundedExploreAllowsEmptyTargetButBoundedExploreRejectsIt() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        var semantics = interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE",
+                 "requests":[{"requestId":"e","type":"EXPLORE","target":{},"fact":"EVIDENCE","topic":"","unboundedContinuation":true}]}
+                """));
+        UserRequest.ExploreRequest request = assertInstanceOf(UserRequest.ExploreRequest.class, semantics.requests().getFirst());
+        assertTrue(request.unboundedContinuation()); assertEquals(null, request.target());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE",
+                 "requests":[{"requestId":"e","type":"EXPLORE","target":{},"fact":"EVIDENCE","topic":"","unboundedContinuation":false}]}
+                """)));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void repairUsesClosedViolationInstructionAndRetainsBothFailures() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ReflectionTestUtils.setField(interpreter, "aiClient", client);
+        ReflectionTestUtils.setField(interpreter, "objectMapper", mapper);
+        var invalid = modelResponse("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","requests":[]}
+                """);
+        when(client.chatCompletion(any(List.class), any(List.class), any(Map.class), anyString())).thenReturn(invalid, invalid);
+        SemanticInterpretationException error = org.junit.jupiter.api.Assertions.assertThrows(SemanticInterpretationException.class,
+                () -> interpreter.interpret("预算改成150"));
+        assertEquals("HARD_BUDGET_REQUIRED", error.getCause().getMessage());
+        assertEquals(1, error.getSuppressed().length);
+        assertEquals("HARD_BUDGET_REQUIRED", error.getSuppressed()[0].getMessage());
+        ArgumentCaptor<List<Map<String, Object>>> messages = ArgumentCaptor.forClass(List.class);
+        verify(client, times(2)).chatCompletion(messages.capture(), any(List.class), any(Map.class), anyString());
+        assertTrue(String.valueOf(messages.getAllValues().get(1).getFirst().get("content")).contains("HARD_BUDGET_REQUIRED"));
+        assertFalse(String.valueOf(messages.getAllValues().get(1).getFirst().get("content")).contains("CONDITIONAL_FALLBACK_REQUIRED"));
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode modelResponse(String arguments) throws Exception {
+        return mapper.readTree("""
+                {"choices":[{"message":{"tool_calls":[{"function":{"arguments":%s}}]}}]}
+                """.formatted(mapper.writeValueAsString(arguments)));
     }
 
     @Test

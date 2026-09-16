@@ -38,7 +38,7 @@ public final class EffectiveTaskContextResolver {
             case com.hmdp.ai.v2.semantic.UserRequest.CompareRequest r -> r.targets();
             case com.hmdp.ai.v2.semantic.UserRequest.SimilarRequest r -> List.of(r.anchor());
             case com.hmdp.ai.v2.semantic.UserRequest.SelectRequest r -> List.of(r.target());
-            case com.hmdp.ai.v2.semantic.UserRequest.ExploreRequest r -> List.of(r.target());
+            case com.hmdp.ai.v2.semantic.UserRequest.ExploreRequest r -> r.target() == null ? List.of() : List.of(r.target());
             default -> List.of();
         };
     }

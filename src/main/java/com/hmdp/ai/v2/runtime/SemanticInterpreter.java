@@ -39,30 +39,31 @@ public class SemanticInterpreter {
     public TurnSemantics interpret(String userTurn) {
         if (userTurn == null || userTurn.isBlank()) throw new IllegalArgumentException("message cannot be blank");
         try {
-            return parseAndValidate(userTurn, false);
+            return parseAndValidate(userTurn);
         } catch (RuntimeException firstFailure) {
+            Violation violation = violationOf(firstFailure);
             try {
-                return parseAndValidate(userTurn, true);
-            } catch (RuntimeException ignored) {
-                throw new SemanticInterpretationException("无法可靠理解这句话，请换一种说法或说明要修改的条件", firstFailure);
+                return parseAndValidate(userTurn, violation);
+            } catch (RuntimeException secondFailure) {
+                SemanticInterpretationException error = new SemanticInterpretationException("无法可靠理解这句话，请换一种说法或说明要修改的条件", secondFailure);
+                error.addSuppressed(firstFailure);
+                throw error;
             }
         }
     }
 
-    private TurnSemantics parseAndValidate(String userTurn, boolean repair) {
+    private TurnSemantics parseAndValidate(String userTurn) { return parseAndValidate(userTurn, null); }
+    private TurnSemantics parseAndValidate(String userTurn, Violation repair) {
         TurnSemantics semantics = parse(call(userTurn, repair));
-        if (requiresHardBudget(userTurn) && semantics.requirementChanges().stream()
-                .filter(RequirementChange.CriteriaPatch.class::isInstance)
-                .map(RequirementChange.CriteriaPatch.class::cast)
-                .noneMatch(change -> change.patch().budget() != null && change.patch().budget().hardMax() != null))
-            throw new IllegalArgumentException("explicit budget cap requires budgetHard");
+        if (requiresHardBudget(userTurn) && !hasHardBudget(semantics)) throw violation(Violation.HARD_BUDGET_REQUIRED);
+        if (requiresBudgetClear(userTurn) && !hasBudgetClearWithoutReplacement(semantics)) throw violation(Violation.BUDGET_CLEAR_REQUIRED);
         if (requiresConditionalFallback(userTurn) && semantics.requirementChanges().stream()
                 .filter(RequirementChange.ConditionalRequirementChange.class::isInstance)
                 .map(RequirementChange.ConditionalRequirementChange.class::cast)
                 .noneMatch(change -> !isEmpty(change.change()))) {
             // A parsed-but-empty fallback silently turns a user promise into an unconstrained search.
             // Treat it as invalid so the existing repair call can obtain a complete semantic contract.
-            throw new IllegalArgumentException("conditional fallback requires a non-empty criteria change");
+            throw violation(Violation.CONDITIONAL_FALLBACK_REQUIRED);
         }
         return semantics;
     }
@@ -71,8 +72,22 @@ public class SemanticInterpreter {
         return userTurn.matches("(?s).*如果.*(?:没有|没|无).*(?:就|则|改|换).*?");
     }
     private boolean requiresHardBudget(String userTurn) {
-        return userTurn.matches("(?s).*(?:预算|人均|消费)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?(?:以内|不超过|最多|上限|改成).*?");
+        return userTurn.matches("(?s).*(?:人均|预算|消费)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?(?:以内|以下).*?")
+                || userTurn.matches("(?s).*(?:人均|预算|消费)[^\\d]{0,12}(?:不超过|最多|上限)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?.*")
+                || userTurn.matches("(?s).*预算[^\\d]{0,12}(?:改成|改为|调整为|设为|提高到|降到)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?.*");
     }
+    private boolean requiresBudgetClear(String userTurn) {
+        return userTurn.matches("(?s).*(?:预算不限|不限预算|不要预算限制|取消预算限制|去掉预算条件).*");
+    }
+    private boolean hasHardBudget(TurnSemantics semantics) { return semantics.requirementChanges().stream()
+            .filter(RequirementChange.CriteriaPatch.class::isInstance).map(RequirementChange.CriteriaPatch.class::cast)
+            .anyMatch(change -> change.patch().budget() != null && change.patch().budget().hardMax() != null); }
+    private boolean hasBudgetClearWithoutReplacement(TurnSemantics semantics) { return semantics.requirementChanges().stream()
+            .filter(RequirementChange.CriteriaPatch.class::isInstance).map(RequirementChange.CriteriaPatch.class::cast)
+            .anyMatch(change -> change.cleared().contains(RequirementChange.ClearedCriterion.BUDGET)
+                    && (change.patch().budget() == null || (change.patch().budget().hardMax() == null && change.patch().budget().softTarget() == null))); }
+    private SemanticContractViolation violation(Violation code) { return new SemanticContractViolation(code); }
+    private Violation violationOf(RuntimeException failure) { return failure instanceof SemanticContractViolation v ? v.code() : Violation.GENERIC_CONTRACT; }
 
     private boolean isEmpty(RequirementChange.CriteriaPatch change) {
         DiningCriteriaPatch patch = change.patch();
@@ -126,7 +141,7 @@ public class SemanticInterpreter {
         if (expected != evidence) throw new IllegalArgumentException("taskDirective lacks matching explicit evidence");
     }
 
-    private JsonNode call(String userTurn, boolean repair) {
+    private JsonNode call(String userTurn, Violation repair) {
         Map<String, Object> function = new LinkedHashMap<>();
         function.put("name", FUNCTION);
         function.put("description", "Return canonical dining user semantics. Never return ids, plans, tools, SQL, or mutations.");
@@ -139,7 +154,7 @@ public class SemanticInterpreter {
                 + "A dining recommendation request must use type RECOMMENDATION; a general-information question must use type GENERAL with its topic, never FACT. "
                 + "Every request needs requestId, type, and topic; topic must be non-empty for GENERAL and empty for other request types. "
                 + "For RESTORE, emit a task selector only when the user explicitly specifies earliest, active, or a uniquely identifying context. If the target task is not uniquely specified, emit RESTORE with empty references so runtime asks for clarification; never default to EARLIEST. "
-                + "Every request must include target and fact: use a valid reference for FACT, SELECT, SIMILAR, EXPLORE, and COMPARE; use {} and fact DETAIL for other types. A reference with lastVisible:true means the final candidate in the current visible batch; never convert it to a guessed ordinal. "
+                + "Every request must include target and fact: use a valid reference for FACT, SELECT, SIMILAR, and COMPARE; use {} and fact DETAIL for other types. For EXPLORE with unboundedContinuation=true, target may be empty because research is not scoped to a visible entity. For bounded/entity-scoped EXPLORE, provide a valid target. A reference with lastVisible:true means the final candidate in the current visible batch; never convert it to a guessed ordinal. "
                 + "For FACT, fact must describe the requested fact using its enum. "
                 + "Every feedback item must include target, kind, aspect, batch, and polarity. For a single entity use its reference, batch false, and polarity NEGATIVE as an ignored placeholder; for a batch use target {}, kind REJECT as an ignored placeholder, batch true, and the requested polarity. "
                 + "Examples: ‘找附近的餐厅’ -> CONTINUE/NONE plus requests [{requestId: r1, type: RECOMMENDATION, topic: '', target: {}, fact: DETAIL}]; runtime creates a task only when no active task exists. ‘新开一个任务找日料’ -> START_NEW/EXPLICIT_NEW_TASK. "
@@ -158,8 +173,8 @@ public class SemanticInterpreter {
                 + "Never invent a city, district, POI, or device location. Leave location criteria untouched unless the user supplied it; device-relative wording is not a POI. References may only be ordinal, focused, named, lastVisible, or task selector; never invent database ids. "
                 + "Return every root field required by the schema; use empty arrays when there is no value. "
                 + "Use null/omission for untouched criteria and cleared for explicit removal. "
-                + "A numeric budget stated as ‘以内’, ‘不超过’, or an unqualified replacement such as ‘预算改成150’ is a hard maximum: emit budgetHard. Use budgetSoft only when the user explicitly expresses a preference such as ‘大约’ or ‘最好在…左右’; never weaken a stated cap into budgetSoft. "
-                + (repair ? "Your previous output was invalid. For a conditional fallback, include its non-empty criteria and cleared fields. Return a complete function call and obey every enum and required field exactly." : "");
+                + "A numeric budget stated as ‘以内’, ‘不超过’, or an unqualified replacement such as ‘预算改成150’ is a hard maximum: emit budgetHard. Use budgetSoft only when the user explicitly expresses a preference such as ‘大约’ or ‘最好在…左右’; never weaken a stated cap into budgetSoft. Explicit removal such as 预算不限/不要预算限制 must use cleared:[BUDGET] and must not emit a replacement budget. "
+                + repairInstruction(repair);
         JsonNode response = aiClient.chatCompletion(List.of(
                 Map.of("role", "system", "content", system),
                 Map.of("role", "user", "content", userTurn)), List.of(tool), choice, "V2_SEMANTIC_INTERPRETATION");
@@ -215,7 +230,10 @@ public class SemanticInterpreter {
                         factTypes(item.path("dimensions"))));
                 case "SELECT" -> result.add(new UserRequest.SelectRequest(id, reference(item.path("target"))));
                 case "SIMILAR" -> result.add(new UserRequest.SimilarRequest(id, reference(item.path("target"))));
-                case "EXPLORE" -> result.add(new UserRequest.ExploreRequest(id, reference(item.path("target")), item.path("unboundedContinuation").asBoolean()));
+                case "EXPLORE" -> { boolean unbounded = item.path("unboundedContinuation").asBoolean();
+                    JsonNode target = item.path("target");
+                    if (!unbounded && emptyReference(target)) throw new IllegalArgumentException("bounded explore requires target");
+                    result.add(new UserRequest.ExploreRequest(id, emptyReference(target) ? null : reference(target), unbounded)); }
                 case "GENERAL" -> result.add(new UserRequest.GeneralKnowledgeRequest(id, requiredText(item, "topic")));
                 default -> throw new IllegalArgumentException("unsupported request type");
             }
@@ -243,6 +261,16 @@ public class SemanticInterpreter {
             default -> throw new IllegalArgumentException("unsupported reference");
         };
     }
+    private boolean emptyReference(JsonNode node) { return node == null || node.isMissingNode() || node.isNull() || (node.isObject() && node.isEmpty()); }
+    private String repairInstruction(Violation violation) { return switch (violation == null ? Violation.NONE : violation) {
+        case NONE -> "";
+        case HARD_BUDGET_REQUIRED -> " Your previous output violated HARD_BUDGET_REQUIRED: the user stated an explicit budget cap or replacement; output criteria.budgetHard.";
+        case BUDGET_CLEAR_REQUIRED -> " Your previous output violated BUDGET_CLEAR_REQUIRED: the user removed the budget constraint; output cleared:[BUDGET] and no budgetSoft/budgetHard.";
+        case CONDITIONAL_FALLBACK_REQUIRED -> " Your previous output violated CONDITIONAL_FALLBACK_REQUIRED: emit a conditional fallback with non-empty fallback criteria or cleared fields.";
+        case GENERIC_CONTRACT -> " Your previous output violated the semantic contract. Return a complete function call and obey enums and required fields exactly.";
+    }; }
+    enum Violation { NONE, HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED, CONDITIONAL_FALLBACK_REQUIRED, GENERIC_CONTRACT }
+    private static final class SemanticContractViolation extends IllegalArgumentException { private final Violation code; private SemanticContractViolation(Violation code) { super(code.name()); this.code = code; } private Violation code() { return code; } }
     private ObservationPredicate predicate(JsonNode node) {
         String type = requiredText(node, "type");
         return switch (type) {
