@@ -79,11 +79,12 @@ public class V2ChatOrchestrator {
         for (int attempt = 0; attempt < 2; attempt++) {
             VersionedMemory loaded = load(chatId);
             PreBuild built = preparePre(request, loaded.memory(), semantics);
-            if (built.response() != null) return new PreOutcome(null, built.response());
+            if (built.response() != null && !built.persistBeforeResponse()) return new PreOutcome(null, built.response());
             try {
                 AiWorkingMemory committed = versions.append(chatId, userId(), loaded.version(), loaded.memory(),
                         ConversationEventType.STATE_REDUCED, preEvent(semantics),
                         Map.of("taskId", built.taskId()));
+                if (built.response() != null) return new PreOutcome(null, built.response());
                 if (built.abandon()) return new PreOutcome(null, renderer.render(chatId,
                         ResponseSpec.completed("当前推荐任务已结束。")));
                 PlanningSnapshot snapshot = snapshot(built.task(), loaded.memory(), committed.getVersion());
@@ -123,8 +124,12 @@ public class V2ChatOrchestrator {
 
         V2TaskState reduced = preReducer.reduce(stateGateway.read(task), semantics, grounded);
         V2LocationResolver.Resolution location = locationResolver.resolve(reduced.criteria(), request.getLocation(), reduced.searchAnchor());
-        if (location instanceof V2LocationResolver.Resolution.NeedsClarification clarification)
-            return PreBuild.response(clarification(chatId(request), clarification.message()));
+        if (location instanceof V2LocationResolver.Resolution.NeedsClarification clarification) {
+            // Requirements and grounded feedback are deterministic user facts at this point.  A missing
+            // search anchor only blocks resolution/execution; it must not roll those facts back.
+            stateGateway.write(task, reduced);
+            return PreBuild.persistedResponse(task.getTaskId(), clarification(chatId(request), clarification.message()));
+        }
         reduced = reduced.withSearchAnchor(((V2LocationResolver.Resolution.Resolved) location).anchor());
         stateGateway.write(task, reduced);
         return PreBuild.ready(task.getTaskId(), task, grounded);
@@ -419,10 +424,11 @@ public class V2ChatOrchestrator {
     private record VersionedMemory(int version, ConversationWorkingMemory memory) { }
     private record PreOutcome(PreparedTurn prepared, ChatMessageResponse response) { }
     private record PreBuild(String taskId, DecisionTaskState task, GroundedTurn grounded,
-                            ChatMessageResponse response, boolean abandon) {
-        static PreBuild ready(String id, DecisionTaskState task, GroundedTurn grounded) { return new PreBuild(id, task, grounded, null, false); }
-        static PreBuild response(ChatMessageResponse response) { return new PreBuild(null, null, null, response, false); }
-        static PreBuild abandon(String id) { return new PreBuild(id, null, null, null, true); }
+                            ChatMessageResponse response, boolean abandon, boolean persistBeforeResponse) {
+        static PreBuild ready(String id, DecisionTaskState task, GroundedTurn grounded) { return new PreBuild(id, task, grounded, null, false, false); }
+        static PreBuild response(ChatMessageResponse response) { return new PreBuild(null, null, null, response, false, false); }
+        static PreBuild persistedResponse(String id, ChatMessageResponse response) { return new PreBuild(id, null, null, response, false, true); }
+        static PreBuild abandon(String id) { return new PreBuild(id, null, null, null, true, false); }
     }
     private record PreparedTurn(ConversationWorkingMemory preMemory, int preVersion, String taskId, String activeTaskId,
                                 TurnSemantics semantics, GroundedTurn grounded, PlanningSnapshot snapshot) { }

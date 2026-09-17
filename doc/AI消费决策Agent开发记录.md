@@ -2478,3 +2478,7 @@ Run171 表明固定的 conditional-fallback repair 文案不能纠正预算语�
 Run174 证明语义模型会把设备相对词或未出现的地点包装成 city/district/POI，进而错误触发 location clarification。本轮在 typed semantics 进入 reducer 前加入来源校验：地点字段必须逐字追溯到当前用户轮次，行政名称仅允许安全的尾缀归一（如“福州”与“福州市”）；不在此处解析现实地点或写入 device anchor。移除不可信地点不会改变菜系、预算、距离等同轮 criteria，真实命名 POI 仍交由 LocationResolver/provider 做唯一性判断。
 
 同时将 HTTP、连接和读取超时从 semantic repair taxonomy 中隔离：首次 transport/model availability failure 记录 evaluation-only `MODEL_TRANSPORT_FAILURE` attempt 并以受控 `SemanticModelAvailabilityException` 返回，不再伪装为 generic contract 后发起第二次模型调用。trace 不写入 Working Memory 或 durable state。定向回归覆盖虚构地点、device-relative fake POI、显式 city/POI、保留其他 criteria，以及 transport failure 单次调用和可观测性；冻结 Main asset 未改。
+
+### V2 PRE requirement commit 与 location clarification（2026-09-17）
+
+Run178 证明 location clarification 发生在 `PreExecutionReducer.reduce()` 之后、PRE OCC append 之前时，会使已确定的预算 clear、距离、菜系等 canonical requirements 随早返回丢失。PRE 现在仅在 grounding 已成功、且 location resolver 需要 clarification 时提交已归约 state，再返回 clarification；SearchAnchor 不写入，执行也不会开始。任务/实体 grounding 未解决仍在 reducer 前返回，因此不会持久化未 grounding 的 feedback 或 reference effect；OCC 冲突继续最多 reload/reduce/append 一次。定向回归覆盖 requirement 保留、无假 anchor、unresolved feedback 不提交和既有 OCC 行为。

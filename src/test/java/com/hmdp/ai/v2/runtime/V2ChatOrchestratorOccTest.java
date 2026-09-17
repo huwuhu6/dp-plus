@@ -18,6 +18,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
+import java.math.BigDecimal;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -27,6 +28,55 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class V2ChatOrchestratorOccTest {
+    @Test
+    void locationClarificationCommitsCanonicalRequirementsButNotSearchAnchor() throws Exception {
+        ObjectMapper json = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        SemanticInterpreter interpreter = mock(SemanticInterpreter.class);
+        WorkingMemoryVersionService versions = mock(WorkingMemoryVersionService.class);
+        ChatMemoryService chats = mock(ChatMemoryService.class);
+        ConversationEventService events = mock(ConversationEventService.class);
+        ConversationWorkingMemory memory = activeMemory(new DiningCriteria(null, new DiningCriteria.CuisineCriteria("旧菜系", List.of()),
+                new DiningCriteria.BudgetCriteria(null, BigDecimal.valueOf(100)), null, null, DiningCriteria.SemanticPreferences.empty()));
+        AtomicReference<AiWorkingMemory> current = new AtomicReference<>(row(0, json.writeValueAsString(memory)));
+        when(chats.resolveChatId("chat")).thenReturn("chat"); when(chats.load("chat")).thenReturn(List.of());
+        when(versions.latest("chat")).thenAnswer(ignored -> current.get());
+        when(versions.append(anyString(), nullable(Long.class), anyInt(), any(), any(ConversationEventType.class), any(), anyMap()))
+                .thenAnswer(invocation -> { ConversationWorkingMemory changed = invocation.getArgument(3); AiWorkingMemory committed = row((int) invocation.getArgument(2) + 1, json.writeValueAsString(changed)); current.set(committed); return committed; });
+        when(interpreter.interpret("更新条件")).thenReturn(new TurnSemantics(TaskDirective.CONTINUE, List.of(
+                new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(new DiningCriteria.LocationCriteria(null, null, "未解析地点"),
+                        new DiningCriteria.CuisineCriteria("火锅", List.of()), null, new DiningCriteria.DistanceCriteria(BigDecimal.valueOf(3)), null, null),
+                        java.util.Set.of(RequirementChange.ClearedCriterion.BUDGET))), List.of(), List.of(), List.of(), List.of()));
+
+        V2ChatOrchestrator orchestrator = orchestrator(interpreter, versions, chats, events, json);
+        ChatMessageRequest request = new ChatMessageRequest(); request.setChatId("chat"); request.setMessage("更新条件");
+        ChatMessageResponse response = orchestrator.chat(request);
+
+        assertEquals("CLARIFYING", response.getDecision().getStatus());
+        DecisionTaskState persisted = json.readValue(current.get().getMemoryJson(), ConversationWorkingMemory.class).activeTask();
+        assertEquals("火锅", persisted.getV2Criteria().cuisine().include());
+        assertEquals(new BigDecimal("3"), persisted.getV2Criteria().distance().hardMaxKm());
+        assertNull(persisted.getV2Criteria().budget());
+        assertNull(persisted.getV2SearchAnchor(), "unresolved named location must not fabricate an anchor");
+        verify(versions, times(1)).append(anyString(), nullable(Long.class), anyInt(), any(), any(ConversationEventType.class), any(), anyMap());
+    }
+
+    @Test
+    void unresolvedFeedbackDoesNotCommitPreEffects() throws Exception {
+        ObjectMapper json = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        SemanticInterpreter interpreter = mock(SemanticInterpreter.class); WorkingMemoryVersionService versions = mock(WorkingMemoryVersionService.class);
+        ChatMemoryService chats = mock(ChatMemoryService.class); ConversationEventService events = mock(ConversationEventService.class);
+        ConversationWorkingMemory memory = activeMemory(DiningCriteria.empty());
+        when(chats.resolveChatId("chat")).thenReturn("chat"); when(chats.load("chat")).thenReturn(List.of()); when(versions.latest("chat")).thenReturn(row(0, json.writeValueAsString(memory)));
+        when(interpreter.interpret("排除第二家")).thenReturn(new TurnSemantics(TaskDirective.CONTINUE, List.of(),
+                List.of(new EntityFeedback.EntityFeedbackItem(new EntityReference.OrdinalRef(2), EntityFeedback.FeedbackKind.REJECT, EntityFeedback.FeedbackAspect.UNSPECIFIED)), List.of(), List.of()));
+
+        V2ChatOrchestrator orchestrator = orchestrator(interpreter, versions, chats, events, json);
+        ChatMessageRequest request = new ChatMessageRequest(); request.setChatId("chat"); request.setMessage("排除第二家");
+        assertEquals("CLARIFYING", orchestrator.chat(request).getDecision().getStatus());
+        verify(versions, never()).append(anyString(), nullable(Long.class), anyInt(), any(), any(ConversationEventType.class), any(), anyMap());
+        assertTrue(memory.activeTask().getV2RejectedShopIds().isEmpty());
+    }
+
     @Test
     void completedAcknowledgementDoesNotMasqueradeAsClarification() {
         ChatMessageResponse response = new V2ResponseRenderer().render("chat", ResponseSpec.completed("任务已结束。"));
@@ -115,5 +165,20 @@ class V2ChatOrchestratorOccTest {
 
     private AiWorkingMemory row(int version, String json) {
         AiWorkingMemory row = new AiWorkingMemory(); row.setVersion(version); row.setMemoryJson(json); row.setChatId("chat"); return row;
+    }
+
+    private ConversationWorkingMemory activeMemory(DiningCriteria criteria) {
+        ConversationWorkingMemory memory = new ConversationWorkingMemory(); DecisionTaskState task = new DecisionTaskState();
+        task.setTaskId("task"); task.setV2Criteria(criteria); memory.getTasks().add(task); memory.setActiveTaskId("task"); return memory;
+    }
+
+    private V2ChatOrchestrator orchestrator(SemanticInterpreter interpreter, WorkingMemoryVersionService versions, ChatMemoryService chats,
+                                             ConversationEventService events, ObjectMapper json) {
+        V2ChatOrchestrator orchestrator = new V2ChatOrchestrator();
+        ReflectionTestUtils.setField(orchestrator, "semanticInterpreter", interpreter); ReflectionTestUtils.setField(orchestrator, "versions", versions);
+        ReflectionTestUtils.setField(orchestrator, "chatMemoryService", chats); ReflectionTestUtils.setField(orchestrator, "conversationEventService", events);
+        ReflectionTestUtils.setField(orchestrator, "objectMapper", json); ReflectionTestUtils.setField(orchestrator, "executor", new StaticPlanExecutor());
+        ReflectionTestUtils.setField(orchestrator, "actions", mock(V2ActionHandler.class)); ReflectionTestUtils.setField(orchestrator, "renderer", new V2ResponseRenderer());
+        ReflectionTestUtils.setField(orchestrator, "shopMapper", mock(ShopMapper.class)); ReflectionTestUtils.setField(orchestrator, "locationResolver", new V2LocationResolver(null)); return orchestrator;
     }
 }
