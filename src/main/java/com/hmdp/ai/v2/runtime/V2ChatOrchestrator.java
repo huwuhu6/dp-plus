@@ -180,7 +180,7 @@ public class V2ChatOrchestrator {
         }
     }
 
-    StaticPlanExecutor.ExecutionResult execute(CompilationResult compilation) {
+    public StaticPlanExecutor.ExecutionResult execute(CompilationResult compilation) {
         if (compilation instanceof CompilationResult.StaticPlan staticPlan)
             return executor.execute(staticPlan.plan(), actions);
         if (compilation instanceof CompilationResult.Direct direct) {
