@@ -2472,3 +2472,9 @@ Run169 的持久化 `MAIN_V2_REFERENCE_LAST_IDENTITY` ERROR 在 SemanticInterpre
 Run171 表明固定的 conditional-fallback repair 文案不能纠正预算语义或 unbounded research。SemanticInterpreter 改为把第一次解析/验证失败映射到封闭 violation enum：`HARD_BUDGET_REQUIRED`、`BUDGET_CLEAR_REQUIRED`、`CONDITIONAL_FALLBACK_REQUIRED` 或 generic contract；第二次调用只接收对应固定指令，不拼接异常或模型输出。二次失败保留 second failure 为 cause，first failure 作为 suppressed diagnostics。
 
 硬预算 detector 覆盖“维度+数值+以内/以下”“维度+不超过/最多/上限+数值”和“预算+改成/改为/调整为/设为/提高到/降到+数值”；预算显式取消另以 invariant 要求 `cleared:[BUDGET]` 且不生成 replacement budget。开放式 `EXPLORE(unboundedContinuation=true)` 可没有 entity target，grounding/task-context 忽略空 operand 并保持现有 Adaptive → controlled UNSUPPORTED 运行时边界；bounded Explore 仍拒绝空 target。冻结 Main asset 未改。定向 clean 回归通过：SemanticInterpreter、V2DomainGolden、V2RuntimeHardening。
+
+### V2 location provenance 与模型传输失败边界（2026-09-17）
+
+Run174 证明语义模型会把设备相对词或未出现的地点包装成 city/district/POI，进而错误触发 location clarification。本轮在 typed semantics 进入 reducer 前加入来源校验：地点字段必须逐字追溯到当前用户轮次，行政名称仅允许安全的尾缀归一（如“福州”与“福州市”）；不在此处解析现实地点或写入 device anchor。移除不可信地点不会改变菜系、预算、距离等同轮 criteria，真实命名 POI 仍交由 LocationResolver/provider 做唯一性判断。
+
+同时将 HTTP、连接和读取超时从 semantic repair taxonomy 中隔离：首次 transport/model availability failure 记录 evaluation-only `MODEL_TRANSPORT_FAILURE` attempt 并以受控 `SemanticModelAvailabilityException` 返回，不再伪装为 generic contract 后发起第二次模型调用。trace 不写入 Working Memory 或 durable state。定向回归覆盖虚构地点、device-relative fake POI、显式 city/POI、保留其他 criteria，以及 transport failure 单次调用和可观测性；冻结 Main asset 未改。

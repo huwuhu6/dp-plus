@@ -16,6 +16,7 @@ import com.hmdp.ai.v2.semantic.SemanticRelation;
 import com.hmdp.ai.v2.semantic.ObservationPredicate;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientException;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -52,6 +53,7 @@ public class SemanticInterpreter {
         try {
             return parseAndValidate(userTurn);
         } catch (RuntimeException firstFailure) {
+            if (isTransportFailure(firstFailure)) throw new SemanticModelAvailabilityException("语义模型暂不可用，请稍后重试", firstFailure);
             Violation violation = violationOf(firstFailure);
             try {
                 return parseAndValidate(userTurn, violation);
@@ -65,9 +67,14 @@ public class SemanticInterpreter {
 
     private TurnSemantics parseAndValidate(String userTurn) { return parseAndValidate(userTurn, null); }
     private TurnSemantics parseAndValidate(String userTurn, Violation repair) {
-        CallResult call = call(userTurn, repair);
+        CallResult call;
+        try { call = call(userTurn, repair); }
+        catch (RuntimeException failure) {
+            recordEvaluationAttempt(repair, null, "MODEL_TRANSPORT_FAILURE");
+            throw failure;
+        }
         try {
-        TurnSemantics semantics = normalizeDeterministicBudget(userTurn, parse(call.root()));
+        TurnSemantics semantics = normalizeLocationProvenance(userTurn, normalizeDeterministicBudget(userTurn, parse(call.root())));
         if (requiresHardBudget(userTurn) && !hasHardBudget(semantics)) throw violation(Violation.HARD_BUDGET_REQUIRED);
         if (requiresBudgetClear(userTurn) && !hasBudgetClearWithoutReplacement(semantics)) throw violation(Violation.BUDGET_CLEAR_REQUIRED);
         if (requiresConditionalFallback(userTurn) && semantics.requirementChanges().stream()
@@ -93,6 +100,27 @@ public class SemanticInterpreter {
         return userTurn.matches("(?s).*(?:人均|预算|消费)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?(?:以内|以下).*?")
                 || userTurn.matches("(?s).*(?:人均|预算|消费)[^\\d]{0,12}(?:不超过|最多|上限)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?.*")
                 || userTurn.matches("(?s).*预算[^\\d]{0,12}(?:改成|改为|调整为|设为|提高到|降到)[^\\d]{0,12}\\d+(?:\\.\\d+)?(?:元)?.*");
+    }
+    /** Model-extracted place text is admitted only when it is explicitly present in this user turn. */
+    private TurnSemantics normalizeLocationProvenance(String userTurn, TurnSemantics semantics) {
+        List<RequirementChange> changes = new ArrayList<>();
+        for (RequirementChange change : semantics.requirementChanges()) {
+            if (!(change instanceof RequirementChange.CriteriaPatch criteria) || criteria.patch().location() == null) { changes.add(change); continue; }
+            DiningCriteriaPatch patch = criteria.patch(); DiningCriteria.LocationCriteria location = patch.location();
+            String city = mentionedLocation(userTurn, location.city(), true) ? location.city() : null;
+            String district = mentionedLocation(userTurn, location.district(), true) ? location.district() : null;
+            String poi = mentionedLocation(userTurn, location.poi(), false) ? location.poi() : null;
+            DiningCriteria.LocationCriteria trusted = city == null && district == null && poi == null ? null : new DiningCriteria.LocationCriteria(city, district, poi);
+            changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(trusted, patch.cuisine(), patch.budget(), patch.distance(), patch.diningTime(), patch.semanticPreferences()), criteria.cleared()));
+        }
+        return new TurnSemantics(semantics.taskDirective(), semantics.taskDirectiveEvidence(), changes, semantics.entityFeedback(), semantics.requests(), semantics.relations(), semantics.references());
+    }
+    private boolean mentionedLocation(String userTurn, String value, boolean administrative) {
+        if (value == null || value.isBlank()) return false;
+        if (userTurn.contains(value)) return true;
+        if (!administrative) return false;
+        String normalized = value.replaceAll("(?:市|区|县|自治州|自治区)$", "");
+        return !normalized.isBlank() && userTurn.contains(normalized);
     }
     /** High-confidence numeric budget forms are normalized before reduction; ambiguous price language remains model-owned. */
     private TurnSemantics normalizeDeterministicBudget(String userTurn, TurnSemantics semantics) {
@@ -136,6 +164,7 @@ public class SemanticInterpreter {
                     && (change.patch().budget() == null || (change.patch().budget().hardMax() == null && change.patch().budget().softTarget() == null))); }
     private SemanticContractViolation violation(Violation code) { return new SemanticContractViolation(code); }
     private Violation violationOf(RuntimeException failure) { return failure instanceof SemanticContractViolation v ? v.code() : Violation.GENERIC_CONTRACT; }
+    private boolean isTransportFailure(Throwable failure) { for (Throwable current = failure; current != null; current = current.getCause()) if (current instanceof RestClientException || current instanceof java.net.SocketTimeoutException || current instanceof java.net.ConnectException) return true; return false; }
 
     private boolean isEmpty(RequirementChange.CriteriaPatch change) {
         DiningCriteriaPatch patch = change.patch();
@@ -236,8 +265,8 @@ public class SemanticInterpreter {
         }
     }
     private void recordEvaluationAttempt(Violation repair, String arguments, String validationResult) {
-        evaluationAttempts.get().add(Map.of("attempt", repair == null ? "FIRST" : "REPAIR", "violation", repair == null ? "NONE" : repair.name(),
-                "functionArguments", arguments, "validationResult", validationResult));
+        Map<String, Object> attempt = new LinkedHashMap<>(); attempt.put("attempt", repair == null ? "FIRST" : "REPAIR"); attempt.put("violation", repair == null ? "NONE" : repair.name());
+        if (arguments != null) attempt.put("functionArguments", arguments); attempt.put("validationResult", validationResult); evaluationAttempts.get().add(attempt);
     }
     private record CallResult(JsonNode root, String arguments) { }
 

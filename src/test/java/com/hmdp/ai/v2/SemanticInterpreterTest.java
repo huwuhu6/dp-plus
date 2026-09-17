@@ -3,6 +3,7 @@ package com.hmdp.ai.v2;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.v2.runtime.SemanticInterpreter;
 import com.hmdp.ai.v2.runtime.SemanticInterpretationException;
+import com.hmdp.ai.v2.runtime.SemanticModelAvailabilityException;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
 import com.hmdp.ai.v2.semantic.EntityFeedback;
 import com.hmdp.ai.v2.semantic.EntityReference;
@@ -10,10 +11,12 @@ import com.hmdp.ai.v2.semantic.RequirementChange;
 import com.hmdp.ai.v2.semantic.TaskDirective;
 import com.hmdp.ai.v2.semantic.UserRequest;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.client.ResourceAccessException;
 import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.net.SocketTimeoutException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -121,6 +124,45 @@ class SemanticInterpreterTest {
     }
 
     @Test
+    void locationProvenanceDropsInventedPlacesButPreservesExplicitMentions() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        var parsed = interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","criteria":{"poi":"虚构地点","cuisine":"火锅","budgetHard":120,"distanceKm":3}}
+                """));
+        var dropped = (com.hmdp.ai.v2.semantic.TurnSemantics) ReflectionTestUtils.invokeMethod(interpreter, "normalizeLocationProvenance", "找3公里内人均120以内火锅", parsed);
+        RequirementChange.CriteriaPatch patch = assertInstanceOf(RequirementChange.CriteriaPatch.class, dropped.requirementChanges().getFirst());
+        assertEquals(null, patch.patch().location()); assertEquals("火锅", patch.patch().cuisine().include()); assertEquals(new BigDecimal("120"), patch.patch().budget().hardMax());
+        var city = (com.hmdp.ai.v2.semantic.TurnSemantics) ReflectionTestUtils.invokeMethod(interpreter, "normalizeLocationProvenance", "福州附近找火锅", interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","criteria":{"city":"福州市"}}
+                """)));
+        assertEquals("福州市", assertInstanceOf(RequirementChange.CriteriaPatch.class, city.requirementChanges().getFirst()).patch().location().city());
+
+        var deviceRelative = (com.hmdp.ai.v2.semantic.TurnSemantics) ReflectionTestUtils.invokeMethod(interpreter, "normalizeLocationProvenance", "附近找火锅", interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","criteria":{"poi":"device_location_relative"}}
+                """)));
+        assertEquals(null, assertInstanceOf(RequirementChange.CriteriaPatch.class, deviceRelative.requirementChanges().getFirst()).patch().location());
+        var namedPoi = (com.hmdp.ai.v2.semantic.TurnSemantics) ReflectionTestUtils.invokeMethod(interpreter, "normalizeLocationProvenance", "福州大学附近找火锅", interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","criteria":{"poi":"福州大学"}}
+                """)));
+        assertEquals("福州大学", assertInstanceOf(RequirementChange.CriteriaPatch.class, namedPoi.requirementChanges().getFirst()).patch().location().poi());
+    }
+
+    @Test
+    void transportFailureIsObservedWithoutSemanticRepair() {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
+        ReflectionTestUtils.setField(interpreter, "aiClient", client);
+        ReflectionTestUtils.setField(interpreter, "objectMapper", mapper);
+        when(client.chatCompletion(any(List.class), any(List.class), any(Map.class), anyString()))
+                .thenThrow(new ResourceAccessException("read timed out", new SocketTimeoutException("timed out")));
+
+        assertInstanceOf(SemanticModelAvailabilityException.class,
+                org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> interpreter.interpret("找火锅")));
+        verify(client, times(1)).chatCompletion(any(List.class), any(List.class), any(Map.class), anyString());
+        assertEquals("MODEL_TRANSPORT_FAILURE", interpreter.takeEvaluationAttempts().getFirst().get("validationResult"));
+    }
+
+    @Test
     void unboundedExploreAllowsEmptyTargetButBoundedExploreRejectsIt() throws Exception {
         SemanticInterpreter interpreter = new SemanticInterpreter();
         var semantics = interpreter.parse(mapper.readTree("""
@@ -147,14 +189,14 @@ class SemanticInterpreterTest {
                 """);
         when(client.chatCompletion(any(List.class), any(List.class), any(Map.class), anyString())).thenReturn(invalid, invalid);
         SemanticInterpretationException error = org.junit.jupiter.api.Assertions.assertThrows(SemanticInterpretationException.class,
-                () -> interpreter.interpret("预算改成150"));
-        assertEquals("HARD_BUDGET_REQUIRED", error.getCause().getMessage());
+                () -> interpreter.interpret("如果没有火锅就改烧烤"));
+        assertEquals("CONDITIONAL_FALLBACK_REQUIRED", error.getCause().getMessage());
         assertEquals(1, error.getSuppressed().length);
-        assertEquals("HARD_BUDGET_REQUIRED", error.getSuppressed()[0].getMessage());
+        assertEquals("CONDITIONAL_FALLBACK_REQUIRED", error.getSuppressed()[0].getMessage());
         ArgumentCaptor<List<Map<String, Object>>> messages = ArgumentCaptor.forClass(List.class);
         verify(client, times(2)).chatCompletion(messages.capture(), any(List.class), any(Map.class), anyString());
-        assertTrue(String.valueOf(messages.getAllValues().get(1).getFirst().get("content")).contains("HARD_BUDGET_REQUIRED"));
-        assertFalse(String.valueOf(messages.getAllValues().get(1).getFirst().get("content")).contains("CONDITIONAL_FALLBACK_REQUIRED"));
+        assertTrue(String.valueOf(messages.getAllValues().get(1).getFirst().get("content")).contains("CONDITIONAL_FALLBACK_REQUIRED"));
+        assertFalse(String.valueOf(messages.getAllValues().get(1).getFirst().get("content")).contains("HARD_BUDGET_REQUIRED"));
     }
 
     private com.fasterxml.jackson.databind.JsonNode modelResponse(String arguments) throws Exception {
