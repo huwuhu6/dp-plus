@@ -61,6 +61,18 @@ class V2LocationResolverTest {
     }
 
     @Test
+    void inheritedCoordinateAnchorSurvivesNonLocationRequirementTurnButNamedAnchorDoesNotSatisfyDistance() {
+        V2LocationResolver resolver = new V2LocationResolver(null);
+        SearchAnchor device = new SearchAnchor(null, "当前位置", 26D, 119D, null, null, null, SearchAnchor.AnchorSource.DEVICE);
+        var reused = assertInstanceOf(V2LocationResolver.Resolution.Resolved.class,
+                resolver.resolve(criteria(null, new DiningCriteria.DistanceCriteria(java.math.BigDecimal.ONE)), null, device, false));
+        assertEquals(device, reused.anchor());
+        SearchAnchor named = new SearchAnchor(null, null, null, null, null, "某城市", null, SearchAnchor.AnchorSource.NAMED_LOCATION);
+        assertInstanceOf(V2LocationResolver.Resolution.NeedsClarification.class,
+                resolver.resolve(criteria(null, new DiningCriteria.DistanceCriteria(java.math.BigDecimal.ONE)), null, named, false));
+    }
+
+    @Test
     void unverifiedDistrictLabelClarifiesInsteadOfBecomingAdministrativeScope() {
         LocationResolutionProvider provider = mock(LocationResolutionProvider.class);
         when(provider.isAvailable()).thenReturn(true);

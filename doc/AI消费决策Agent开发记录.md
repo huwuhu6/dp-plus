@@ -2482,3 +2482,7 @@ Run174 证明语义模型会把设备相对词或未出现的地点包装成 cit
 ### V2 PRE requirement commit 与 location clarification（2026-09-17）
 
 Run178 证明 location clarification 发生在 `PreExecutionReducer.reduce()` 之后、PRE OCC append 之前时，会使已确定的预算 clear、距离、菜系等 canonical requirements 随早返回丢失。PRE 现在仅在 grounding 已成功、且 location resolver 需要 clarification 时提交已归约 state，再返回 clarification；SearchAnchor 不写入，执行也不会开始。任务/实体 grounding 未解决仍在 reducer 前返回，因此不会持久化未 grounding 的 feedback 或 reference effect；OCC 冲突继续最多 reload/reduce/append 一次。定向回归覆盖 requirement 保留、无假 anchor、unresolved feedback 不提交和既有 OCC 行为。
+
+### V2 空字段与 SearchAnchor 延续契约（2026-09-18）
+
+Run179 显示模型在无关的后续轮会输出空 cuisine，且已有 DEVICE anchor 会因当前轮未重复上传坐标而丢失。typed parser 现在将空白 cuisine 和空 exclusion 列表视为 untouched；只有 `cleared:[CUISINE]` 才删除已有菜系，非空 exclusion 仍是有效 mutation。Location resolver 接收来自 typed `RequirementChange` 的 location-change intent：无 location mutation 且无新设备坐标时，仅复用有可靠坐标、且可满足当前距离约束的既有 anchor；显式 clear/new named location 继续重新解析，模糊或无坐标 anchor 不会冒充距离基准。定向 clean 回归通过，冻结评测资产未改。

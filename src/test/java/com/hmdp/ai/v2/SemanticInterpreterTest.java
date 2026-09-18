@@ -124,6 +124,19 @@ class SemanticInterpreterTest {
     }
 
     @Test
+    void blankOptionalCuisineIsUntouchedButExclusionsRemainMeaningful() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        RequirementChange.CriteriaPatch blank = assertInstanceOf(RequirementChange.CriteriaPatch.class, interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","criteria":{"cuisine":"   "}}
+                """)).requirementChanges().getFirst());
+        assertEquals(null, blank.patch().cuisine());
+        RequirementChange.CriteriaPatch excluded = assertInstanceOf(RequirementChange.CriteriaPatch.class, interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","criteria":{"cuisine":"","excludedCuisines":["烧烤"," "]}}
+                """)).requirementChanges().getFirst());
+        assertEquals(null, excluded.patch().cuisine().include()); assertEquals(List.of("烧烤"), excluded.patch().cuisine().exclude());
+    }
+
+    @Test
     void locationProvenanceDropsInventedPlacesButPreservesExplicitMentions() throws Exception {
         SemanticInterpreter interpreter = new SemanticInterpreter();
         var parsed = interpreter.parse(mapper.readTree("""

@@ -23,10 +23,18 @@ public class V2LocationResolver {
     }
 
     public Resolution resolve(DiningCriteria criteria, ChatLocationInput device, SearchAnchor previous) {
+        return resolve(criteria, device, previous, true);
+    }
+
+    /** Location-change intent comes from typed semantics; criteria alone cannot distinguish inherited location from a new one. */
+    public Resolution resolve(DiningCriteria criteria, ChatLocationInput device, SearchAnchor previous, boolean locationChanged) {
         DiningCriteria.LocationCriteria requested = criteria == null ? null : criteria.location();
         boolean explicitArea = hasText(requested == null ? null : requested.city())
                 || hasText(requested == null ? null : requested.district());
         String poi = requested == null ? null : requested.poi();
+
+        if (!locationChanged && !validCoordinates(device) && previous != null
+                && (!requiresDistance(criteria) || validCoordinates(previous))) return new Resolution.Resolved(previous);
 
         boolean vagueNear = poi != null && poi.matches("(?i)附近|周边|周围|这里|这附近");
         if (hasText(poi) && !vagueNear && previous != null && previous.source() == SearchAnchor.AnchorSource.POI
@@ -103,6 +111,7 @@ public class V2LocationResolver {
                 && input.getLatitude() >= -90D && input.getLatitude() <= 90D
                 && input.getLongitude() >= -180D && input.getLongitude() <= 180D;
     }
+    private boolean validCoordinates(SearchAnchor anchor) { return anchor != null && anchor.latitude() != null && anchor.longitude() != null; }
     private boolean hasText(String value) { return value != null && !value.isBlank(); }
     private String firstText(String first, String second, String fallback) {
         if (hasText(first)) return first;

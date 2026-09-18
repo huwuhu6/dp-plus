@@ -123,7 +123,8 @@ public class V2ChatOrchestrator {
         GroundedTurn grounded = ((GroundingResult.Grounded) grounding).turn();
 
         V2TaskState reduced = preReducer.reduce(stateGateway.read(task), semantics, grounded);
-        V2LocationResolver.Resolution location = locationResolver.resolve(reduced.criteria(), request.getLocation(), reduced.searchAnchor());
+        V2LocationResolver.Resolution location = locationResolver.resolve(reduced.criteria(), request.getLocation(), reduced.searchAnchor(),
+                hasLocationMutation(semantics));
         if (location instanceof V2LocationResolver.Resolution.NeedsClarification clarification) {
             // Requirements and grounded feedback are deterministic user facts at this point.  A missing
             // search anchor only blocks resolution/execution; it must not roll those facts back.
@@ -404,6 +405,11 @@ public class V2ChatOrchestrator {
         if (patch.budget() != null) dimensions.add("BUDGET"); if (patch.distance() != null) dimensions.add("DISTANCE");
         if (patch.diningTime() != null) dimensions.add("DINING_TIME"); if (patch.semanticPreferences() != null) dimensions.add("SEMANTIC_PREFERENCES");
         return dimensions;
+    }
+    private boolean hasLocationMutation(TurnSemantics semantics) {
+        return semantics.requirementChanges().stream().filter(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch.class::isInstance)
+                .map(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch.class::cast)
+                .anyMatch(change -> change.patch().location() != null || change.cleared().contains(com.hmdp.ai.v2.semantic.RequirementChange.ClearedCriterion.LOCATION));
     }
 
     private List<com.hmdp.ai.v2.semantic.EntityReference> semanticReferences(TurnSemantics semantics) {

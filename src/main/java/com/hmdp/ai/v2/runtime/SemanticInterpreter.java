@@ -275,8 +275,10 @@ public class SemanticInterpreter {
         String city = nonBlankText(node, "city"), district = nonBlankText(node, "district"), poi = nonBlankText(node, "poi");
         DiningCriteria.LocationCriteria location = city != null || district != null || poi != null
                 ? new DiningCriteria.LocationCriteria(city, district, poi) : null;
-        DiningCriteria.CuisineCriteria cuisine = any(node, "cuisine", "excludedCuisines")
-                ? new DiningCriteria.CuisineCriteria(text(node, "cuisine"), strings(node.path("excludedCuisines"))) : null;
+        String includedCuisine = nonBlankText(node, "cuisine");
+        List<String> excludedCuisines = strings(node.path("excludedCuisines")).stream().filter(value -> value != null && !value.isBlank()).toList();
+        DiningCriteria.CuisineCriteria cuisine = includedCuisine != null || !excludedCuisines.isEmpty()
+                ? new DiningCriteria.CuisineCriteria(includedCuisine, excludedCuisines) : null;
         DiningCriteria.BudgetCriteria budget = any(node, "budgetSoft", "budgetHard")
                 ? new DiningCriteria.BudgetCriteria(decimal(node, "budgetSoft"), decimal(node, "budgetHard")) : null;
         DiningCriteria.DistanceCriteria distance = node.hasNonNull("distanceKm")
