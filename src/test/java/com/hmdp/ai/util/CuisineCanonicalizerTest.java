@@ -151,4 +151,12 @@ class CuisineCanonicalizerTest {
         assertTrue(values.contains("其他"));
         assertTrue(values.size() >= 20);
     }
+
+    @Test
+    void detectsKnownCuisineMentionsWithoutDuplicatingAliases() {
+        assertTrue(CuisineCanonicalizer.containsKnownCuisineMention("想吃寿司"));
+        assertTrue(CuisineCanonicalizer.containsKnownCuisineMention("来点烤肉"));
+        assertTrue(CuisineCanonicalizer.containsKnownCuisineMention("附近喝咖啡"));
+        assertFalse(CuisineCanonicalizer.containsKnownCuisineMention("介绍餐饮历史"));
+    }
 }

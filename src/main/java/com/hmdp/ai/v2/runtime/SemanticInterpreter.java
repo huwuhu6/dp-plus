@@ -3,6 +3,7 @@ package com.hmdp.ai.v2.runtime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.ai.client.OpenAiCompatibleClient;
+import com.hmdp.ai.util.CuisineCanonicalizer;
 import com.hmdp.ai.v2.semantic.DiningCriteria;
 import com.hmdp.ai.v2.semantic.DiningCriteriaPatch;
 import com.hmdp.ai.v2.semantic.EntityFeedback;
@@ -75,6 +76,7 @@ public class SemanticInterpreter {
         }
         try {
         TurnSemantics semantics = normalizeLocationProvenance(userTurn, normalizeDeterministicBudget(userTurn, parse(call.root())));
+        if (requiresCuisineCoverage(userTurn, semantics)) throw violation(Violation.CUISINE_COVERAGE_REQUIRED);
         if (requiresHardBudget(userTurn) && !hasHardBudget(semantics)) throw violation(Violation.HARD_BUDGET_REQUIRED);
         if (requiresBudgetClear(userTurn) && !hasBudgetClearWithoutReplacement(semantics)) throw violation(Violation.BUDGET_CLEAR_REQUIRED);
         if (requiresConditionalFallback(userTurn) && semantics.requirementChanges().stream()
@@ -154,6 +156,13 @@ public class SemanticInterpreter {
     }
     private boolean requiresBudgetClear(String userTurn) {
         return userTurn.matches("(?s).*(?:预算不限|不限预算|不要预算限制|取消预算限制|去掉预算条件).*");
+    }
+    private boolean requiresCuisineCoverage(String userTurn, TurnSemantics semantics) {
+        boolean recommendation = semantics.requests().stream().anyMatch(UserRequest.RecommendationRequest.class::isInstance);
+        boolean cuisineExpressed = semantics.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
+                .map(RequirementChange.CriteriaPatch.class::cast).anyMatch(change -> change.patch().cuisine() != null
+                        || change.cleared().contains(RequirementChange.ClearedCriterion.CUISINE));
+        return recommendation && !cuisineExpressed && CuisineCanonicalizer.containsKnownCuisineMention(userTurn);
     }
     private boolean hasHardBudget(TurnSemantics semantics) { return semantics.requirementChanges().stream()
             .filter(RequirementChange.CriteriaPatch.class::isInstance).map(RequirementChange.CriteriaPatch.class::cast)
@@ -351,9 +360,10 @@ public class SemanticInterpreter {
         case HARD_BUDGET_REQUIRED -> " Your previous output violated HARD_BUDGET_REQUIRED: the user stated an explicit budget cap or replacement; output criteria.budgetHard.";
         case BUDGET_CLEAR_REQUIRED -> " Your previous output violated BUDGET_CLEAR_REQUIRED: the user removed the budget constraint; output cleared:[BUDGET] and no budgetSoft/budgetHard.";
         case CONDITIONAL_FALLBACK_REQUIRED -> " Your previous output violated CONDITIONAL_FALLBACK_REQUIRED: emit a conditional fallback with non-empty fallback criteria or cleared fields.";
+        case CUISINE_COVERAGE_REQUIRED -> " Your previous output omitted an explicitly mentioned known cuisine from a dining recommendation. Re-evaluate whether it is an include, exclusion, replacement, or explicit clear and return the corresponding cuisine semantics.";
         case GENERIC_CONTRACT -> " Your previous output violated the semantic contract. Return a complete function call and obey enums and required fields exactly.";
     }; }
-    enum Violation { NONE, HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED, CONDITIONAL_FALLBACK_REQUIRED, GENERIC_CONTRACT }
+    enum Violation { NONE, HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED, CONDITIONAL_FALLBACK_REQUIRED, CUISINE_COVERAGE_REQUIRED, GENERIC_CONTRACT }
     private static final class SemanticContractViolation extends IllegalArgumentException { private final Violation code; private SemanticContractViolation(Violation code) { super(code.name()); this.code = code; } private Violation code() { return code; } }
     private ObservationPredicate predicate(JsonNode node) {
         String type = requiredText(node, "type");

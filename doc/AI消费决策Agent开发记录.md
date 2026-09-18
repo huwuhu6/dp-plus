@@ -2486,3 +2486,7 @@ Run178 证明 location clarification 发生在 `PreExecutionReducer.reduce()` �
 ### V2 空字段与 SearchAnchor 延续契约（2026-09-18）
 
 Run179 显示模型在无关的后续轮会输出空 cuisine，且已有 DEVICE anchor 会因当前轮未重复上传坐标而丢失。typed parser 现在将空白 cuisine 和空 exclusion 列表视为 untouched；只有 `cleared:[CUISINE]` 才删除已有菜系，非空 exclusion 仍是有效 mutation。Location resolver 接收来自 typed `RequirementChange` 的 location-change intent：无 location mutation 且无新设备坐标时，仅复用有可靠坐标、且可满足当前距离约束的既有 anchor；显式 clear/new named location 继续重新解析，模糊或无坐标 anchor 不会冒充距离基准。定向 clean 回归通过，冻结评测资产未改。
+
+### V2 显式菜系 coverage repair（2026-09-18）
+
+连续五次冻结 CLEAR subset 发现模型对明确菜系的首轮提取为 3/5，另两次遗漏或错误放入 POI，属于重复的 semantic coverage defect。SemanticInterpreter 因此增加一次封闭 `CUISINE_COVERAGE_REQUIRED` repair：只有当前轮包含 `CuisineCanonicalizer` 已知 alias/canonical、语义为 RECOMMENDATION、且模型既未提供 cuisine include/exclusion 也未显式 clear 时触发。修复指令要求模型判断 include、exclusion、replacement 或 clear，代码不直接写入 criteria；GENERAL 问题不触发。菜系 alias 检测复用 canonicalizer 唯一词表，覆盖寿司、烤肉、区域菜、面食、咖啡等同类输入。冻结 Main 未改。

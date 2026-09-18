@@ -202,4 +202,11 @@ public class CuisineCanonicalizer {
     public static java.util.Set<String> knownCanonicalValues() {
         return new java.util.LinkedHashSet<>(CANONICAL_MAP.values());
     }
+
+    /** True only when text explicitly contains a known platform cuisine alias or canonical category. */
+    public static boolean containsKnownCuisineMention(String text) {
+        if (text == null || text.isBlank()) return false;
+        return CANONICAL_MAP.keySet().stream().anyMatch(text::contains)
+                || knownCanonicalValues().stream().anyMatch(text::contains);
+    }
 }

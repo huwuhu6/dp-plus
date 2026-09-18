@@ -137,6 +137,24 @@ class SemanticInterpreterTest {
     }
 
     @Test
+    void cuisineCoverageRequiresRepairOnlyForRecommendationWithoutCuisineSemantics() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        var omitted = interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","requests":[{"requestId":"r","type":"RECOMMENDATION","target":{},"fact":"DETAIL","topic":""}]}
+                """));
+        for (String input : List.of("想吃寿司", "找烤肉", "来点川菜", "附近喝咖啡", "想吃面食"))
+            assertTrue((Boolean) ReflectionTestUtils.invokeMethod(interpreter, "requiresCuisineCoverage", input, omitted), input);
+        var exclusion = interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","criteria":{"excludedCuisines":["火锅"]},"requests":[{"requestId":"r","type":"RECOMMENDATION","target":{},"fact":"DETAIL","topic":""}]}
+                """));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(interpreter, "requiresCuisineCoverage", "不吃火锅，换点别的", exclusion));
+        var general = interpreter.parse(mapper.readTree("""
+                {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","requests":[{"requestId":"g","type":"GENERAL","target":{},"fact":"DETAIL","topic":"火锅历史"}]}
+                """));
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(interpreter, "requiresCuisineCoverage", "介绍火锅历史", general));
+    }
+
+    @Test
     void locationProvenanceDropsInventedPlacesButPreservesExplicitMentions() throws Exception {
         SemanticInterpreter interpreter = new SemanticInterpreter();
         var parsed = interpreter.parse(mapper.readTree("""
