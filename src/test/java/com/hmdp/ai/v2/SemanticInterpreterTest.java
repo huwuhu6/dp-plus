@@ -192,6 +192,38 @@ class SemanticInterpreterTest {
         assertEquals("三里屯", normalizedPoi(interpreter, "人均180以内，在三里屯附近找火锅", "三里屯", "180", null, null));
     }
 
+    @Test
+    void locationProvenanceUsesTurnLevelNumericEvidenceAcrossCriteriaPatches() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        var numericCopy = combinedPatches(interpreter,
+                "{\"taskDirective\":\"CONTINUE\",\"taskDirectiveEvidence\":\"NONE\",\"criteria\":{\"poi\":\"240\",\"distanceKm\":3}}",
+                "{\"taskDirective\":\"CONTINUE\",\"taskDirectiveEvidence\":\"NONE\",\"criteria\":{\"budgetHard\":240}}");
+        var normalizedCopy = (com.hmdp.ai.v2.semantic.TurnSemantics) ReflectionTestUtils.invokeMethod(interpreter,
+                "normalizeLocationProvenance", "3公里内人均240以内找餐厅", numericCopy);
+        var locationPatch = assertInstanceOf(RequirementChange.CriteriaPatch.class, normalizedCopy.requirementChanges().getFirst());
+        var budgetPatch = assertInstanceOf(RequirementChange.CriteriaPatch.class, normalizedCopy.requirementChanges().get(1));
+        assertEquals(null, locationPatch.patch().location());
+        assertEquals(new BigDecimal("3"), locationPatch.patch().distance().hardMaxKm());
+        assertEquals(new BigDecimal("240"), budgetPatch.patch().budget().hardMax());
+
+        var namedPlace = combinedPatches(interpreter,
+                "{\"taskDirective\":\"CONTINUE\",\"taskDirectiveEvidence\":\"NONE\",\"criteria\":{\"poi\":\"北京798艺术区\"}}",
+                "{\"taskDirective\":\"CONTINUE\",\"taskDirectiveEvidence\":\"NONE\",\"criteria\":{\"budgetHard\":798}}");
+        var normalizedPlace = (com.hmdp.ai.v2.semantic.TurnSemantics) ReflectionTestUtils.invokeMethod(interpreter,
+                "normalizeLocationProvenance", "在北京798艺术区附近找人均798以内的餐厅", namedPlace);
+        var namedLocationPatch = assertInstanceOf(RequirementChange.CriteriaPatch.class, normalizedPlace.requirementChanges().getFirst());
+        assertEquals("北京798艺术区", namedLocationPatch.patch().location().poi());
+    }
+
+    private com.hmdp.ai.v2.semantic.TurnSemantics combinedPatches(SemanticInterpreter interpreter, String first, String second) throws Exception {
+        var primary = interpreter.parse(mapper.readTree(first));
+        var secondary = interpreter.parse(mapper.readTree(second));
+        var changes = new java.util.ArrayList<>(primary.requirementChanges());
+        changes.addAll(secondary.requirementChanges());
+        return new com.hmdp.ai.v2.semantic.TurnSemantics(primary.taskDirective(), primary.taskDirectiveEvidence(), changes,
+                primary.entityFeedback(), primary.requests(), primary.relations(), primary.references());
+    }
+
     private String normalizedPoi(SemanticInterpreter interpreter, String userTurn, String poi, String hardBudget, String softBudget, String distance) throws Exception {
         String fields = "\"poi\":\"%s\"".formatted(poi)
                 + (hardBudget == null ? "" : ",\"budgetHard\":%s".formatted(hardBudget))

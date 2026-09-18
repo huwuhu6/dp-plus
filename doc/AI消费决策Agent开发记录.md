@@ -1,5 +1,11 @@
 # AI 消费决策 Agent 开发记录
 
+## 2026-09-18：修复 V2 跨 CriteriaPatch 位置来源组合边界
+
+位置 provenance 的数值冲突判断改为读取当前 `TurnSemantics` 中所有 `CriteriaPatch` 的预算 hard/soft 与距离 hard evidence，而不是只读取承载 POI 的单个 patch。这样 deterministic budget normalization 追加独立 patch 时，复制到 POI 的预算数值不会因 patch 分片而获得 location identity；明确“在 X / X 附近”的命名地点仍优先保留。未合并 patch、未修改 budget normalization 或 LocationResolver。
+
+新增 composition regression：`poi=240,distance=3` 与独立 `budgetHard=240` 会删除 POI 且保留距离/预算；含数值的明确命名地点“北京798艺术区”在独立 `budgetHard=798` 下仍保留。定向验证通过：`SemanticInterpreterTest` 18/18、`V2LocationResolverTest` 5/5、`V2RuntimeHardeningTest` 3/3。全量 clean test 另有既存 `AiConversationEvaluationServiceTest` 6 个 mock wiring failure（`semanticInterpreter` 为 null），与本次 provenance 变更无调用重叠。
+
 ## 2026-09-16：补齐 audited Main V2 评测资产
 
 新增 `conversation-v2-main-v2`（24 条）作为开发期可见的 V2 contract regression benchmark，不从 MySQL 回退加载。它保留唯一 final-status，覆盖 criteria overwrite/clear/relative/multi patch、task restore/abandon、visible-batch ordinal identity、reject/critique/batch feedback、alternatives、location anchor/clarification、hard criteria、条件语义及 controlled unsupported。候选排序与具体 shopId 均不作为 gold。

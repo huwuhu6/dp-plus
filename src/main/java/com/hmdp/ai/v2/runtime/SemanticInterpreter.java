@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -105,17 +106,31 @@ public class SemanticInterpreter {
     }
     /** Model-extracted place text is admitted only when it is explicitly present in this user turn. */
     private TurnSemantics normalizeLocationProvenance(String userTurn, TurnSemantics semantics) {
+        Set<BigDecimal> numericSlotEvidence = numericSlotEvidence(semantics);
         List<RequirementChange> changes = new ArrayList<>();
         for (RequirementChange change : semantics.requirementChanges()) {
             if (!(change instanceof RequirementChange.CriteriaPatch criteria) || criteria.patch().location() == null) { changes.add(change); continue; }
             DiningCriteriaPatch patch = criteria.patch(); DiningCriteria.LocationCriteria location = patch.location();
             String city = mentionedLocation(userTurn, location.city(), true) ? location.city() : null;
             String district = mentionedLocation(userTurn, location.district(), true) ? location.district() : null;
-            String poi = admissiblePoi(userTurn, location.poi(), patch) ? location.poi() : null;
+            String poi = admissiblePoi(userTurn, location.poi(), numericSlotEvidence) ? location.poi() : null;
             DiningCriteria.LocationCriteria trusted = city == null && district == null && poi == null ? null : new DiningCriteria.LocationCriteria(city, district, poi);
             changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(trusted, patch.cuisine(), patch.budget(), patch.distance(), patch.diningTime(), patch.semanticPreferences()), criteria.cleared()));
         }
         return new TurnSemantics(semantics.taskDirective(), semantics.taskDirectiveEvidence(), changes, semantics.entityFeedback(), semantics.requests(), semantics.relations(), semantics.references());
+    }
+    /** Provenance is evaluated against all canonical criteria patches in this turn, including deterministic additions. */
+    private Set<BigDecimal> numericSlotEvidence(TurnSemantics semantics) {
+        Set<BigDecimal> values = new LinkedHashSet<>();
+        semantics.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
+                .map(RequirementChange.CriteriaPatch.class::cast).map(RequirementChange.CriteriaPatch::patch).forEach(patch -> {
+                    if (patch.budget() != null) {
+                        if (patch.budget().hardMax() != null) values.add(patch.budget().hardMax());
+                        if (patch.budget().softTarget() != null) values.add(patch.budget().softTarget());
+                    }
+                    if (patch.distance() != null && patch.distance().hardMaxKm() != null) values.add(patch.distance().hardMaxKm());
+                });
+        return values;
     }
     private boolean mentionedLocation(String userTurn, String value, boolean administrative) {
         if (value == null || value.isBlank()) return false;
@@ -125,11 +140,11 @@ public class SemanticInterpreter {
         return !normalized.isBlank() && userTurn.contains(normalized);
     }
     /** A lexical mention alone is insufficient when the model copied another canonical slot into POI. */
-    private boolean admissiblePoi(String userTurn, String poi, DiningCriteriaPatch patch) {
+    private boolean admissiblePoi(String userTurn, String poi, Set<BigDecimal> numericSlotEvidence) {
         if (!mentionedLocation(userTurn, poi, false)) return false;
         if (hasLocationContext(userTurn, poi)) return true;
         if (CuisineCanonicalizer.containsKnownCuisineMention(poi)) return false;
-        return !sharesNumericSlot(poi, patch);
+        return !sharesNumericSlot(poi, numericSlotEvidence);
     }
     private boolean hasLocationContext(String userTurn, String poi) {
         if (poi == null || poi.isBlank()) return false;
@@ -137,13 +152,11 @@ public class SemanticInterpreter {
         return userTurn.matches("(?s).*(?:在|去|到)\\s*" + quoted + ".*")
                 || userTurn.matches("(?s).*" + quoted + "\\s*(?:附近|周边|一带).*");
     }
-    private boolean sharesNumericSlot(String poi, DiningCriteriaPatch patch) {
+    private boolean sharesNumericSlot(String poi, Set<BigDecimal> numericSlotEvidence) {
         Matcher values = Pattern.compile("\\d+(?:\\.\\d+)?").matcher(poi == null ? "" : poi);
         while (values.find()) {
             BigDecimal value = new BigDecimal(values.group());
-            if (same(value, patch.budget() == null ? null : patch.budget().hardMax())
-                    || same(value, patch.budget() == null ? null : patch.budget().softTarget())
-                    || same(value, patch.distance() == null ? null : patch.distance().hardMaxKm())) return true;
+            if (numericSlotEvidence.stream().anyMatch(candidate -> same(value, candidate))) return true;
         }
         return false;
     }
