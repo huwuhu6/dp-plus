@@ -2490,3 +2490,7 @@ Run179 显示模型在无关的后续轮会输出空 cuisine，且已有 DEVICE 
 ### V2 显式菜系 coverage repair（2026-09-18）
 
 连续五次冻结 CLEAR subset 发现模型对明确菜系的首轮提取为 3/5，另两次遗漏或错误放入 POI，属于重复的 semantic coverage defect。SemanticInterpreter 因此增加一次封闭 `CUISINE_COVERAGE_REQUIRED` repair：只有当前轮包含 `CuisineCanonicalizer` 已知 alias/canonical、语义为 RECOMMENDATION、且模型既未提供 cuisine include/exclusion 也未显式 clear 时触发。修复指令要求模型判断 include、exclusion、replacement 或 clear，代码不直接写入 criteria；GENERAL 问题不触发。菜系 alias 检测复用 canonicalizer 唯一词表，覆盖寿司、烤肉、区域菜、面食、咖啡等同类输入。冻结 Main 未改。
+
+### V2 location provenance 的跨 slot 准入（2026-09-18）
+
+Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 budget、distance、cuisine、device placeholder 或解释文本污染。原 lexical provenance 已删除多数污染，但“原文出现”错误地让 cuisine token 与预算数字获得 POI 身份。现有 admission gate 因而增加最小 cross-slot conflict：POI 仍须来自当前轮；无显式地点关系时，若它包含当前 canonical budget/distance 数值或命中 `CuisineCanonicalizer` 已知类别则拒绝。显式“在/去/到 X”或“X附近/周边/一带”仍允许真实命名地点，带数字的地名也不会仅因数字被拒绝。LocationResolver 仍独立负责唯一性与 anchor 解析。定向 tests 覆盖预算、菜系、device、幻觉、真实道路/机构/数字地名与预算加真实 POI；冻结 Main 未改。

@@ -111,7 +111,7 @@ public class SemanticInterpreter {
             DiningCriteriaPatch patch = criteria.patch(); DiningCriteria.LocationCriteria location = patch.location();
             String city = mentionedLocation(userTurn, location.city(), true) ? location.city() : null;
             String district = mentionedLocation(userTurn, location.district(), true) ? location.district() : null;
-            String poi = mentionedLocation(userTurn, location.poi(), false) ? location.poi() : null;
+            String poi = admissiblePoi(userTurn, location.poi(), patch) ? location.poi() : null;
             DiningCriteria.LocationCriteria trusted = city == null && district == null && poi == null ? null : new DiningCriteria.LocationCriteria(city, district, poi);
             changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(trusted, patch.cuisine(), patch.budget(), patch.distance(), patch.diningTime(), patch.semanticPreferences()), criteria.cleared()));
         }
@@ -124,6 +124,30 @@ public class SemanticInterpreter {
         String normalized = value.replaceAll("(?:市|区|县|自治州|自治区)$", "");
         return !normalized.isBlank() && userTurn.contains(normalized);
     }
+    /** A lexical mention alone is insufficient when the model copied another canonical slot into POI. */
+    private boolean admissiblePoi(String userTurn, String poi, DiningCriteriaPatch patch) {
+        if (!mentionedLocation(userTurn, poi, false)) return false;
+        if (hasLocationContext(userTurn, poi)) return true;
+        if (CuisineCanonicalizer.containsKnownCuisineMention(poi)) return false;
+        return !sharesNumericSlot(poi, patch);
+    }
+    private boolean hasLocationContext(String userTurn, String poi) {
+        if (poi == null || poi.isBlank()) return false;
+        String quoted = Pattern.quote(poi.trim());
+        return userTurn.matches("(?s).*(?:在|去|到)\\s*" + quoted + ".*")
+                || userTurn.matches("(?s).*" + quoted + "\\s*(?:附近|周边|一带).*");
+    }
+    private boolean sharesNumericSlot(String poi, DiningCriteriaPatch patch) {
+        Matcher values = Pattern.compile("\\d+(?:\\.\\d+)?").matcher(poi == null ? "" : poi);
+        while (values.find()) {
+            BigDecimal value = new BigDecimal(values.group());
+            if (same(value, patch.budget() == null ? null : patch.budget().hardMax())
+                    || same(value, patch.budget() == null ? null : patch.budget().softTarget())
+                    || same(value, patch.distance() == null ? null : patch.distance().hardMaxKm())) return true;
+        }
+        return false;
+    }
+    private boolean same(BigDecimal left, BigDecimal right) { return right != null && left.compareTo(right) == 0; }
     /** High-confidence numeric budget forms are normalized before reduction; ambiguous price language remains model-owned. */
     private TurnSemantics normalizeDeterministicBudget(String userTurn, TurnSemantics semantics) {
         if (!requiresHardBudget(userTurn) && !requiresBudgetClear(userTurn)) return semantics;
@@ -384,7 +408,9 @@ public class SemanticInterpreter {
                 "name", string, "taskSelector", enumString("EARLIEST", "ACTIVE", "MATCH_CONTEXT"),
                 "goalCategory", string, "city", string));
         Map<String, Object> criteria = Map.of("type", "object", "properties", Map.of(
-                "city", string, "district", string, "poi", string, "cuisine", string,
+                "city", Map.of("type", "string", "description", "Explicit user-stated city administrative location only."),
+                "district", Map.of("type", "string", "description", "Explicit user-stated district/county administrative location only."),
+                "poi", Map.of("type", "string", "description", "Explicit user-stated named physical place, landmark, institution, road, or mall only; never cuisine, budget, distance, device placeholder, explanation text, or another criterion."), "cuisine", string,
                 "excludedCuisines", Map.of("type", "array", "items", string),
                 "budgetSoft", Map.of("type", "number", "description", "Preference target only; requires explicit approximate/preferred wording"),
                 "budgetHard", Map.of("type", "number", "description", "Mandatory maximum for stated budgets and all ‘以内/不超过/改成N’ constraints"),

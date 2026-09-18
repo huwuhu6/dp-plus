@@ -179,6 +179,31 @@ class SemanticInterpreterTest {
     }
 
     @Test
+    void locationProvenanceRejectsCrossSlotCopiesWithoutBlacklistingNamedPlaces() throws Exception {
+        SemanticInterpreter interpreter = new SemanticInterpreter();
+        assertEquals(null, normalizedPoi(interpreter, "人均240以内找餐厅", "240", "240", null, null));
+        assertEquals(null, normalizedPoi(interpreter, "3公里内找烧烤", "烧烤", null, null, "3"));
+        assertEquals(null, normalizedPoi(interpreter, "附近找餐厅", "device_location_relative", null, null, null));
+        assertEquals(null, normalizedPoi(interpreter, "找餐厅", "不存在地点", null, null, null));
+        assertEquals("北京路", normalizedPoi(interpreter, "广州北京路附近找粤菜", "北京路", null, null, null));
+        assertEquals("南京路步行街", normalizedPoi(interpreter, "南京路步行街附近找餐厅", "南京路步行街", null, null, null));
+        assertEquals("中山大学", normalizedPoi(interpreter, "中山大学附近找餐厅", "中山大学", null, null, null));
+        assertEquals("北京798艺术区", normalizedPoi(interpreter, "北京798艺术区附近找咖啡", "北京798艺术区", null, null, null));
+        assertEquals("三里屯", normalizedPoi(interpreter, "人均180以内，在三里屯附近找火锅", "三里屯", "180", null, null));
+    }
+
+    private String normalizedPoi(SemanticInterpreter interpreter, String userTurn, String poi, String hardBudget, String softBudget, String distance) throws Exception {
+        String fields = "\"poi\":\"%s\"".formatted(poi)
+                + (hardBudget == null ? "" : ",\"budgetHard\":%s".formatted(hardBudget))
+                + (softBudget == null ? "" : ",\"budgetSoft\":%s".formatted(softBudget))
+                + (distance == null ? "" : ",\"distanceKm\":%s".formatted(distance));
+        var parsed = interpreter.parse(mapper.readTree("{\"taskDirective\":\"CONTINUE\",\"taskDirectiveEvidence\":\"NONE\",\"criteria\":{" + fields + "}}"));
+        var normalized = (com.hmdp.ai.v2.semantic.TurnSemantics) ReflectionTestUtils.invokeMethod(interpreter, "normalizeLocationProvenance", userTurn, parsed);
+        var location = assertInstanceOf(RequirementChange.CriteriaPatch.class, normalized.requirementChanges().getFirst()).patch().location();
+        return location == null ? null : location.poi();
+    }
+
+    @Test
     void transportFailureIsObservedWithoutSemanticRepair() {
         SemanticInterpreter interpreter = new SemanticInterpreter();
         OpenAiCompatibleClient client = mock(OpenAiCompatibleClient.class);
