@@ -354,6 +354,7 @@ public class AiConversationEvaluationService {
                     output.put("route", "ERROR");
                     output.put("error", compact(turnError.getMessage()));
                     output.put("failureKind", "EXECUTION_ERROR");
+                    output.put("userRequest", objectMapper.valueToTree(request));
                     output.put("semanticAttempts", semanticInterpreter.takeEvaluationAttempts());
                     output.put("stages", stageTrace);
                     output.put("modelCalls", modelCallObservationSnapshot());
@@ -387,6 +388,9 @@ public class AiConversationEvaluationService {
                 output.put("route", response.getRoute());
                 output.put("decisionStatus", response.getDecisionStatus());
                 output.put("answer", compact(response.getAnswer()));
+                // 摘要供旧诊断使用；评测证据必须保留用户实际获得的完整响应。
+                output.put("userRequest", objectMapper.valueToTree(request));
+                output.put("fullResponse", objectMapper.valueToTree(response));
                 output.put("traceIncomplete", Boolean.TRUE.equals(response.getTraceIncomplete()));
                 output.put("semanticAttempts", semanticInterpreter.takeEvaluationAttempts());
                 output.put("stages", stageTrace);
@@ -513,6 +517,7 @@ public class AiConversationEvaluationService {
         snapshot.decisionStatus = snapshot.finalStatus;
         snapshot.staleSuppressed = "STALE_SUPPRESSED".equals(snapshot.finalStatus);
         snapshot.finalCandidates = new ArrayList<>(snapshot.recommendations);
+        snapshot.fullResponse = objectMapper.valueToTree(response);
         try {
             // 即使本轮澄清没有持久化 Working Memory，语义事件仍应可被断言。
             readLatestV2Semantics(chatId, snapshot);
@@ -524,6 +529,7 @@ public class AiConversationEvaluationService {
             if (row != null && row.getMemoryJson() != null) {
                 try {
                     ConversationWorkingMemory memory = objectMapper.readValue(row.getMemoryJson(), ConversationWorkingMemory.class);
+                    snapshot.allTasks = objectMapper.valueToTree(memory.getTasks());
                     snapshot.workingMemoryVersion = row.getVersion();
                     snapshot.activeTaskId = memory.getActiveTaskId();
                     snapshot.taskCount = memory.getTasks() == null ? 0 : memory.getTasks().size();
@@ -563,6 +569,7 @@ public class AiConversationEvaluationService {
         if (conversationStateService == null) return snapshot;
         AiChatSession state = conversationStateService.getOrCreate(chatId);
         ConversationWorkingMemory memory = conversationStateService.workingMemory(state);
+        snapshot.allTasks = objectMapper.valueToTree(memory.getTasks());
         snapshot.workingMemoryVersion = state.getVersion();
         snapshot.activeCriteria = objectMapper.convertValue(conversationStateService.activeCriteria(memory), new TypeReference<Map<String, Object>>() { });
         snapshot.activeTaskId = memory.getActiveTaskId();
@@ -750,18 +757,10 @@ public class AiConversationEvaluationService {
                 continue;
             }
             if (assertions.isEmpty()) throw new IllegalArgumentException("V2 outcome requires non-empty assertions");
-            boolean turnMatched = true;
             Map<String, Object> actual = snapshot.v2Projection();
-            for (Map.Entry<?, ?> entry : assertions.entrySet()) {
-                String path = String.valueOf(entry.getKey());
-                PathValue value = resolvePath(actual, path);
-                if (!matchesPathAssertion(entry.getValue(), value)) {
-                    failures.add(assertionFailure(turn, path, "v2Outcome", entry.getValue(),
-                            value.present ? value.value : null, value.present ? null : "PATH_ABSENT"));
-                    turnMatched = false;
-                }
-            }
-            if (turnMatched) matchedCount++;
+            List<Map<String, Object>> turnFailures = assertEvaluationProjection(turn, assertions, actual);
+            failures.addAll(turnFailures);
+            if (turnFailures.isEmpty()) matchedCount++;
         }
         return new V2OutcomeCoverage(expectedCount, matchedCount, matchedCount == expectedCount);
     }
@@ -770,6 +769,31 @@ public class AiConversationEvaluationService {
         if (json == null || json.isBlank()) return false;
         com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(json);
         return node != null && !node.isNull() && (!node.isContainerNode() || !node.isEmpty());
+    }
+
+    /** 供隔离评测复用同一组谓词，不引入另一套状态断言语义。缺少检查不能算成功。 */
+    public List<Map<String, Object>> assertEvaluationProjection(int turn, Map<?, ?> expected,
+                                                                Map<String, Object> actual) {
+        if (expected == null || expected.isEmpty()) throw new IllegalArgumentException("non-empty assertions required");
+        List<Map<String, Object>> failures = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : expected.entrySet()) {
+            V2DatasetValidator.validateExpression(entry.getValue());
+            String path = String.valueOf(entry.getKey());
+            if (!V2DatasetValidator.knownPath(path)) throw new IllegalArgumentException("unknown V2 evaluation path: " + path);
+            PathValue value = resolvePath(actual, path);
+            if (!matchesPathAssertion(entry.getValue(), value)) {
+                failures.add(assertionFailure(turn, path, "v2Outcome", entry.getValue(),
+                        value.present ? value.value : null, value.present ? null : "PATH_ABSENT"));
+            }
+        }
+        return failures;
+    }
+
+    /** 受控试点复用已有 DISJOINT 关系；无新推荐不是“已换一批”。 */
+    public boolean assertRecommendationDisjoint(List<Long> fromIds, List<Long> toIds) {
+        EvaluationTurnSnapshot from = new EvaluationTurnSnapshot(); from.recommendations = fromIds;
+        EvaluationTurnSnapshot to = new EvaluationTurnSnapshot(); to.recommendations = toIds;
+        return relationMatches("recommendations", "DISJOINT", Map.of(), from, to);
     }
 
     private int countV2Outcomes(String expectedJson) {
@@ -1503,6 +1527,8 @@ public class AiConversationEvaluationService {
         private boolean staleSuppressed;
         private List<Map<String, Object>> toolCalls = new ArrayList<>();
         private List<Long> recommendations = new ArrayList<>();
+        private com.fasterxml.jackson.databind.JsonNode allTasks;
+        private com.fasterxml.jackson.databind.JsonNode fullResponse;
 
         private static EvaluationTurnSnapshot error(int turnNo) {
             EvaluationTurnSnapshot snapshot = new EvaluationTurnSnapshot();
@@ -1561,6 +1587,10 @@ public class AiConversationEvaluationService {
             result.put("workingMemoryVersion", workingMemoryVersion); result.put("toolCalls", toolCalls);
             result.put("recommendations", recommendations); result.put("decisionSessionId", decisionSessionId);
             result.put("v2", v2Projection());
+            result.put("allTasks", allTasks);
+            result.put("fullResponse", fullResponse);
+            // 现有事件没有请求与执行对象的可靠对应；空白不能伪装成已捕获。
+            result.put("requestExecutionEvidence", "UNAVAILABLE_IN_EXISTING_EVENTS");
             return result;
         }
     }

@@ -89,7 +89,7 @@ public final class V2DatasetValidator {
             throw new IllegalArgumentException("invalid expected turn");
     }
 
-    private static void validateExpression(Object value) {
+    static void validateExpression(Object value) {
         if (!(value instanceof Map<?, ?> expression)) return;
         if (expression.size() != 1) throw new IllegalArgumentException("invalid assertion operator");
         String operator = String.valueOf(expression.keySet().iterator().next());
@@ -107,7 +107,7 @@ public final class V2DatasetValidator {
         return Set.of("activeCriteria", "candidatePool", "latestBatchShopIds", "shownShopIds", "focusedShopId", "sourceDecisionSessionId", "activeDecisionSessionId", "dialogPhase", "activeTaskId", "taskCount", "batchCount").contains(path);
     }
 
-    private static boolean knownPath(String path) {
+    static boolean knownPath(String path) {
         String root = path.contains(".") ? path.substring(0, path.indexOf('.')) : path;
         if (!PATHS.contains(root)) return false;
         if ("criteria".equals(root)) return Set.of("criteria", "criteria.location", "criteria.cuisine", "criteria.budget", "criteria.distance", "criteria.preferences").contains(path) || path.matches("criteria\\.(location\\.(city|district|poi)|cuisine\\.(include|exclude)|budget\\.(hardMax|softTarget)|distance\\.hardMaxKm|preferences\\.(values|priorityOrder))");

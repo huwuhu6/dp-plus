@@ -182,6 +182,16 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8081/ai/retrieval/indexes/r
 
 最近一次本地 `structured-profile-evidence-vector-v3` 主评测基线：15 条用例全部完成，Recall@K `0.8333`、MRR `0.5833`、证据覆盖率 `1.0`、硬约束违规数 `0`、模型调用成功率 `100%`、P95 总延迟约 `5.8s`。这些值会随本地数据、模型和检索参数变化，应以运行记录而非 README 数字作为最终结论。
 
+### V2 自然语言多轮受控试点
+
+业务规范 v1.1 已冻结。受控试点覆盖 S04、S08、S09、S13、C06、C15，运行：
+
+```powershell
+mvn -q "-Dtest=V2PilotEvaluationTest,V2ControlledPilotTest,AiConversationEvaluationObservationTest" test
+```
+
+生成 `target/eval-pilot/plan-v1.json` 与 `controlled-v1.json`，包含冻结计划、完整响应、全任务/历史批次、实际执行边界证据和逐项判定。该测试使用语义模型与外部事实/存储替身，真实 V2 链路创建推荐批次；不能作为真实模型端到端通过率。未执行的业务检查为未验证，前提冲突不算就绪，其他十个场景未运行。准备方式、统计口径和已复现限制见 [试点建设与验证报告](doc/eval/V2自然语言多轮评测-试点建设与验证-v1.md)。
+
 ## 建议的开发顺序
 
 1. 先在前端测试 15 到 20 个真实对话，重点覆盖位置补充、指代追问、优惠券、评价、退出和重新进入决策。
