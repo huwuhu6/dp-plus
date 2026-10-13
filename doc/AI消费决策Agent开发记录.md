@@ -2508,3 +2508,5 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 关键判定漏洞由负例证实并修复：异常轮的默认空快照不能参加状态、结果和关系验证；未写新 memory version 的澄清轮不能沿用前轮 VERIFIED_PASS；两个缺失 decisionSession identity 不能证明 SAME。V2 结构校验不再依赖数据集修订号后缀，semantic-main-v1 同样严格校验，缺失 V2 JSONL 不回退 MySQL；空 assertions、非法路径/操作符及非整数轮号不能进入评测。坏断言异常处理中不再重复解析，基础设施错误独立计入 Case 失败并保留已有诊断。缺少可选状态/关系断言时 memoryMatched=null，缺少 V2 断言时 matched=null，不计作该类验证通过；无持久化 memory 的成功轮仍采集语义事件。
 
 冻结 Main 24 条、semantic-main 10 条从真实 JSONL 加载且未修改。最终 V2 评测及相关语义/运行时回归 81/81，通过负例确认状态、关系、实体绑定错误和未执行硬验证不会误通过。完整 mvn -q test 执行 388 项：380 通过、0 断言失败、6 依赖集成错误、2 跳过；真实模型 Benchmark 未运行，不据此声明业务通过率。评测判定层可以支撑下一轮多轮研究，端到端集成证据仍需依赖恢复后补齐。运行新实验需显式选择当前 Main-v2 或 semantic-main-v1，避免现有配置缺省版本差异；未修改业务实现、Prompt 或 Holdout。详见 `doc/V2评测基础设施健康检查-20261013.md`。
+
+后续补验：完整 `mvn -q test` 重跑 exit code 0，388 项中 386 通过、0 失败、0 错误、2 可选 Milvus 测试因未开启 `milvus.integration.enabled` 跳过。原受阻的 6 项集成测试全部通过，包括真实数据库的 Working Memory 版本与关联事件原子持久化验证。评测基础设施的测试阻塞已解除，可以开展下一轮 V2 实验；真实模型 Benchmark 仍未运行。
