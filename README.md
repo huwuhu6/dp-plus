@@ -221,3 +221,13 @@ fetch('/api/ai/evaluations/conversation-runs', {
 ```
 
 人工验收至少覆盖：设备定位找店、命名目的地确认、条件细化重搜、无结果松弛、候选序号/店名追问、评价与优惠券并行查询、退出后重新发起推荐，以及 SSE 的 `status -> text_delta -> ui_component -> suggested_chips -> complete` 事件顺序。每次真实评测记录运行 ID、模型版本、检索策略版本和 JMeter 报告路径，才可用于跨版本对比。
+
+## 真实语义模型受控试点（显式 opt-in）
+
+在 `.v2-eval-pilot` Worktree 中使用既有本地模型配置；唯一 runId 防止覆盖已启动的实验：
+
+```powershell
+mvn -q "-Dtest=V2RealModelPilotTest" "-Dv2.realModel.enabled=true" "-Dv2.pilot.runId=首次实验的唯一标识" "-Dspring.config.additional-location=file:../src/main/resources/application-dev.yml" test
+```
+
+runId 使用字母、数字、下划线或连字符。结果位于 `target/eval-pilot/<runId>/`。只向模型传 Production 解释器实际构造的输入，不补历史或验收答案；模型、商户事实、存储的受控边界分别记录。该模式不代表真实检索端到端通过率，默认 Maven 回归不会调用模型。

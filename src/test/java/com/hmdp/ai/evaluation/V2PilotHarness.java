@@ -25,13 +25,22 @@ final class V2PilotHarness {
     final List<BoundaryCall> calls=new ArrayList<>();
     final List<Map<String,Object>> history=new ArrayList<>();
     final List<Map<String,Object>> assertionFailures=new ArrayList<>();
+    final List<com.fasterxml.jackson.databind.JsonNode> commits=new ArrayList<>();
+    final List<com.fasterxml.jackson.databind.JsonNode> events=new ArrayList<>();
     final ChatOrchestrationService chat=new ChatOrchestrationService();
-    final SemanticInterpreter interpreter=mock(SemanticInterpreter.class);
+    final SemanticInterpreter interpreter;
+    final String chatId;
+    TurnSemantics actualSemantic;
     final ShopRetrievalEngine retrieval=mock(ShopRetrievalEngine.class);
     AiWorkingMemory persisted;
     RuntimeException retrievalFailure;
 
     V2PilotHarness() throws Exception {
+        this(mock(SemanticInterpreter.class), "test-pilot");
+    }
+
+    V2PilotHarness(SemanticInterpreter interpreter, String chatId) throws Exception {
+        this.interpreter=interpreter;this.chatId=chatId;
         ReflectionTestUtils.setField(assertions,"objectMapper",json);
         V2ChatOrchestrator runtime=new V2ChatOrchestrator();
         WorkingMemoryVersionService versions=mock(WorkingMemoryVersionService.class);
@@ -40,7 +49,8 @@ final class V2PilotHarness {
             int current=persisted==null?0:persisted.getVersion();
             if (i.<Integer>getArgument(2)!=current) throw new AssertionError("test memory version conflict");
             AiWorkingMemory row=new AiWorkingMemory();row.setId(1L);row.setVersion(current+1);row.setChatId(i.getArgument(0));
-            row.setMemoryJson(json.writeValueAsString(i.getArgument(3)));persisted=row;return row;
+            row.setMemoryJson(json.writeValueAsString(i.getArgument(3)));persisted=row;
+            commits.add(json.valueToTree(Map.<String,Object>of("version",current+1,"memory",i.getArgument(3),"event",i.getArgument(5))));return row;
         });
         ChatMemoryService chats=mock(ChatMemoryService.class);
         when(chats.resolveChatId(anyString())).thenAnswer(i->i.getArgument(0));
@@ -77,7 +87,10 @@ final class V2PilotHarness {
             }
         }).when(actions).execute(any());
         ReflectionTestUtils.setField(runtime,"semanticInterpreter",interpreter);ReflectionTestUtils.setField(runtime,"versions",versions);
-        ReflectionTestUtils.setField(runtime,"chatMemoryService",chats);ReflectionTestUtils.setField(runtime,"conversationEventService",mock(ConversationEventService.class));
+        ConversationEventService eventService=mock(ConversationEventService.class);
+        doAnswer(i->{events.add(json.valueToTree(Map.<String,Object>of("type",i.getArgument(0),"status",i.getArgument(1),"payload",i.getArgument(4))));return null;})
+                .when(eventService).recordBestEffort(any(),any(),nullable(Long.class),nullable(Long.class),any(),nullable(Map.class));
+        ReflectionTestUtils.setField(runtime,"chatMemoryService",chats);ReflectionTestUtils.setField(runtime,"conversationEventService",eventService);
         ReflectionTestUtils.setField(runtime,"objectMapper",json);ReflectionTestUtils.setField(runtime,"executor",new StaticPlanExecutor());
         ReflectionTestUtils.setField(runtime,"actions",actions);ReflectionTestUtils.setField(runtime,"renderer",new V2ResponseRenderer());
         ReflectionTestUtils.setField(runtime,"shopMapper",shops);ReflectionTestUtils.setField(runtime,"locationResolver",new V2LocationResolver(location));
@@ -85,14 +98,21 @@ final class V2PilotHarness {
     }
 
     TurnEvidence turn(String originalMessage,TurnSemantics semantic,List<DecisionRecommendation> candidates) throws Exception {
-        calls.clear();when(interpreter.interpret(originalMessage)).thenReturn(semantic);
+        when(interpreter.interpret(originalMessage)).thenReturn(semantic);
+        actualSemantic=semantic;
+        return turn(originalMessage,candidates);
+    }
+
+    TurnEvidence turn(String originalMessage,List<DecisionRecommendation> candidates) throws Exception {
+        calls.clear();commits.clear();events.clear();
+        clearInvocations(interpreter);
         doAnswer(i->{if(retrievalFailure!=null)throw retrievalFailure;return new ShopRetrievalEngine.RetrievalResult(true,null,candidates,null);})
                 .when(retrieval).retrieve(any(com.hmdp.ai.v2.plan.SearchSpec.class));
-        ChatMessageRequest request=new ChatMessageRequest();request.setChatId("test-pilot");request.setMessage(originalMessage);
+        ChatMessageRequest request=new ChatMessageRequest();request.setChatId(chatId);request.setMessage(originalMessage);
         ChatMessageResponse response=chat.chat(request,null,null);
         verify(interpreter).interpret(originalMessage);
         ConversationWorkingMemory memory=persisted==null?new ConversationWorkingMemory():json.readValue(persisted.getMemoryJson(),ConversationWorkingMemory.class);
-        TurnEvidence evidence=capture(json,turns.size()+1,request,response,memory,semantic,List.copyOf(calls),true);turns.add(evidence);return evidence;
+        TurnEvidence evidence=capture(json,turns.size()+1,request,response,memory,actualSemantic,List.copyOf(calls),true);turns.add(evidence);return evidence;
     }
 
     Map<String,Object> taskProjection(TurnEvidence turn,String id) {
