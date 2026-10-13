@@ -46,7 +46,7 @@ public class ConversationEvaluationDatasetLoader {
             log.info("[AI][eval] dataset={} loaded from JSONL, {} cases", datasetVersion, fromFile.size());
             return fromFile;
         }
-        if (datasetVersion.endsWith("-v2")) throw new IllegalStateException("audited V2 dataset JSONL is required: " + datasetVersion);
+        if (V2DatasetValidator.requiresJsonl(datasetVersion)) throw new IllegalStateException("audited V2 dataset JSONL is required: " + datasetVersion);
         log.info("[AI][eval] dataset={} JSONL not found, fallback to MySQL", datasetVersion);
         return caseMapper.selectList(new QueryWrapper<AiConversationEvaluationCase>()
                 .eq("active", true).eq("dataset_version", datasetVersion).orderByAsc("id"));

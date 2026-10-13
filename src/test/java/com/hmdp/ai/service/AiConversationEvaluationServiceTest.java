@@ -43,7 +43,7 @@ import static org.mockito.Mockito.when;
 class AiConversationEvaluationServiceTest {
     @Test
     void submitsRobustnessSubsetWithDeterministicDeduplicationAndRejectsUnknownCodes() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ConversationEvaluationDatasetLoader loader = mock(ConversationEvaluationDatasetLoader.class);
         AiConversationEvaluationRunMapper runs = mock(AiConversationEvaluationRunMapper.class);
         AiProperties properties = new AiProperties(); properties.setConversationRobustnessDatasetVersion("conversation-robustness-v1");
@@ -64,7 +64,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void evaluatesTurnStateToolsAndRelationsWithoutChangingLegacyAssertions() throws Exception {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
@@ -141,7 +141,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void evaluatesV2OutcomesWithoutLegacyRouteExpectations() throws Exception {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
@@ -197,7 +197,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void acceptsDeclaredSafeTerminalStatusAlternatives() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
 
         assertEquals(true, ReflectionTestUtils.invokeMethod(service, "equalsExpected",
                 "COMPLETED|WAITING_RELAXATION", "COMPLETED"));
@@ -209,7 +209,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void runsScriptedTurnsThroughChatEntryAndAggregatesRouteMetrics() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
         ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
@@ -253,7 +253,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void verifiesAlternativeRecommendationsDoNotReusePreviouslyShownShops() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
         ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
@@ -295,7 +295,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void marksAlternativeRecommendationEvaluationAsFailedWhenAShopIsRepeated() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         DecisionRecommendation first = recommendation(74L);
         DecisionRecommendation repeated = recommendation(74L);
@@ -306,7 +306,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void marksAlternativeRecommendationEvaluationAsFailedWhenNoReplacementIsReturned() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
 
         assertEquals(false, ReflectionTestUtils.invokeMethod(service, "matchesUnseenRecommendations", 1,
@@ -315,7 +315,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void verifiesEachConfiguredAlternativeRecommendationTurnPair() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         List<List<DecisionRecommendation>> snapshots = List.of(
                 List.of(recommendation(74L)), List.of(recommendation(85L)), List.of(recommendation(74L)));
@@ -326,7 +326,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void submitsConversationEvaluationWithoutHoldingTheRequestForAllTurns() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
         ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
@@ -367,7 +367,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void continuesAfterExpectedTurnErrorAndAssertsRecoveryRoute() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         ChatOrchestrationService chatService = mock(ChatOrchestrationService.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
         ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
@@ -409,7 +409,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void comparesConversationRunsOnlyWithinTheSameDataset() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         AiConversationEvaluationRun baseline = run(1L, 100L, "conversation-v1", 10, 8, 7, 9, 8, 1000L);
@@ -435,7 +435,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void rejectsComparisonAcrossDifferentConversationDatasets() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         when(runMapper.selectById(1L)).thenReturn(run(1L, 100L, "conversation-v1", 10, 1, 1, 1, 1, 1L));
@@ -452,7 +452,7 @@ class AiConversationEvaluationServiceTest {
 
     @Test
     void returnsOnlyFailedConversationCasesAsDiagnostics() {
-        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        AiConversationEvaluationService service = evaluationService();
         AiConversationEvaluationRunMapper runMapper = mock(AiConversationEvaluationRunMapper.class);
         AiConversationEvaluationCaseMapper caseMapper = mock(AiConversationEvaluationCaseMapper.class);
         ConversationEvaluationDatasetLoader datasetLoader = mock(ConversationEvaluationDatasetLoader.class);
@@ -486,6 +486,13 @@ class AiConversationEvaluationServiceTest {
         } finally {
             UserHolder.removeUser();
         }
+    }
+
+    private AiConversationEvaluationService evaluationService() {
+        AiConversationEvaluationService service = new AiConversationEvaluationService();
+        ReflectionTestUtils.setField(service, "semanticInterpreter",
+                mock(com.hmdp.ai.v2.runtime.SemanticInterpreter.class));
+        return service;
     }
 
     private AiConversationEvaluationRun run(Long id, Long userId, String dataset, int caseCount,

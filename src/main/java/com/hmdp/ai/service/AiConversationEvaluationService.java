@@ -298,6 +298,7 @@ public class AiConversationEvaluationService {
                 .filter(item -> Boolean.FALSE.equals(item.getUnseenRecommendationsMatched())).count());
         failureCounts.put("v2Outcomes", (int) results.stream()
                 .filter(item -> Boolean.FALSE.equals(item.getV2OutcomeMatched())).count());
+        failureCounts.put("infrastructure", (int) results.stream().filter(item -> item.getErrorMessage() != null).count());
         failureCounts.put("execution", (int) results.stream().filter(this::unexpectedError).count());
         ConversationEvaluationDiagnosticsResponse response = new ConversationEvaluationDiagnosticsResponse();
         response.setRun(run);
@@ -315,15 +316,15 @@ public class AiConversationEvaluationService {
         String chatId = "eval-" + casePart + "-" + UUID.randomUUID().toString().substring(0, 8);
         result.setChatId(chatId);
         long startedAt = System.currentTimeMillis();
+        List<Map<String, Object>> outputs = new ArrayList<>();
+        List<EvaluationTurnSnapshot> turnSnapshots = new ArrayList<>();
+        List<Map<String, Object>> assertionFailures = new ArrayList<>();
         try {
             List<Map<String, Object>> turns = objectMapper.readValue(evaluationCase.getTurnsJson(), new TypeReference<List<Map<String, Object>>>() { });
             List<String> routes = new ArrayList<>();
             List<Long> finalShopIds = new ArrayList<>();
             Set<Long> decisionSessionIds = new HashSet<>();
-            List<Map<String, Object>> outputs = new ArrayList<>();
             List<List<DecisionRecommendation>> recommendationSnapshots = new ArrayList<>();
-            List<EvaluationTurnSnapshot> turnSnapshots = new ArrayList<>();
-            List<Map<String, Object>> assertionFailures = new ArrayList<>();
             Set<Long> observedToolCallIds = new HashSet<>();
             String finalStatus = null;
             int actualErrorCount = 0;
@@ -352,6 +353,7 @@ public class AiConversationEvaluationService {
                     Map<String, Object> output = new LinkedHashMap<>();
                     output.put("route", "ERROR");
                     output.put("error", compact(turnError.getMessage()));
+                    output.put("failureKind", "EXECUTION_ERROR");
                     output.put("semanticAttempts", semanticInterpreter.takeEvaluationAttempts());
                     output.put("stages", stageTrace);
                     output.put("modelCalls", modelCallObservationSnapshot());
@@ -429,7 +431,10 @@ public class AiConversationEvaluationService {
             result.setToolArgumentsMatched(toolArgumentsMatched(evaluationCase.getExpectedToolArgumentsJson(), actualToolCalls));
             boolean turnStatesMatched = matchesTurnStates(evaluationCase.getExpectedTurnStatesJson(), turnSnapshots, assertionFailures);
             boolean relationsMatched = matchesRelations(evaluationCase.getExpectedRelationsJson(), turnSnapshots, assertionFailures);
-            result.setMemoryMatched(finalMemoryMatched && turnStatesMatched && relationsMatched);
+            boolean memoryExpected = hasExpectations(evaluationCase.getExpectedMemoryJson())
+                    || hasExpectations(evaluationCase.getExpectedTurnStatesJson())
+                    || hasExpectations(evaluationCase.getExpectedRelationsJson());
+            result.setMemoryMatched(memoryExpected ? finalMemoryMatched && turnStatesMatched && relationsMatched : null);
             V2OutcomeCoverage v2Coverage = matchesV2Outcomes(evaluationCase.getExpectedV2OutcomesJson(), turnSnapshots, assertionFailures);
             result.setExpectedV2OutcomeCount(v2Coverage.expectedCount());
             result.setMatchedV2OutcomeCount(v2Coverage.matchedCount());
@@ -454,7 +459,8 @@ public class AiConversationEvaluationService {
             result.setRecoveryMatched(false);
             result.setMemoryMatched(false);
             result.setV2OutcomeMatched(false);
-            result.setExpectedV2OutcomeCount(countV2Outcomes(evaluationCase.getExpectedV2OutcomesJson()));
+            // 不在异常处理内再次解析坏断言，否则诊断会被同一个异常覆盖。
+            result.setExpectedV2OutcomeCount(null);
             result.setMatchedV2OutcomeCount(0);
             result.setUnseenRecommendationsMatched(false);
             String diagnostic = e.getMessage();
@@ -462,6 +468,15 @@ public class AiConversationEvaluationService {
                 diagnostic = diagnostic + ": " + e.getCause().getMessage();
             }
             result.setErrorMessage(compact(diagnostic));
+            try {
+                result.setTurnOutputsJson(objectMapper.writeValueAsString(Map.of(
+                        "failureKind", "EVALUATION_INFRASTRUCTURE_ERROR", "error", compact(diagnostic),
+                        "turns", outputs, "snapshots", compactTurnSnapshots(turnSnapshots), "assertionFailures", assertionFailures)));
+            } catch (com.fasterxml.jackson.core.JsonProcessingException serializationError) {
+                throw new IllegalStateException("evaluation diagnostic cannot be serialized", serializationError);
+            }
+        } finally {
+            clearModelObservation();
         }
         result.setDurationMs(System.currentTimeMillis() - startedAt);
         return result;
@@ -495,6 +510,15 @@ public class AiConversationEvaluationService {
                 ? response.getDecisionStatus() : response.getDecision().getStatus();
         snapshot.recommendations = recommendationIds(recommendations);
         snapshot.decisionSessionId = response == null ? null : response.getDecisionSessionId();
+        snapshot.decisionStatus = snapshot.finalStatus;
+        snapshot.staleSuppressed = "STALE_SUPPRESSED".equals(snapshot.finalStatus);
+        snapshot.finalCandidates = new ArrayList<>(snapshot.recommendations);
+        try {
+            // 即使本轮澄清没有持久化 Working Memory，语义事件仍应可被断言。
+            readLatestV2Semantics(chatId, snapshot);
+        } catch (Exception e) {
+            throw new IllegalStateException("V2 evaluation semantics cannot be read", e);
+        }
         if (workingMemoryVersionService != null) {
             AiWorkingMemory row = workingMemoryVersionService.latest(chatId);
             if (row != null && row.getMemoryJson() != null) {
@@ -530,7 +554,6 @@ public class AiConversationEvaluationService {
                     snapshot.finalCandidates = new ArrayList<>(snapshot.recommendations);
                     readLatestV2Execution(chatId, row, snapshot);
                     readAffectedTask(row, memory, snapshot);
-                    readLatestV2Semantics(chatId, snapshot);
                     return snapshot;
                 } catch (Exception e) {
                     throw new IllegalStateException("V2 evaluation snapshot cannot be read", e);
@@ -566,7 +589,8 @@ public class AiConversationEvaluationService {
     private void readLatestV2Execution(String chatId, AiWorkingMemory row, EvaluationTurnSnapshot snapshot) throws Exception {
         if (conversationEventMapper == null || row.getId() == null) return;
         AiConversationEvent event = conversationEventMapper.selectOne(new QueryWrapper<AiConversationEvent>()
-                .eq("chat_id", chatId).eq("working_memory_id", row.getId()).eq("event_type", "STATE_REDUCED")
+                // 澄清轮可能复用旧 memory version；仅按版本读会把上一轮的验证误当成本轮完成。
+                .eq("chat_id", chatId).eq("turn_no", snapshot.turnNo).eq("working_memory_id", row.getId()).eq("event_type", "STATE_REDUCED")
                 .orderByDesc("sequence_no").last("limit 1"));
         if (event == null || event.getEventResult() == null || event.getEventResult().isBlank()) return;
         Map<String, Object> result = objectMapper.readValue(event.getEventResult(), new TypeReference<Map<String, Object>>() { });
@@ -583,7 +607,7 @@ public class AiConversationEvaluationService {
     private void readAffectedTask(AiWorkingMemory row, ConversationWorkingMemory memory, EvaluationTurnSnapshot snapshot) throws Exception {
         if (conversationEventMapper == null || row.getId() == null || memory.getTasks() == null) return;
         AiConversationEvent event = conversationEventMapper.selectOne(new QueryWrapper<AiConversationEvent>()
-                .eq("working_memory_id", row.getId()).eq("event_type", "STATE_REDUCED")
+                .eq("working_memory_id", row.getId()).eq("turn_no", snapshot.turnNo).eq("event_type", "STATE_REDUCED")
                 .orderByDesc("sequence_no").last("limit 1"));
         if (event == null || event.getMetadata() == null || event.getMetadata().isBlank()) return;
         Map<String, Object> metadata = objectMapper.readValue(event.getMetadata(), new TypeReference<Map<String, Object>>() { });
@@ -684,7 +708,7 @@ public class AiConversationEvaluationService {
             Integer turn = integerValue(expectation.get("turn"));
             EvaluationTurnSnapshot snapshot = snapshotAt(snapshots, turn);
             Object rawMemory = expectation.get("memory");
-            if (turn == null || snapshot == null || !(rawMemory instanceof Map)) {
+            if (turn == null || snapshot == null || "ERROR".equals(snapshot.route) || !(rawMemory instanceof Map)) {
                 failures.add(assertionFailure(turn, null, "turnState", rawMemory, null, "TURN_SNAPSHOT_UNAVAILABLE"));
                 matched = false;
                 continue;
@@ -721,10 +745,11 @@ public class AiConversationEvaluationService {
             else {
                 Map<String, Object> inline = new LinkedHashMap<>(expectation); inline.remove("turn"); assertions = inline;
             }
-            if (turn == null || snapshot == null) {
+            if (turn == null || snapshot == null || "ERROR".equals(snapshot.route)) {
                 failures.add(assertionFailure(turn, "v2Outcomes", "v2Outcome", assertions, null, "TURN_SNAPSHOT_UNAVAILABLE"));
                 continue;
             }
+            if (assertions.isEmpty()) throw new IllegalArgumentException("V2 outcome requires non-empty assertions");
             boolean turnMatched = true;
             Map<String, Object> actual = snapshot.v2Projection();
             for (Map.Entry<?, ?> entry : assertions.entrySet()) {
@@ -739,6 +764,12 @@ public class AiConversationEvaluationService {
             if (turnMatched) matchedCount++;
         }
         return new V2OutcomeCoverage(expectedCount, matchedCount, matchedCount == expectedCount);
+    }
+
+    private boolean hasExpectations(String json) throws Exception {
+        if (json == null || json.isBlank()) return false;
+        com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(json);
+        return node != null && !node.isNull() && (!node.isContainerNode() || !node.isEmpty());
     }
 
     private int countV2Outcomes(String expectedJson) {
@@ -841,13 +872,13 @@ public class AiConversationEvaluationService {
             String relation = stringValue(expectation.get("relation"));
             EvaluationTurnSnapshot from = snapshotAt(snapshots, fromTurn);
             EvaluationTurnSnapshot to = snapshotAt(snapshots, toTurn);
-            boolean relationMatched = from != null && to != null && relationMatches(type, relation, expectation, from, to);
+            boolean relationMatched = from != null && to != null && !"ERROR".equals(from.route) && !"ERROR".equals(to.route) && relationMatches(type, relation, expectation, from, to);
             if (!relationMatched) {
                 Map<String, Object> actual = new LinkedHashMap<>();
                 actual.put("from", from == null ? null : from.relationProjection());
                 actual.put("to", to == null ? null : to.relationProjection());
                 failures.add(assertionFailure(toTurn, type, "relation", expectation, actual,
-                        from == null || to == null ? "TURN_SNAPSHOT_UNAVAILABLE" : null));
+                        from == null || to == null || "ERROR".equals(from.route) || "ERROR".equals(to.route) ? "TURN_SNAPSHOT_UNAVAILABLE" : null));
                 matched = false;
             }
         }
@@ -871,7 +902,8 @@ public class AiConversationEvaluationService {
         if ("decisionSession".equals(type)) {
             Long fromId = from.activeDecisionSessionId == null ? from.decisionSessionId : from.activeDecisionSessionId;
             Long toId = to.activeDecisionSessionId == null ? to.decisionSessionId : to.activeDecisionSessionId;
-            if ("SAME".equals(relation)) return java.util.Objects.equals(fromId, toId);
+            // 缺少 identity 只能说明未观测到会话，不能证明跨轮仍是同一会话。
+            if ("SAME".equals(relation)) return fromId != null && fromId.equals(toId);
             if ("CHANGED".equals(relation)) return fromId != null && toId != null && !fromId.equals(toId);
         }
         if ("groundedOrdinal".equals(type) && "EQUALS_VISIBLE".equals(relation)) {
@@ -1009,6 +1041,7 @@ public class AiConversationEvaluationService {
                 || Boolean.FALSE.equals(result.getRecoveryMatched())
                 || Boolean.FALSE.equals(result.getUnseenRecommendationsMatched())
                 || Boolean.FALSE.equals(result.getV2OutcomeMatched())
+                || result.getErrorMessage() != null
                 || unexpectedError(result);
     }
 

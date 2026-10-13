@@ -174,7 +174,9 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8081/ai/retrieval/indexes/r
 | 对比两次多轮评测 | `GET /ai/evaluations/conversation-runs/{runId}/compare/{baselineRunId}` |
 | 查看多轮失败诊断 | `GET /ai/evaluations/conversation-runs/{runId}/diagnostics` |
 
-多轮主评测默认数据集为 `conversation-v2-runtime-v1`，通过每轮 `expectedV2Outcomes` 检查 V2 Task、criteria、SearchAnchor 与执行结果；旧 route、context rewrite 和 legacy tool 断言仅作诊断，不再作为 V2 用例的业务成功门槛。运行仍需已登录的本地前端会话。
+多轮评测通过每轮 `expectedV2Outcomes` 检查 V2 Task、criteria、SearchAnchor 与执行结果。`application.yaml` 的默认版本为 `conversation-v2-main-v1`（Java 配置类的独立缺省值为 `conversation-v2-runtime-v1`）；开展当前主回归前应显式设置 `AI_CONVERSATION_EVALUATION_DATASET_VERSION=conversation-v2-main-v2`，加载 24 条冻结用例。语义回归可设置为 `conversation-v2-semantic-main-v1`，加载 10 条用例。V2 JSONL 缺失或结构非法时直接失败，不回退 MySQL。运行仍需已登录的本地前端会话。
+
+`expectedV2Outcomes`、`expectedTurnStates` 和 `expectedRelations` 的失败均影响 Case Pass；未配置状态/关系断言时 `memoryMatched=null`，未配置 V2 结果断言时 `v2OutcomeMatched=null`，不计作该项验证通过。`hardConstraintsVerified` 仅在当前轮 `verificationStatus=VERIFIED_PASS` 时为 true。逐轮业务/模型异常记录为 `EXECUTION_ERROR`，评测读取或断言解析异常记录为 `EVALUATION_INFRASTRUCTURE_ERROR`；失败诊断还保留 `assertionFailures`。旧 route、context rewrite 和 legacy tool 断言仅作诊断，不再作为 V2 用例的业务成功门槛。
 
 `/ai/retrieval/indexes/rebuild` 当前为本地调试便利开放；部署前应增加认证和管理员权限校验。
 

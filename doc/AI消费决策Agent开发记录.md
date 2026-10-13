@@ -2500,3 +2500,11 @@ Run179 显示模型在无关的后续轮会输出空 cuisine，且已有 DEVICE 
 ### V2 location provenance 的跨 slot 准入（2026-09-18）
 
 Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 budget、distance、cuisine、device placeholder 或解释文本污染。原 lexical provenance 已删除多数污染，但“原文出现”错误地让 cuisine token 与预算数字获得 POI 身份。现有 admission gate 因而增加最小 cross-slot conflict：POI 仍须来自当前轮；无显式地点关系时，若它包含当前 canonical budget/distance 数值或命中 `CuisineCanonicalizer` 已知类别则拒绝。显式“在/去/到 X”或“X附近/周边/一带”仍允许真实命名地点，带数字的地名也不会仅因数字被拒绝。LocationResolver 仍独立负责唯一性与 anchor 解析。定向 tests 覆盖预算、菜系、device、幻觉、真实道路/机构/数字地名与预算加真实 POI；冻结 Main 未改。
+
+### V2 评测基础设施独立健康检查（2026-10-13）
+
+基于 HEAD `812b085a7def6657094f59f2de04b2feb3728663` 检查当前事实，复现既有评测服务测试缺少 SemanticInterpreter mock 导致的 6 项失败，补齐测试注入，未通过生产空值回退或修改预期掩盖问题。
+
+关键判定漏洞由负例证实并修复：异常轮的默认空快照不能参加状态、结果和关系验证；未写新 memory version 的澄清轮不能沿用前轮 VERIFIED_PASS；两个缺失 decisionSession identity 不能证明 SAME。V2 结构校验不再依赖数据集修订号后缀，semantic-main-v1 同样严格校验，缺失 V2 JSONL 不回退 MySQL；空 assertions、非法路径/操作符及非整数轮号不能进入评测。坏断言异常处理中不再重复解析，基础设施错误独立计入 Case 失败并保留已有诊断。缺少可选状态/关系断言时 memoryMatched=null，缺少 V2 断言时 matched=null，不计作该类验证通过；无持久化 memory 的成功轮仍采集语义事件。
+
+冻结 Main 24 条、semantic-main 10 条从真实 JSONL 加载且未修改。最终 V2 评测及相关语义/运行时回归 81/81，通过负例确认状态、关系、实体绑定错误和未执行硬验证不会误通过。完整 mvn -q test 执行 388 项：380 通过、0 断言失败、6 依赖集成错误、2 跳过；真实模型 Benchmark 未运行，不据此声明业务通过率。评测判定层可以支撑下一轮多轮研究，端到端集成证据仍需依赖恢复后补齐。运行新实验需显式选择当前 Main-v2 或 semantic-main-v1，避免现有配置缺省版本差异；未修改业务实现、Prompt 或 Holdout。详见 `doc/V2评测基础设施健康检查-20261013.md`。

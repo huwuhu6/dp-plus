@@ -18,5 +18,23 @@ class V2DatasetValidatorTest {
     @Test void rejectsUnknownCrossTurnRelation() { AiConversationEvaluationCase item = caseOf("A"); item.setTurnsJson("[{\"message\":\"one\"},{\"message\":\"two\"}]"); item.setExpectedRelationsJson("[{\"fromTurn\":1,\"toTurn\":2,\"type\":\"candidatePool\",\"relation\":\"EQUALS_VISIBLE\"}]"); assertThrows(IllegalArgumentException.class, () -> validate(item)); }
     @Test void acceptsLastVisibleGroundingRelation() { AiConversationEvaluationCase item = caseOf("A"); item.setTurnsJson("[{\"message\":\"one\"},{\"message\":\"two\"}]"); item.setExpectedRelationsJson("[{\"fromTurn\":1,\"toTurn\":2,\"type\":\"groundedOrdinal\",\"relation\":\"EQUALS_VISIBLE\",\"ordinal\":\"LAST\"}]"); assertDoesNotThrow(() -> validate(item)); }
     private void validate(AiConversationEvaluationCase... cases) { V2DatasetValidator.validate("conversation-v2-main-v2", List.of(cases), mapper); }
+    @Test void rejectsMalformedAndVacuousOutcomes() {
+        for (String json : List.of("[{\"turn\":1,\"assertions\":{}}]", "[{\"turn\":1,\"assertions\":[]}]", "[{\"turn\":1.5,\"assertions\":{\"taskId\":null}}]", "[{\"turn\":1,\"assertions\":{\"taskId\":{\"notSet\":false}}}]", "[{\"turn\":1,\"assertions\":{\"finalCandidates\":{\"size\":1.5}}}]")) {
+            AiConversationEvaluationCase item = caseOf("A"); item.setExpectedV2OutcomesJson(json);
+            assertThrows(IllegalArgumentException.class, () -> validate(item), json);
+        }
+    }
+    @Test void rejectsInvalidTurnStatePathsAndOperators() {
+        for (String memory : List.of("{}", "{\"candidatePooL\":{\"empty\":true}}", "{\"candidatePool\":{\"unknown\":true}}", "{\"activeCriteria.bdugetPerPerson\":{\"notSet\":true}}")) {
+            AiConversationEvaluationCase item = caseOf("A"); item.setExpectedTurnStatesJson("[{\"turn\":1,\"memory\":" + memory + "}]");
+            assertThrows(IllegalArgumentException.class, () -> validate(item));
+        }
+    }
+    @Test void semanticRevisionOneUsesV2Validation() {
+        AiConversationEvaluationCase item = caseOf("A"); item.setDatasetVersion("conversation-v2-semantic-main-v1");
+        item.setExpectedV2OutcomesJson("[{\"turn\":1,\"assertions\":{\"semantic.typo\":{\"absent\":true}}}]");
+        assertThrows(IllegalArgumentException.class, () -> V2DatasetValidator.validate(item.getDatasetVersion(), List.of(item), mapper));
+    }
+    @Test void rejectsEmptyDataset() { assertThrows(IllegalArgumentException.class, () -> validate()); }
     private AiConversationEvaluationCase caseOf(String code) { AiConversationEvaluationCase item = new AiConversationEvaluationCase(); item.setCaseCode(code); item.setDatasetVersion("conversation-v2-main-v2"); item.setActive(true); item.setTurnsJson("[{\"message\":\"x\"}]"); item.setExpectedFinalStatus("COMPLETED"); item.setExpectedV2OutcomesJson("[{\"turn\":1,\"assertions\":{\"criteria.budget.hardMax\":{\"notSet\":true}}}]"); return item; }
 }
