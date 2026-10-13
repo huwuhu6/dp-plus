@@ -75,7 +75,7 @@ ai:
   provider: ${AI_PROVIDER:dashscope}
   base-url: ${AI_BASE_URL:${DASHSCOPE_COMPATIBLE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}}
   api-key: ${AI_API_KEY:${DASHSCOPE_API_KEY:}}
-  model: ${AI_MODEL:deepseek-v4-flash}
+  model: ${AI_MODEL:deepseek-v4-flash-0731}
   timeout-ms: ${AI_TIMEOUT_MS:20000}
   tool-planning-timeout-ms: ${AI_TOOL_PLANNING_TIMEOUT_MS:8000}
   tool-execution-timeout-ms: ${AI_TOOL_EXECUTION_TIMEOUT_MS:2500}

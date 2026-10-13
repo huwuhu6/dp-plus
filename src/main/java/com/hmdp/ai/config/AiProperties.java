@@ -9,7 +9,7 @@ public class AiProperties {
     private String provider = "deepseek";
     private String baseUrl = "https://api.deepseek.com";
     private String apiKey;
-    private String model = "deepseek-v4-flash";
+    private String model = "deepseek-v4-flash-0731";
     private Integer timeoutMs = 20000;
     private Boolean narrativeEnabled = true;
     private Integer toolPlanningTimeoutMs = 8000;

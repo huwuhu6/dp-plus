@@ -2529,3 +2529,8 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - Production SemanticInterpreter仅接收system和当前user，不使用已存ChatMemory；schema/parser无法完整表达时间、人数和环境偏好。typed语义替身注入这些字段的测试，只证明确定性组件，不代表真实模型能力。
 - 新增显式opt-in真实语义受控runner及旁路调用证据，保留隔离事实和存储、完整PRE/POST提交与模型输入；同run不可覆盖，runner不重试选优。原生契约repair独立记录。A/B分开统计，不修改Production或业务规范。
 - 首次真实语义受控运行在干净代码0ef196a下，六场景13轮均收到404 model_not_found，未产生语义/状态提交/执行。保留原输入和失败证据，36项前提不满足、0/6就绪，不能归因模型理解或Production；未换模型重跑。最终完整回归407通过、3跳过、0失败/错误，真实模型runner的JUnit成功仅代表完成失败记录。
+
+### 2026-10-14：固定默认模型版本
+
+- 官方当前DeepSeek API列出deepseek-v4-flash-0731；用户要求持久化默认配置，Java AiProperties与application.yaml的AI_MODEL默认值同步更新到该固定版本。本地忽略的dev配置同样更新默认值，避免覆盖回旧模型；配置秘密不提交。
+- 原deepseek-v4-flash的404实验保留，新模型使用独立runId，不改Prompt、业务逻辑或Fixture。
