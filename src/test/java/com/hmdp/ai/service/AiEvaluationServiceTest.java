@@ -43,7 +43,9 @@ class AiEvaluationServiceTest {
         ReflectionTestUtils.setField(service, "runMapper", runMapper);
         ReflectionTestUtils.setField(service, "caseResultMapper", resultMapper);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
-        ReflectionTestUtils.setField(service, "aiProperties", new AiProperties());
+        AiProperties properties = new AiProperties();
+        properties.setModel("test-configured-model");
+        ReflectionTestUtils.setField(service, "aiProperties", properties);
 
         AiEvaluationCase firstCase = evaluationCase(1L, "FIRST", "4");
         AiEvaluationCase secondCase = evaluationCase(2L, "SECOND", "6");
@@ -67,7 +69,7 @@ class AiEvaluationServiceTest {
         assertEquals(1000L, response.getRun().getAvgTotalDurationMs());
         assertEquals(1000L, response.getRun().getP95TotalDurationMs());
         assertEquals(800L, response.getRun().getAvgExtractingDurationMs());
-        assertEquals("deepseek-v4-flash", response.getRun().getModel());
+        assertEquals("test-configured-model", response.getRun().getModel());
         assertEquals("structured-profile-evidence-v2", response.getRun().getRetrievalStrategyVersion());
         assertEquals(0.5D, response.getRun().getRecallAtK());
         assertEquals(0.5D, response.getRun().getMrr());

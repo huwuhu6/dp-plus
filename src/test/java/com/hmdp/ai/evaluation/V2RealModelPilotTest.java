@@ -122,7 +122,7 @@ class V2RealModelPilotTest {
             switch(id) {
                 case "S04" -> {
                     String food=oldCriteria.path("cuisine").path("include").asText();
-                    // 首轮模型只看到餐厅泛请求；fixture不能悄悄给它补“日料”条件。
+                    // 原话明确要求日料；只按实际语义和状态判定，不向模型补充Fixture条件。
                     checks.put("M1",food.isBlank()?null:h.matches(Map.of("criteria.cuisine.include","日料","criteria.location",Map.of("equals",task(first,old).path("v2Criteria").path("location"))),h.taskProjection(last,old)));
                     JsonNode candidates=last.fullResponse().path("decision").path("recommendations");
                     checks.put("M2",!candidates.isEmpty()&&java.util.stream.StreamSupport.stream(candidates.spliterator(),false).allMatch(s->s.path("avgPrice").asLong()==40));
