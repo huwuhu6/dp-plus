@@ -2624,3 +2624,13 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - 定向118 passed；完整mvn -q test：500 passed、6 skipped、0 failures/errors，C06/C15、S13、原FIRST/REPAIR/提取及24条Main/10条semantic加载正常。正反例覆盖已知/未知价格、一般知识/未展示商户、歧义/冲突、历史批次不恢复条件、商品错对象/错属性/缺来源/明确有无、属性遗漏与编造零提交、多请求保留及无选择不虚报。
 - 一次真实real-merchant-fact-fix-20261014-once，代码f04f94ea47240664149b6e578c7ac5bc75d57def，deepseek-v4-flash-0731、60000ms；保持原话、原TEST_ONLY事实分支和隔离会话。S02 FIRST为FACT PRICE/name椰子鸡，实际工具22、人均40、忌辣/2人/晚上/热食均保留；S06 FIRST为PRODUCT/“无骨的”/ordinal2，实际工具22，明确无法确认且未查到不等于没有；C23 FIRST为同店主餐事实+BOOLEAN true guard，PRE未选/POST选22，完整回复同时说明主餐证据与已选米线。三次逻辑/HTTP调用均成功，均FIRST VALID，无repair或传输重试。JUnit入口通过只代表记录完成，另以实际语义、对象、值、PRE/POST及完整回复验证本轮修复目标。
 - 原始参数、真实输入/响应、工具和状态证据、JUnit XML及repair-goal-verification在target/eval-pilot/real-merchant-fact-fix-20261014-once；旧实验未覆盖。没有重测真实首轮、现实菜单或全部冻结项目，不把三个修复目标通过当成完整场景/端到端通过。属性证据仍按原文字面匹配，复杂词形由事实提供者适配或保持未知；C04距离来源、C06首轮覆盖及地理/菜单事实缺口仍待后续，不继续扩展本轮。
+### 2026-10-14：首轮条件来源与附近默认半径
+
+- 商户事实修复分支安全 Fast-forward 至本地 main `0c61a0f97b69fe14a16606c3964e68b1b6f20a79`，合并后完整回归 500 passed、6 skipped、0 failures/errors。后续修改隔离在 `fix/v2-first-turn-distance-source`，Production 与测试提交 `eb2907bfbfbfaa4408134d59e7740c6eb170f674`，未继续合并或推送。
+- 旧 C04 原话没有距离要求，FIRST 却输出 distanceKm=3 并被当作用户硬限制，属于来源校验缺陷。现在数字距离必须有用户明确范围表达；附近意图单独保存，不向用户语义补数字。SearchRadiusPolicy 区分 USER_EXPLICIT 与 SYSTEM_DEFAULT：前者严格保持用户半径，后者有可靠坐标时默认3km，硬过滤无匹配才允许一次扩大至5km，并保留预算、菜系等其他约束。默认策略不再借用历史 ConversationStateService 状态。
+- 首轮覆盖增加单字菜系的用餐语境识别、公司等个人位置引用检查及周末时间检查；“吃碗面”不能因“面”过短而被遗漏，也不能把“体面”识别为面食。公司位置不能由公共同名 POI 冒充，缺少可信个人位置或设备定位时澄清。附近/显式距离检索需要有效坐标，无地理范围的推荐不再执行跨城市搜索；明确城市仍允许城市范围检索。
+- 负例先复现首轮遗漏及错误来源；定向回归106 passed，最终完整回归517 passed、7 skipped、0 failures/errors，覆盖真实 PRE/POST、缺定位禁止执行、系统半径扩展、用户硬半径不扩展、空检索与语义失败区分，以及 C06/C15、商户事实、OCC 和版本化数据集加载。Main JSONL、冻结规范及 Holdout 未修改。
+- 唯一真实首轮实验 `real-first-turn-source-20261014-once`：deepseek-v4-flash-0731、60000ms，clean 代码 SHA 为上述 eb2907b；各输入仅运行一次，使用实际语义调用链与隔离内存，无设备定位/公司位置提供者，不注入答案。“公司附近吃碗面” FIRST 保留面及附近但缺公司引用，REPAIR 补回公司后通过校验；真实 PRE 保存面食条件，最终澄清公司具体位置，没有猜坐标或执行检索。这是语义保留与定位安全证据，不是完整推荐业务通过。
+- C04 原始首轮本次没有产生3km，但 FIRST 无依据生成“不辣”和1人，遗漏周末；首先触发 DIETARY_COVERAGE_REQUIRED。定向提取虽输出周末，却将 spiceRequirement 写成字符串 "null"，最终完整校验拒绝，0次业务提交。准确归因为模型结构化生成/修复仍不可靠，未继续重跑或为该结果放宽校验。该实验的 JUnit 成功只证明两份结果已记录，不代表两项业务均成功。
+- 旧 S01/S03/S06 首轮已有菜系及 EMPTY 搜索结果，不能据此断言模型漏菜系或数据库一定没有数据；它们缺少可靠地理上下文，旧证据也不足以定位数据覆盖与召回责任。C23 的具体万达、负一楼仍需城市、场所与楼层事实支持，默认半径不能替代这些证据。未重跑十场景，也未开展真实商户检索端到端实验。
+- 完整测试汇总在 `target/eval-pilot/first-turn-final-test-summary.json`，原始日志 `first-turn-final-full.log`、`first-turn-directed-final.log`；真实输入、实际请求/响应、FIRST/修复参数、校验、内存、事件及 JUnit 执行证据保留于上述新 runId 目录，均为忽略的本地生成物。
