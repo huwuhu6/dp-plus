@@ -251,6 +251,7 @@ public class V2ChatOrchestrator {
             verificationAttempted = true;
             // 目前商户事实没有结构化接待人数，也没有相对日期解析；保留需求但不能声称硬验证完成。
             unsupportedHardEvidence |= spec.criteria().partySize()!=null && spec.criteria().partySize()>1
+                    || spec.criteria().dietaryRestrictions()!=null && spec.criteria().dietaryRestrictions().present()
                     || spec.criteria().diningTime()!=null && !spec.criteria().diningTime().arrivalTime().matches("\\d{1,2}:\\d{2}");
             var report = verifier.verify(spec, observation.recommendations());
             failures.addAll(report.failedHardChecks());
@@ -309,10 +310,16 @@ public class V2ChatOrchestrator {
             List<String> unverified=new ArrayList<>();
             if (task.getV2Criteria().partySize()!=null && task.getV2Criteria().partySize()>1)
                 unverified.add("接待"+task.getV2Criteria().partySize()+"人的能力");
+            if(task.getV2Criteria().dietaryRestrictions()!=null && task.getV2Criteria().dietaryRestrictions().present()) {
+                var diet=task.getV2Criteria().dietaryRestrictions();
+                unverified.add("主餐的食材禁忌"+diet.avoidedIngredients()+"及辣度要求“"+diet.spiceRequirement()+"”");
+            }
             if (task.getV2Criteria().diningTime()!=null && !task.getV2Criteria().diningTime().arrivalTime().matches("\\d{1,2}:\\d{2}"))
                 unverified.add("“"+task.getV2Criteria().diningTime().arrivalTime()+"”的具体到店时间及营业情况");
             if (!unverified.isEmpty()) {
                 String answer=response.getAnswer()+" "+String.join("、",unverified)+"尚未核实，请向商户确认；环境偏好仅作检索参考。";
+                if(task.getV2Criteria().dietaryRestrictions()!=null && task.getV2Criteria().dietaryRestrictions().present())
+                    answer+="这些是待核实候选，不能视为已满足饮食限制；菜系或店名不能证明主餐安全。";
                 response.setAnswer(answer);response.getDecision().setAnswer(answer);
             }
         }

@@ -12,7 +12,8 @@ public sealed interface RequirementChange permits RequirementChange.CriteriaPatc
             if (cleared.contains(ClearedCriterion.BUDGET) && patch.budget() != null || cleared.contains(ClearedCriterion.CUISINE) && patch.cuisine() != null
                     || cleared.contains(ClearedCriterion.LOCATION) && patch.location() != null || cleared.contains(ClearedCriterion.DISTANCE) && patch.distance() != null
                     || cleared.contains(ClearedCriterion.DINING_TIME) && patch.diningTime() != null || cleared.contains(ClearedCriterion.SEMANTIC_PREFERENCES) && patch.semanticPreferences() != null
-                    || cleared.contains(ClearedCriterion.PARTY_SIZE) && patch.partySize() != null)
+                    || cleared.contains(ClearedCriterion.PARTY_SIZE) && patch.partySize() != null
+                    || cleared.contains(ClearedCriterion.DIETARY_RESTRICTIONS) && patch.dietaryRestrictions()!=null)
                 throw new IllegalArgumentException("criterion cannot be patched and cleared in one turn");
         }
     }
@@ -22,6 +23,6 @@ public sealed interface RequirementChange permits RequirementChange.CriteriaPatc
     record RequirementLock(DiningCriteria.PreferenceDimension dimension) implements RequirementChange { }
     /** This branch is excluded from PreReducer because its truth needs execution evidence. */
     record ConditionalRequirementChange(String observedRequestId, ObservationPredicate predicate, CriteriaPatch change) implements RequirementChange { }
-    enum ClearedCriterion { BUDGET, CUISINE, LOCATION, DISTANCE, DINING_TIME, SEMANTIC_PREFERENCES, PARTY_SIZE }
+    enum ClearedCriterion { BUDGET, CUISINE, LOCATION, DISTANCE, DINING_TIME, SEMANTIC_PREFERENCES, PARTY_SIZE, DIETARY_RESTRICTIONS }
     enum Direction { LOWER, HIGHER }
 }

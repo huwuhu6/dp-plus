@@ -15,5 +15,5 @@ public sealed interface UserRequest permits UserRequest.RecommendationRequest, U
     /** unboundedContinuation means the user delegated choosing unknown next research steps; then target may be null. */
     record ExploreRequest(String requestId, EntityReference target, boolean unboundedContinuation) implements UserRequest { }
     record GeneralKnowledgeRequest(String requestId, String topic) implements UserRequest { }
-    enum FactType { SOCKET, PRIVATE_ROOM, REVIEW, VOUCHER, DISTANCE, QUEUE, DETAIL, EVIDENCE }
+    enum FactType { SOCKET, PRIVATE_ROOM, REVIEW, VOUCHER, DISTANCE, QUEUE, DETAIL, EVIDENCE, NON_SPICY_MAIN_MEAL }
 }

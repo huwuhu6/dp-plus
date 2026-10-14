@@ -44,6 +44,15 @@ public class V2ActionHandler implements ActionExecutor {
             default -> "get_shop_detail";
         };
         AgentToolResult result = toolRegistry.find(name).execute(Map.of("shopId", action.shop().shopId()));
+        if(action.fact()==com.hmdp.ai.v2.semantic.UserRequest.FactType.NON_SPICY_MAIN_MEAL) {
+            Object raw=result.getFacts()==null?null:result.getFacts().get("mainMealSpiceEvidence");
+            var evidence=raw instanceof com.hmdp.ai.v2.evidence.MainMealSpiceEvidence e && e.admissibleFor(action.shop().shopId())?e:null;
+            ObservationValue value=evidence==null?null:new ObservationValue.BooleanValue(evidence.preparation()==com.hmdp.ai.v2.evidence.MainMealSpiceEvidence.Preparation.NON_SPICY);
+            String answer=evidence==null?"无法确认这家店能否提供符合本次用餐的不辣主餐；条件尚未证实，暂不选店。":
+                    evidence.preparation()==com.hmdp.ai.v2.evidence.MainMealSpiceEvidence.Preparation.NON_SPICY?"有主餐不辣证据："+evidence.mealName()+"（来源："+evidence.source()+"）。":
+                    "仅能确认主餐可减辣，不能确认最终不辣；条件尚未满足，暂不选店。";
+            return new ExecutionObservation(action.requestId(),ExecutionObservation.Status.SUCCESS,List.of(),null,List.of(),answer,null,value);
+        }
         return new ExecutionObservation(action.requestId(), ExecutionObservation.Status.SUCCESS, List.of(), null, List.of(),
                 result.getDisplayText(), result.getSummary(), typedValue(action.fact(), result.getFacts()));
     }

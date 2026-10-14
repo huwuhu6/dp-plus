@@ -6,7 +6,12 @@ import java.util.List;
 /** 仅承载用户明确表达的餐饮条件，搜索策略的推导值不能写入这里。 */
 public record DiningCriteria(LocationCriteria location, CuisineCriteria cuisine, BudgetCriteria budget,
                              DistanceCriteria distance, DiningTimeCriteria diningTime,
-                             SemanticPreferences preferences, Integer partySize) {
+                             SemanticPreferences preferences, Integer partySize,
+                             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) DietaryRestrictions dietaryRestrictions) {
+    public DiningCriteria(LocationCriteria location,CuisineCriteria cuisine,BudgetCriteria budget,DistanceCriteria distance,
+                          DiningTimeCriteria diningTime,SemanticPreferences preferences,Integer partySize) {
+        this(location,cuisine,budget,distance,diningTime,preferences,partySize,null);
+    }
     public DiningCriteria(LocationCriteria location, CuisineCriteria cuisine, BudgetCriteria budget,
                           DistanceCriteria distance, DiningTimeCriteria diningTime, SemanticPreferences preferences) {
         this(location,cuisine,budget,distance,diningTime,preferences,null);
@@ -35,6 +40,20 @@ public record DiningCriteria(LocationCriteria location, CuisineCriteria cuisine,
     }
     public record DistanceCriteria(BigDecimal hardMaxKm) { }
     public record DiningTimeCriteria(String arrivalTime) { }
+    /** 用户食材与辣度限制，始终是硬要求；不代表整店菜单已经安全，也不推导医学禁忌。 */
+    public record DietaryRestrictions(List<String> avoidedIngredients, String spiceRequirement) {
+        public DietaryRestrictions {
+            avoidedIngredients=avoidedIngredients==null?List.of():avoidedIngredients.stream().map(String::trim).distinct().toList();
+            if(avoidedIngredients.stream().anyMatch(String::isBlank))throw new IllegalArgumentException("blank ingredient restriction");
+            if(spiceRequirement!=null && spiceRequirement.isBlank())throw new IllegalArgumentException("blank spice restriction");
+        }
+        public boolean present(){return !avoidedIngredients.isEmpty() || spiceRequirement!=null;}
+        public static DietaryRestrictions merge(DietaryRestrictions old,DietaryRestrictions patch) {
+            if(patch==null)return old;if(old==null)return patch;
+            var ingredients=new java.util.LinkedHashSet<>(old.avoidedIngredients());ingredients.addAll(patch.avoidedIngredients());
+            return new DietaryRestrictions(List.copyOf(ingredients),patch.spiceRequirement()==null?old.spiceRequirement():patch.spiceRequirement());
+        }
+    }
     public record SemanticPreferences(List<SemanticPreference> values, List<PreferenceDimension> priorityOrder) {
         public SemanticPreferences { values = values == null ? List.of() : List.copyOf(values); priorityOrder = priorityOrder == null ? List.of() : List.copyOf(priorityOrder); }
         public static SemanticPreferences empty() { return new SemanticPreferences(List.of(), List.of()); }

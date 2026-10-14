@@ -4,7 +4,13 @@ package com.hmdp.ai.v2.semantic;
 public record DiningCriteriaPatch(DiningCriteria.LocationCriteria location, DiningCriteria.CuisineCriteria cuisine,
                                   DiningCriteria.BudgetCriteria budget, DiningCriteria.DistanceCriteria distance,
                                   DiningCriteria.DiningTimeCriteria diningTime,
-                                  DiningCriteria.SemanticPreferences semanticPreferences, Integer partySize) {
+                                  DiningCriteria.SemanticPreferences semanticPreferences, Integer partySize,
+                                  @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) DiningCriteria.DietaryRestrictions dietaryRestrictions) {
+    public DiningCriteriaPatch(DiningCriteria.LocationCriteria location,DiningCriteria.CuisineCriteria cuisine,
+                              DiningCriteria.BudgetCriteria budget,DiningCriteria.DistanceCriteria distance,
+                              DiningCriteria.DiningTimeCriteria time,DiningCriteria.SemanticPreferences preferences,Integer partySize) {
+        this(location,cuisine,budget,distance,time,preferences,partySize,null);
+    }
     public DiningCriteriaPatch(DiningCriteria.LocationCriteria location, DiningCriteria.CuisineCriteria cuisine,
                                DiningCriteria.BudgetCriteria budget, DiningCriteria.DistanceCriteria distance,
                                DiningCriteria.DiningTimeCriteria diningTime, DiningCriteria.SemanticPreferences semanticPreferences) {

@@ -36,6 +36,12 @@ public final class ExecutionPlanCompiler {
             String groupId = "G" + groupNumber++;
             Set<String> dependencies = Set.of(); ExecutionPlan.Guard guard = null;
             if (relation != null) {
+                GroundedRequest source=turn.requests().stream().filter(r->r.request().requestId().equals(relation.observedRequestId())).findFirst().orElseThrow();
+                if(source.request() instanceof UserRequest.FactQueryRequest fact && fact.fact()==UserRequest.FactType.NON_SPICY_MAIN_MEAL
+                        && request.request() instanceof UserRequest.SelectRequest
+                        && (!(relation.predicate() instanceof com.hmdp.ai.v2.semantic.ObservationPredicate.BooleanEquals b) || !b.expected()
+                        || shop(source).shopId()!=shop(request).shopId()))
+                    throw new IllegalArgumentException("main-meal choice must observe true evidence for the same merchant");
                 String producingGroup = producerGroups.get(relation.observedRequestId());
                 if (producingGroup == null) throw new IllegalArgumentException("guard must observe an already produced request");
                 dependencies = Set.of(producingGroup); guard = new ExecutionPlan.Guard(relation.observedRequestId(), relation.predicate());

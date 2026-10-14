@@ -42,11 +42,13 @@ class V2ExpandedRealModelTest {
         Path directory=Path.of("target/eval-pilot",runId);Files.createDirectories(directory);
         Files.writeString(directory.resolve("STARTED.json"),"{}",StandardOpenOption.CREATE_NEW);
         var originals=V2ControlledPilotTest.messages(); // 同时验证原文与冻结 SHA 一致。
+        List<String> selected=List.of(System.getProperty("v2.expanded.scenarios",String.join(",",IDS)).split(","));
+        assertTrue(!selected.isEmpty() && IDS.containsAll(selected) && selected.stream().distinct().count()==selected.size());
         String sha=new String(new ProcessBuilder("git","rev-parse","HEAD").start().getInputStream().readAllBytes()).trim();
         boolean dirty=!new String(new ProcessBuilder("git","status","--porcelain").start().getInputStream().readAllBytes()).isBlank();
         String spec=Files.readString(Path.of("doc/eval/V2自然语言多轮评测-业务验收规范-v1.md"));
         List<Plan> plans=new ArrayList<>();
-        for(String id:IDS) {
+        for(String id:selected) {
             var scene=Pattern.compile("(?ms)^### "+id+"｜(.*?)(?=^### [SC]\\d{2}｜|^## 第三)").matcher(spec);assertTrue(scene.find());
             var item=Pattern.compile("(?m)^- ([MF]\\d+)(?:【| )").matcher(scene.group(1));List<ItemPlan> items=new ArrayList<>();
             while(item.find())items.add(new ItemPlan(id+"-"+item.group(1),true,true,true));
@@ -101,13 +103,13 @@ class V2ExpandedRealModelTest {
                     save(directory.resolve(id+"-turns.json"),detailed);
                 }
                 // 就绪要求涵盖冻结展示与事实，不能仅用 nonEmpty 当作完整前提；先保守待人工证据核验。
-                Gate gate=new Gate(Readiness.NOT_READY,Stage.FIRST_TURN_COVERAGE,List.of(id+"-turns.json"),"frozen display/fact prerequisites not yet established by independent review");
+                Gate gate=ExpandedScenarioReadiness.assess(id,json.valueToTree(detailed.getFirst()));
                 List<ItemResult> items=plan.items().stream().map(i->new ItemResult(i.itemId(),Status.UNVERIFIED,Stage.OBSERVATION,
                         List.of(id+"-turns.json"),"raw evidence captured; no business assertion executed; independent review required")).toList();
                 var result=finish(plan,gate,h.turns,items);results.add(result);
                 save(directory.resolve(id+"-result.json"),result);write(json,directory.resolve("report.json"),report(plans,results));
             }
-            save(directory.resolve("COMPLETED.json"),Map.of("scenarios",results.size()));assertEquals(10,results.size());
+            save(directory.resolve("COMPLETED.json"),Map.of("scenarios",results.size()));assertEquals(selected.size(),results.size());
         } finally {ReflectionTestUtils.setField(interpreter,"aiClient",client);}
     }
     private void save(Path file,Object value) throws Exception {json.writerWithDefaultPrettyPrinter().writeValue(file.toFile(),value);}
