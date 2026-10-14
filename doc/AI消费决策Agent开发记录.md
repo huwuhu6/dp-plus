@@ -2634,3 +2634,15 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - C04 原始首轮本次没有产生3km，但 FIRST 无依据生成“不辣”和1人，遗漏周末；首先触发 DIETARY_COVERAGE_REQUIRED。定向提取虽输出周末，却将 spiceRequirement 写成字符串 "null"，最终完整校验拒绝，0次业务提交。准确归因为模型结构化生成/修复仍不可靠，未继续重跑或为该结果放宽校验。该实验的 JUnit 成功只证明两份结果已记录，不代表两项业务均成功。
 - 旧 S01/S03/S06 首轮已有菜系及 EMPTY 搜索结果，不能据此断言模型漏菜系或数据库一定没有数据；它们缺少可靠地理上下文，旧证据也不足以定位数据覆盖与召回责任。C23 的具体万达、负一楼仍需城市、场所与楼层事实支持，默认半径不能替代这些证据。未重跑十场景，也未开展真实商户检索端到端实验。
 - 完整测试汇总在 `target/eval-pilot/first-turn-final-test-summary.json`，原始日志 `first-turn-final-full.log`、`first-turn-directed-final.log`；真实输入、实际请求/响应、FIRST/修复参数、校验、内存、事件及 JUnit 执行证据保留于上述新 runId 目录，均为忽略的本地生成物。
+
+### 2026-10-14：真实检索空结果定位与主体 POI 匹配
+
+- 首轮来源修复安全 Fast-forward 到本地 main `b13b280bd692ebb1e2efe5c65993148dc213d378`；合并后完整回归517 passed、7 skipped、0 failures/errors。后续只读诊断及定位修复隔离在 `test/v2-real-retrieval-diagnosis`，未再次合并或推送；冻结规范、正式Main数据及Holdout均未修改。
+- 真实链路：SemanticInterpreter → PRE任务/条件与实体Grounding → V2LocationResolver → 编译SearchSpec → SearchAction → ShopRetrievalEngine → MySQL候选及画像/评论硬过滤 → 可选Milvus白名单语义加分 → 确定性排序/截断 → verifier → POST批次持久化 → Renderer。城市/区县是行政筛选，不猜行政中心坐标；明确POI由实际地图候选给坐标，授权请求定位走坐标锚点。预算在SQL，菜系/用户距离/MUST证据/可解析营业时段在内存硬过滤。普通推荐不因缺Milvus分数删除硬匹配候选，相似推荐则要求语义召回。系统默认半径只有3→5km的有界扩展，用户硬限制不自动放宽。
+- 数据库现有980家商户、975份画像，5家缺画像、0家缺坐标；福州330、杭州50、厦门300、泉州300。画像没有面食/米线/酸菜鱼/炸鸡类别。这里只证明当前数据库及画像覆盖，不证明现实商户没有这些餐品，也没有独立验证现有记录的新鲜度/真实性；本轮没有新增商户、菜单、索引或业务会话记录。
+- 首次模型实验 `real-retrieval-three-20261014-once`，代码1823da4，deepseek-v4-flash-0731、60000ms，每输入一次，三条共4次逻辑模型调用（A含正常的定向提取）。A“在福州市三坊七巷附近找面馆，人均50元以内。”的FIRST遗漏面馆且无依据输出spiceRequirement="{}"，定向提取清除非法辣度后通过，但仍遗漏菜系；未在本轮修改Prompt或语义修复。A因地图20个主体/相关POI被错误统一判歧义，B的授权“福州大学旗山校区附近”也因20候选无法取得坐标，C的S03原始酸菜鱼请求无定位而澄清，三者均未执行SearchAction。这些不是MySQL或Milvus执行后空召回。
+- 确认并最小修复 V2LocationResolver：在用户指定城市中唯一完整名称匹配可定位主体，仅忽略排版括号/空白，不合并院系、建筑或分校后缀；没有唯一完整身份仍澄清，公共公司/家仍不能冒充个人位置。实际地图主体为三坊七巷、福州大学(旗山校区)，错误来自把主体与其周边子设施统统计为歧义。修复前新增负例6项中1失败；修复后定位/半径/检索及C06/C15相关定向59 passed。
+- 不重复抽取模型结果：`real-retrieval-three-20261014-replay-verified` 用归档完整参数经真实parser和既有确定性规范化重建语义，逐字段与原VALID结果数值等价核对，新增语义模型调用0次，真实地理及MySQL继续调用。A SQL为福建省/福州市/鼓楼区/人均≤50，候选4→菜系等硬条件4（模型未给菜系）→3km内2→排序2→verifier/展示2，shopId顺序69、72与POST批次一致；不能把它当面馆推荐通过。B用用户确认校园经真实地理服务得到26.056756、119.196135，明确不是实测设备GPS；查询980→硬条件980→3km内5→排序截断3→verifier/展示3，顺序60、85、74与POST一致。没有触发5km扩展，默认距离没有写入用户hardMax。
+- C仍因无定位澄清，主轮没有检索。独立福州全市只读覆盖探针（与原始请求执行分开）对面食、酸菜鱼均为SQL330→画像菜系过滤0→最终0，不放宽成任意川菜或小吃。准确归因为PROFILE/DATA_COVERAGE，而不是语义未识别酸菜鱼；原无锚点问题另外记录为LOCATION_CONTEXT。本轮没有用评论中的菜品词反向证明整店菜系或菜单可用。
+- A/B的语义查询词为空，覆盖探针则在硬过滤后归零，所以本轮没有调用Milvus召回，不能宣称向量服务端到端已验证。MySQL、模型与地理服务实际可用，Milvus容器健康只证明容器状态；额外边界包括模型面馆覆盖遗漏、菜系画像粒度不足，以及POI附近查询自动采用锚点行政区的跨区漏召回风险（未证实有效候选被排除，本轮未修改）。
+- 最终完整 `mvn -q test` 为518 passed、8 skipped、0 failures/errors；新增opt-in只读诊断默认跳过，真实实验JUnit成功只证明证据已记录。完整日志 `retrieval-merge-full.log`、`retrieval-fix-directed.log`、`retrieval-final-full.log` 及汇总位于target/eval-pilot；首次模型证据和回放目录保留inputs、modelCalls、semanticAttempts、SearchSpec、SQL参数/候选ID、硬过滤分段计数、结果、完整回复、POST及展示一致性。所有运行生成物留在忽略目录，不进入提交。
