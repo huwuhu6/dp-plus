@@ -2580,3 +2580,11 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - 实际 PRE/POST 证据：旧任务 shopId22 的 POSITIVE 持久化且未选店；新任务独立建立，保留南站与环境 PREFER，旧任务条件未变。受控商户返回仍不证明接待能力、营业事实或真实地理唯一性。
 - 新发现：第一轮 FIRST 遗漏“面”和“公司附近”，仍被原覆盖校验判为 VALID，属于尚未解决的首轮语义覆盖缺口，不宣称 C06 完整通过。现有业务统计为 2 满足、6 未验证、0 不满足，1/1 就绪、0/1 完整验收；旧汇总器 M2 的未验证原因文字早于时间/人数契约，保留原结果并在补充证据文件说明，不扩展评测框架。
 - 完整模型输入、独立 Schema/参数、来源与合并语义、PRE/POST、工具证据及结果保留于 `target/eval-pilot/real-semantic-c06-targeted-extraction-20261014/`，新增 `C06-targeted-verification.json` 只核对第二轮目标证据，不替换冻结验收评分。main、冻结规范、正式数据集与 Holdout 未修改。
+
+### 2026-10-14：模型传输失败的有界退避重试
+
+- 原 OpenAiCompatibleClient 只有一次 HTTP 尝试，SemanticInterpreter 的 REPAIR 是语义纠错，不负责恢复网络/服务错误。十场景 S01 的 HTTP400 明确来自服务端 sandbox grammar compile timed out，不是一般 schema/参数错误。
+- 在现有聊天客户端实现最多3次尝试、500ms指数窗口、Full Jitter、5s退避上限和90s重试预算，尊重Retry-After秒数/HTTP-date，接近预算时缩短读取超时，连接等待最多5s，中断立即停止。通过ai.model-retry配置，可设max-attempts=1关闭；不新增依赖、不切换模型、不改请求文字和Prompt。
+- 仅重试网络IOException、408/429/500/502/503/504与明确供应商grammar编译超时400；普通400、认证/权限失败、证书错误、成功响应的语义缺陷不做传输重试。复用同一HTTP请求，不重跑业务轮或实际商户工具，耗尽后仍抛原异常。
+- 每个实际尝试分别计数及记录成功/失败，客户端提供无认证信息的transportAttempts；真实语义观察文件保留首次失败、后续恢复、延迟、实际读取超时与同一logicalCallId，并记录重试配置。没有把多次传输恢复伪称一次网络调用，也不覆盖旧实验数据。
+- 11项客户端正反例覆盖重试恢复、相同请求、指数窗口/随机范围、服务端特殊400、永久错误、耗尽、网络超时/证书、中断、Retry-After两种格式及时间预算；评测观察负例证明逻辑成功仍保留失败尝试。完整mvn -q test：473 passed、3 skipped、0 failures、0 errors。未再次运行付费真实模型或重抽十场景；旧结果保持不变。

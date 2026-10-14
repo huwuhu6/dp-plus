@@ -14,6 +14,10 @@ final class V2ModelCallEvidence {
 
     JsonNode observe(List<Map<String,Object>> messages,List<Map<String,Object>> tools,Map<String,Object> choice,
                      String action,Supplier<JsonNode> actualCall) {
+        return observe(messages,tools,choice,action,actualCall,null);
+    }
+    JsonNode observe(List<Map<String,Object>> messages,List<Map<String,Object>> tools,Map<String,Object> choice,
+                     String action,Supplier<JsonNode> actualCall,Supplier<List<Map<String,Object>>> attempts) {
         Map<String,Object> call=new LinkedHashMap<>();
         call.put("messages",json.valueToTree(messages));call.put("tools",json.valueToTree(tools));
         call.put("toolChoice",json.valueToTree(choice));call.put("action",action);
@@ -31,6 +35,7 @@ final class V2ModelCallEvidence {
             // 不保存可能含请求URL/认证信息的异常message；完整业务与模型原始输出另有可信记录。
             throw failure;
         } finally {
+            if(attempts!=null)call.put("transportAttempts",attempts.get());
             call.put("durationMs",(System.nanoTime()-started)/1_000_000);calls.add(call);
         }
     }

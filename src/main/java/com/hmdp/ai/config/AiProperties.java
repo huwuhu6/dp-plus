@@ -11,6 +11,7 @@ public class AiProperties {
     private String apiKey;
     private String model = "deepseek-v4-flash-0731";
     private Integer timeoutMs = 20000;
+    private ModelRetryProperties modelRetry = new ModelRetryProperties();
     private Boolean narrativeEnabled = true;
     private Integer toolPlanningTimeoutMs = 8000;
     private Integer toolExecutionTimeoutMs = 2500;
@@ -28,6 +29,14 @@ public class AiProperties {
 
     public boolean isConfigured() {
         return apiKey != null && !apiKey.trim().isEmpty();
+    }
+
+    @Data
+    public static class ModelRetryProperties {
+        private Integer maxAttempts = 3;
+        private Long initialDelayMs = 500L;
+        private Long maxDelayMs = 5000L;
+        private Long maxElapsedMs = 90000L;
     }
 
     @Data

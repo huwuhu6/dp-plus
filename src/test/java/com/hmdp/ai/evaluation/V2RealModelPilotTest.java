@@ -61,6 +61,7 @@ class V2RealModelPilotTest {
         var endpoint=java.net.URI.create(properties.getBaseUrl());
         metadata.put("endpoint",endpoint.getScheme()+"://"+endpoint.getHost()+(endpoint.getPort()<0?"":":"+endpoint.getPort())+endpoint.getPath());
         metadata.put("temperature",0.1);metadata.put("timeoutMs",properties.getTimeoutMs());metadata.put("runnerRetry",false);
+        metadata.put("modelTransportRetry",json.valueToTree(properties.getModelRetry()));
         metadata.put("productionRepair","at most one contract repair per user turn; retained, recorded, not result selection");
         metadata.put("javaVersion",System.getProperty("java.version"));metadata.put("springBootVersion",org.springframework.boot.SpringBootVersion.getVersion());
         metadata.put("repositorySha",plans.getFirst().repositorySha());metadata.put("dirtyWorkspace",plans.getFirst().dirtyWorkspace());
@@ -71,7 +72,7 @@ class V2RealModelPilotTest {
         var modelEvidence=new V2ModelCallEvidence(json);OpenAiCompatibleClient observedClient=spy(productionClient);
         doAnswer(i->modelEvidence.observe(i.getArgument(0),i.getArgument(1),i.getArgument(2),i.getArgument(3),()->{
             try { return (JsonNode)i.callRealMethod(); } catch(RuntimeException e){throw e;} catch(Throwable e){throw new AssertionError(e);}
-        })).when(observedClient).chatCompletion(anyList(),anyList(),anyMap(),eq("V2_SEMANTIC_INTERPRETATION"));
+        },observedClient::lastTransportAttempts)).when(observedClient).chatCompletion(anyList(),anyList(),anyMap(),eq("V2_SEMANTIC_INTERPRETATION"));
         ReflectionTestUtils.setField(productionInterpreter,"aiClient",observedClient);
         List<ScenarioResult> results=new ArrayList<>();
         try {

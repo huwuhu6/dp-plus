@@ -11,6 +11,13 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class V2ModelCallEvidenceTest {
+    @Test void recoveredLogicalCallRetainsFailedTransportAttempt() {
+        var json=new ObjectMapper();var observer=new V2ModelCallEvidence(json);
+        observer.observe(List.of(Map.of("role","user","content","原话")),List.of(),Map.of(),"V2",()->json.createObjectNode(),
+                ()->List.of(Map.of("attempt",1,"success",false,"httpStatus",503),Map.of("attempt",2,"success",true)));
+        var call=json.valueToTree(observer.calls.getFirst());assertTrue(call.path("success").asBoolean());
+        assertEquals(2,call.path("transportAttempts").size());assertFalse(call.path("transportAttempts").get(0).path("success").asBoolean());
+    }
     @Test void actualInterpreterSuppliesOnlyCurrentMessageAndProductionContract() throws Exception {
         ObjectMapper json=new ObjectMapper();SemanticInterpreter interpreter=new SemanticInterpreter();
         OpenAiCompatibleClient client=mock(OpenAiCompatibleClient.class);V2ModelCallEvidence observer=new V2ModelCallEvidence(json);

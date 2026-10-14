@@ -65,6 +65,8 @@ MCP 不可用、解析为空或用户不确认候选时，不会猜测城市或�
 
 仓库仅提交 [application.yaml](src/main/resources/application.yaml) 的占位符，不提交密钥。创建本地文件 `src/main/resources/application-dev.yml`，或在运行环境设置等价环境变量。
 
+聊天模型客户端默认最多尝试 3 次，采用指数退避与 Full Jitter（初始 500ms、退避上限 5s），尊重 `Retry-After`，重试预算为 90s；连接等待最多 5s，单次读取超时在预算将耗尽时缩短。通过 `AI_MODEL_MAX_ATTEMPTS`、`AI_MODEL_RETRY_INITIAL_DELAY_MS`、`AI_MODEL_RETRY_MAX_DELAY_MS`、`AI_MODEL_RETRY_MAX_ELAPSED_MS` 配置，尝试次数设为 1 可关闭重试。只重试临时传输/服务错误，不重跑业务轮、工具或成功响应后的语义判断；普通 400、认证失败不重试，已确认的服务端 grammar 编译超时 400 单独处理。每次实际尝试均记录成功/失败，真实语义试点另保存 `transportAttempts`，恢复成功不会抹掉首次失败。
+
 最小配置示例：
 
 ```yaml
