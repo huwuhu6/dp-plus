@@ -171,7 +171,8 @@ class SemanticInterpreterTest {
         var deviceRelative = (com.hmdp.ai.v2.semantic.TurnSemantics) ReflectionTestUtils.invokeMethod(interpreter, "normalizeLocationProvenance", "附近找火锅", interpreter.parse(mapper.readTree("""
                 {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","criteria":{"poi":"device_location_relative"}}
                 """)));
-        assertEquals(null, assertInstanceOf(RequirementChange.CriteriaPatch.class, deviceRelative.requirementChanges().getFirst()).patch().location());
+        var relativeLocation=assertInstanceOf(RequirementChange.CriteriaPatch.class, deviceRelative.requirementChanges().getFirst()).patch().location();
+        assertEquals(null,relativeLocation.poi());assertEquals(null,relativeLocation.city());assertTrue(relativeLocation.nearby());
         var namedPoi = (com.hmdp.ai.v2.semantic.TurnSemantics) ReflectionTestUtils.invokeMethod(interpreter, "normalizeLocationProvenance", "福州大学附近找火锅", interpreter.parse(mapper.readTree("""
                 {"taskDirective":"CONTINUE","taskDirectiveEvidence":"NONE","criteria":{"poi":"福州大学"}}
                 """)));

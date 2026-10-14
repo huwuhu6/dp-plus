@@ -15,6 +15,10 @@ import java.util.List;
 /** Resolves execution-only search anchors; user-authored location criteria remain untouched. */
 @Component
 public class V2LocationResolver {
+    public static String personalReference(String user){
+        var m=java.util.regex.Pattern.compile("(?:我(?:们)?的?)?(公司|单位|家|学校|住处)(?:附近|周边|周围)").matcher(user);
+        return m.find()?m.group(1):null;
+    }
     private final LocationResolutionProvider locations;
 
     @Autowired
@@ -32,12 +36,14 @@ public class V2LocationResolver {
         boolean explicitArea = hasText(requested == null ? null : requested.city())
                 || hasText(requested == null ? null : requested.district());
         String poi = requested == null ? null : requested.poi();
+        boolean personal=hasText(poi) && poi.matches("(?:我(?:们)?的?)?(?:公司|单位|家|学校|住处)(?:附近|周边|周围)?");
 
         if (!locationChanged && !validCoordinates(device) && previous != null
+                && (!personal || previous.source()==SearchAnchor.AnchorSource.PERSONAL_LOCATION_PROFILE)
                 && (!requiresDistance(criteria) || validCoordinates(previous))) return new Resolution.Resolved(previous);
 
-        boolean vagueNear = poi != null && poi.matches("(?i)附近|周边|周围|这里|这附近");
-        if (hasText(poi) && !vagueNear && previous != null && previous.source() == SearchAnchor.AnchorSource.POI
+        boolean vagueNear = poi != null && poi.matches("(?i)附近|周边|周围|这里|这附近") || requested!=null && requested.nearby() && !hasText(poi);
+        if (!personal && hasText(poi) && !vagueNear && previous != null && previous.source() == SearchAnchor.AnchorSource.POI
                 && previous.canonicalName() != null && (previous.canonicalName().contains(poi) || poi.contains(previous.canonicalName())))
             return new Resolution.Resolved(previous);
 
@@ -57,13 +63,17 @@ public class V2LocationResolver {
             if (candidates.size() != 1)
                 return new Resolution.NeedsClarification("“" + poi + "”对应多个地点，请补充城市、区县或完整地点名。");
             ResolvedLocationCandidate candidate = candidates.getFirst();
-            if (candidate.getLatitude() == null || candidate.getLongitude() == null)
+            // 公共POI唯一不等于用户的公司/家。只有用户专属地点资料提供者能绑定此类指代。
+            if(personal && !"PERSONAL_LOCATION_PROFILE".equals(candidate.getSource()))
+                return new Resolution.NeedsClarification("请提供“"+poi+"”的具体名称或地址；不能把任意公共地点当作你的公司或住处。");
+            if (candidate.getLatitude() == null || candidate.getLongitude() == null || !Double.isFinite(candidate.getLatitude())
+                    || !Double.isFinite(candidate.getLongitude()) || Math.abs(candidate.getLatitude())>90 || Math.abs(candidate.getLongitude())>180)
                 return new Resolution.NeedsClarification("无法可靠确定“" + poi + "”的位置，请提供更明确的地点。");
             return new Resolution.Resolved(new SearchAnchor(candidate.getPoiId(),
                     firstText(candidate.getCanonicalName(), candidate.getLabel(), poi), candidate.getLatitude(),
                     candidate.getLongitude(), firstText(candidate.getProvince(), null, null),
                     firstText(candidate.getCity(), requested.city(), null),
-                    firstText(candidate.getDistrict(), requested.district(), null), SearchAnchor.AnchorSource.POI));
+                    firstText(candidate.getDistrict(), requested.district(), null), personal?SearchAnchor.AnchorSource.PERSONAL_LOCATION_PROFILE:SearchAnchor.AnchorSource.POI));
         }
 
         if (explicitArea) {
@@ -90,7 +100,8 @@ public class V2LocationResolver {
     }
 
     private boolean requiresDistance(DiningCriteria criteria) {
-        return criteria != null && criteria.distance() != null && criteria.distance().hardMaxKm() != null;
+        return criteria != null && (criteria.distance() != null && criteria.distance().hardMaxKm() != null
+                || criteria.location()!=null && criteria.location().nearby());
     }
     /** A model label is not an administrative identity.  Trust a district only after the location provider resolves it uniquely. */
     private boolean verifiedAdministrativeDistrict(DiningCriteria.LocationCriteria requested, ChatLocationInput device) {
@@ -111,7 +122,8 @@ public class V2LocationResolver {
                 && input.getLatitude() >= -90D && input.getLatitude() <= 90D
                 && input.getLongitude() >= -180D && input.getLongitude() <= 180D;
     }
-    private boolean validCoordinates(SearchAnchor anchor) { return anchor != null && anchor.latitude() != null && anchor.longitude() != null; }
+    private boolean validCoordinates(SearchAnchor anchor) { return anchor != null && anchor.latitude() != null && anchor.longitude() != null
+            && Double.isFinite(anchor.latitude()) && Double.isFinite(anchor.longitude()) && Math.abs(anchor.latitude())<=90 && Math.abs(anchor.longitude())<=180; }
     private boolean hasText(String value) { return value != null && !value.isBlank(); }
     private String firstText(String first, String second, String fallback) {
         if (hasText(first)) return first;

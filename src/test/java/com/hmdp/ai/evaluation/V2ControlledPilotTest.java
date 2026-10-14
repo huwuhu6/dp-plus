@@ -26,6 +26,7 @@ class V2ControlledPilotTest {
         new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(Path.of("target/eval-pilot/plan-v1.json").toFile(),plans);
         for (Plan plan:plans) {
             String id=plan.scenarioId();V2PilotHarness h=new V2PilotHarness();
+            if(id.equals("S08"))h.deviceLocation=knownTestDevice();
             String food=switch(id){case "S04"->"日料";case "S08"->"火锅";case "S09"->"餐饮";case "S13"->"早餐";case "C06"->"面";default->"牛排";};
             String poi=switch(id){case "S04"->"大学城";case "S09"->"测试商场四楼";case "S13"->"地铁口";case "C06"->"公司附近";case "C15"->"国贸";default->"附近";};
             DiningCriteria initial=criteria(food,poi,id.equals("C06")?"今晚":null,id.equals("C06")?List.of("单人"):List.of());
@@ -107,6 +108,7 @@ class V2ControlledPilotTest {
 
     @Test void cancelledHotpotStillEffectiveFailsActualPredicate() throws Exception {
         V2PilotHarness h=new V2PilotHarness();
+        h.deviceLocation=knownTestDevice();
         TurnEvidence first=h.turn(MESSAGES.get("S08").get(0),sem(TaskDirective.START_NEW,criteria("火锅","附近",null,List.of()),List.of(),recommend()),shops("S08",false));
         String taskId=first.workingMemory().path("activeTaskId").asText();
         // 错误解释仅新增寿司偏好，未取消旧火锅；真实 reducer/compiler 使用旧 cuisine。
@@ -188,6 +190,7 @@ class V2ControlledPilotTest {
 
     @Test void externalFailureIsObservedAndRethrownToRealExecutor() throws Exception {
         V2PilotHarness h=new V2PilotHarness();
+        h.deviceLocation=knownTestDevice();
         TurnEvidence first=h.turn(MESSAGES.get("S08").get(0),sem(TaskDirective.START_NEW,criteria("火锅","附近",null,List.of()),List.of(),recommend()),shops("S08",false));
         h.retrievalFailure=new IllegalStateException("test fact provider unavailable");
         TurnEvidence actual=h.turn(MESSAGES.get("S08").get(1),sem(TaskDirective.CONTINUE,criteria("寿司","附近",null,List.of()),List.of(),recommend()),shops("S08",true));
@@ -245,6 +248,7 @@ class V2ControlledPilotTest {
     private static TurnSemantics historicalQuery(EntityReference ref) {
         return sem(TaskDirective.CONTINUE,null,List.of(),List.of(new UserRequest.FactQueryRequest("address",ref,UserRequest.FactType.DETAIL),new UserRequest.FactQueryRequest("signature",ref,UserRequest.FactType.DETAIL)));
     }
+    static com.hmdp.ai.dto.ChatLocationInput knownTestDevice(){var d=new com.hmdp.ai.dto.ChatLocationInput();d.setLatitude(26D);d.setLongitude(119D);d.setSource("TEST_ONLY_DEVICE_FIXTURE");return d;}
     private static List<UserRequest> recommend(){return List.of(new UserRequest.RecommendationRequest("recommend"));}
     private static TurnSemantics sem(TaskDirective directive,DiningCriteria criteria,List<EntityFeedback> feedback,List<UserRequest> requests) {
         List<RequirementChange> changes=criteria==null?List.of():List.of(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(criteria.location(),criteria.cuisine(),criteria.budget(),criteria.distance(),criteria.diningTime(),criteria.preferences()),Set.of()));

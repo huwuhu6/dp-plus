@@ -38,14 +38,14 @@ public class ShopRetrievalEngine {
     public RetrievalResult retrieve(SearchSpec spec) {
         Long similarId = spec.anchor() == null ? null : spec.anchor().shopId();
         return retrieve(new ShopRetrievalRequest(spec.criteria(), spec.relativePreferences(), spec.kind(),
-                spec.excludedShopIds(), similarId, spec.searchAnchor(), spec.count(), null));
+                spec.excludedShopIds(), similarId, spec.searchAnchor(), spec.count(), null,spec.radiusPolicy()));
     }
 
     public RetrievalResult retrieve(ShopRetrievalRequest request) {
         if (request.kind() == ExecutionAction.SearchKind.SIMILAR && request.similarityAnchorShopId() == null)
             return RetrievalResult.unsupported("相似推荐需要明确的参考商户。");
         DiningCriteria criteria = request.criteria();
-        if (requiresDistance(criteria) && !hasCoordinates(request.searchAnchor()))
+        if ((requiresDistance(criteria) || request.radiusPolicy().source()!=com.hmdp.ai.v2.plan.SearchRadiusPolicy.Source.NONE) && !hasCoordinates(request.searchAnchor()))
             return RetrievalResult.unsupported("当前距离条件缺少可用定位，请提供当前位置或明确地点。");
 
         long started = System.currentTimeMillis();
@@ -56,9 +56,14 @@ public class ShopRetrievalEngine {
         Set<Long> candidateIds = initial.stream().map(Shop::getId).collect(Collectors.toSet());
         Map<Long, AiShopProfile> profiles = loadProfiles(candidateIds);
         Map<Long, List<AiReviewDocument>> reviews = loadReviews(candidateIds);
-        List<Shop> hardMatched = initial.stream().filter(shop -> hardMatch(shop, profiles.get(shop.getId()), reviews.get(shop.getId()), criteria, request.searchAnchor())).toList();
+        Double radius=request.radiusPolicy().initialKm();
+        List<Shop> hardMatched = filterWithin(initial,profiles,reviews,criteria,request.searchAnchor(),radius);
+        if(hardMatched.isEmpty() && request.radiusPolicy().source()==com.hmdp.ai.v2.plan.SearchRadiusPolicy.Source.SYSTEM_DEFAULT){
+            radius=request.radiusPolicy().maxKm();
+            hardMatched=filterWithin(initial,profiles,reviews,criteria,request.searchAnchor(),radius);
+        }
         if (hardMatched.isEmpty()) return RetrievalResult.success(List.of(), new RetrievalMetrics(initial.size(), 0, 0, false,
-                System.currentTimeMillis() - started, 0));
+                System.currentTimeMillis() - started, 0,radius,request.radiusPolicy().source()));
 
         String semanticQuery = semanticQuery(request, profiles);
         SemanticRecallResult recall = semanticShopRetriever == null || semanticQuery.isBlank()
@@ -88,7 +93,12 @@ public class ShopRetrievalEngine {
         List<DecisionRecommendation> selected = recommendations.stream().limit(limit).toList();
         long duration = System.currentTimeMillis() - started;
         return RetrievalResult.success(selected, new RetrievalMetrics(initial.size(), hardMatched.size(), selected.size(),
-                recall != null && recall.isAvailable(), duration, recall == null ? 0 : recall.getDurationMs()));
+                recall != null && recall.isAvailable(), duration, recall == null ? 0 : recall.getDurationMs(),radius,request.radiusPolicy().source()));
+    }
+    private List<Shop> filterWithin(List<Shop> initial,Map<Long,AiShopProfile> profiles,Map<Long,List<AiReviewDocument>> reviews,DiningCriteria c,
+                                  com.hmdp.ai.v2.plan.SearchAnchor anchor,Double radius){
+        return initial.stream().filter(s->hardMatch(s,profiles.get(s.getId()),reviews.get(s.getId()),c,anchor)
+                && (radius==null || distance(anchor.latitude(),anchor.longitude(),s.getY(),s.getX())<=radius)).toList();
     }
 
     private void applyStructuredSqlFilters(QueryWrapper<Shop> query, DiningCriteria criteria, ShopRetrievalRequest request) {
@@ -203,7 +213,8 @@ public class ShopRetrievalEngine {
         item.setScore(round(Math.max(0D, score)));
     }
     private boolean requiresDistance(DiningCriteria c) { return c.distance() != null && c.distance().hardMaxKm() != null; }
-    private boolean hasCoordinates(com.hmdp.ai.v2.plan.SearchAnchor a) { return a != null && a.latitude() != null && a.longitude() != null; }
+    private boolean hasCoordinates(com.hmdp.ai.v2.plan.SearchAnchor a) { return a != null && a.latitude() != null && a.longitude() != null
+            && Double.isFinite(a.latitude()) && Double.isFinite(a.longitude()) && Math.abs(a.latitude())<=90 && Math.abs(a.longitude())<=180; }
     private double distance(Double lat1, Double lon1, Double lat2, Double lon2) {
         if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return Double.POSITIVE_INFINITY;
         double lat = Math.toRadians(lat2 - lat1), lon = Math.toRadians(lon2 - lon1);
@@ -224,7 +235,8 @@ public class ShopRetrievalEngine {
         static RetrievalResult success(List<DecisionRecommendation> items, RetrievalMetrics metrics) { return new RetrievalResult(true, null, items, metrics); }
     }
     public record RetrievalMetrics(int initialCandidates, int hardMatchedCandidates, int finalCandidates,
-                                   boolean semanticRetrievalUsed, long durationMs, long semanticDurationMs) {
+                                   boolean semanticRetrievalUsed, long durationMs, long semanticDurationMs,Double appliedRadiusKm,com.hmdp.ai.v2.plan.SearchRadiusPolicy.Source radiusSource) {
+        public RetrievalMetrics(int initial,int hard,int count,boolean semantic,long duration,long semanticDuration){this(initial,hard,count,semantic,duration,semanticDuration,null,com.hmdp.ai.v2.plan.SearchRadiusPolicy.Source.NONE);}
         static RetrievalMetrics empty(long duration) { return new RetrievalMetrics(0, 0, 0, false, duration, 0); }
     }
 }

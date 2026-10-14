@@ -210,6 +210,9 @@ public class SemanticInterpreter {
             TurnSemantics semantics=normalizeLocationProvenance(userTurn,normalizeDeterministicBudget(userTurn,parse(effective)));
             validateDietary(userTurn,semantics);validateConditionalMeal(userTurn,semantics);
             validateMerchantQueries(userTurn,semantics);
+            validateDistanceSource(userTurn,semantics);
+            for(var change:semantics.requirementChanges())if(change instanceof RequirementChange.CriteriaPatch c && c.patch().cuisine()!=null)
+                for(String food:c.patch().cuisine().acceptedCuisines())if(!cuisineSource(userTurn,food))throw violation(Violation.CUISINE_COVERAGE_REQUIRED);
             if (requiresCuisineCoverage(userTurn,semantics)) throw violation(Violation.CUISINE_COVERAGE_REQUIRED);
             validateDiningDetails(userTurn,semantics);
             if (requiresHardBudget(userTurn) && !hasHardBudget(semantics)) throw violation(Violation.HARD_BUDGET_REQUIRED);
@@ -226,6 +229,19 @@ public class SemanticInterpreter {
             if(removedDuplicate)evaluationAttempts.get().getLast().put("normalizations",List.of("criteria.spiceRequirement: duplicate of source-backed PREFER removed; preference unchanged"));
             traceRepair(effective,repair,null,failure.getMessage());throw failure;
         }
+    }
+    private void validateDistanceSource(String user,TurnSemantics sem){
+        String personal=com.hmdp.ai.v2.grounding.V2LocationResolver.personalReference(user);
+        if(personal!=null && sem.requests().stream().anyMatch(UserRequest.RecommendationRequest.class::isInstance)
+                && sem.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
+                .map(RequirementChange.CriteriaPatch.class::cast).map(c->c.patch().location()).filter(java.util.Objects::nonNull)
+                .noneMatch(l->l.poi()!=null && l.poi().contains(personal)))throw violation(Violation.LOCATION_REFERENCE_REQUIRED);
+        BigDecimal explicit=com.hmdp.ai.v2.semantic.DistanceSource.explicitMaxKm(user);
+        var distances=sem.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
+                .map(RequirementChange.CriteriaPatch.class::cast).map(c->c.patch().distance()).filter(java.util.Objects::nonNull).toList();
+        if(distances.stream().anyMatch(d->explicit==null || d.hardMaxKm()==null || d.hardMaxKm().signum()<=0 || d.hardMaxKm().compareTo(explicit)!=0)
+                || explicit!=null && distances.isEmpty() && sem.requests().stream().anyMatch(r->r instanceof UserRequest.RecommendationRequest
+                || r instanceof UserRequest.AlternativesRequest || r instanceof UserRequest.SimilarRequest))throw violation(Violation.DISTANCE_SOURCE_REQUIRED);
     }
     private void validateMerchantQueries(String user,TurnSemantics semantics){
         Matcher attribute=Pattern.compile("(?:有没有|是否提供|卖不卖|有)([^，。？?]{1,24}?)(?:吗|[？?]|$)").matcher(user);
@@ -267,7 +283,7 @@ public class SemanticInterpreter {
             for(String field:List.of("arrivalTime","partySize","preferences")) {
                 JsonNode value=first==null?null:first.path("criteria").get(field);
                 boolean required=switch(field) {
-                    case "arrivalTime" -> user.matches("(?s).*(?:明天|后天|今天|今晚|明晚).*" );
+                    case "arrivalTime" -> user.matches("(?s).*(?:明天|后天|今天|今晚|明晚|周末|(?:这|下)?周[一二三四五六日天]).*" );
                     case "partySize" -> user.matches("(?s).*(?:[0-9一二三四五六七八九十两]+\\s*(?:个)?(?:人|位|名)|独自|单人).*" );
                     default -> user.matches("(?s).*(?:环境|氛围)(?:要|希望|最好|想要).*" );
                 };
@@ -287,6 +303,8 @@ public class SemanticInterpreter {
             return dimensions;
         }
         return switch(failure) {
+            case LOCATION_REFERENCE_REQUIRED -> List.of("criteria.poi");
+            case DISTANCE_SOURCE_REQUIRED -> java.util.stream.Stream.concat(java.util.stream.Stream.of("criteria.distanceKm"),failedDimensions(Violation.DINING_DETAILS_REQUIRED,user,first).stream()).distinct().toList();
             case MERCHANT_FACT_REQUIRED -> List.of("requests");
             case DIETARY_COVERAGE_REQUIRED -> List.of("criteria.avoidedIngredients","criteria.spiceRequirement");
             case CUISINE_COVERAGE_REQUIRED -> List.of("criteria.cuisine","criteria.cuisineAnyOf","criteria.excludedCuisines");
@@ -330,7 +348,8 @@ public class SemanticInterpreter {
                 if (field.equals("budgetHard")) return requiresHardBudget(user) && same(value.decimalValue(),hardBudgetValue(user));
                 if (field.equals("budgetSoft")) return user.matches("(?s).*(?:大约|左右|最好|希望).*")
                         && user.matches("(?s).*(?:预算|人均|消费).{0,12}"+Pattern.quote(value.asText())+".*");
-                if (field.equals("distanceKm")) return user.matches("(?s).*"+Pattern.quote(value.asText())+"\\s*(?:公里|千米|km).*");
+                if (field.equals("distanceKm")) {var cap=com.hmdp.ai.v2.semantic.DistanceSource.explicitMaxKm(user);return cap!=null && value.decimalValue().compareTo(cap)==0;}
+                if(field.equals("nearby"))return value.isBoolean() && (!value.booleanValue() || user.matches("(?s).*(?:附近|周边|周围).*"));
                 return false;
             }
             if (path.equals("taskDirective") || path.equals("taskDirectiveEvidence")) {
@@ -385,7 +404,7 @@ public class SemanticInterpreter {
         } catch(RuntimeException invalid) {return false;}
     }
     private boolean cuisineSource(String user,String value) {
-        return user.contains(value) || CuisineCanonicalizer.knownAliases().stream().anyMatch(alias->user.contains(alias)
+        return CuisineCanonicalizer.mentionsAlias(user,value) || CuisineCanonicalizer.knownAliases().stream().anyMatch(alias->CuisineCanonicalizer.mentionsAlias(user,alias)
                 && CuisineCanonicalizer.canonicalize(alias).equals(CuisineCanonicalizer.canonicalize(value)));
     }
     private boolean referenceSource(String user,JsonNode ref) {
@@ -436,14 +455,18 @@ public class SemanticInterpreter {
         Set<BigDecimal> numericSlotEvidence = numericSlotEvidence(semantics);
         List<RequirementChange> changes = new ArrayList<>();
         for (RequirementChange change : semantics.requirementChanges()) {
-            if (!(change instanceof RequirementChange.CriteriaPatch criteria) || criteria.patch().location() == null) { changes.add(change); continue; }
+            if (!(change instanceof RequirementChange.CriteriaPatch criteria)) { changes.add(change); continue; }
             DiningCriteriaPatch patch = criteria.patch(); DiningCriteria.LocationCriteria location = patch.location();
-            String city = mentionedLocation(userTurn, location.city(), true) ? location.city() : null;
-            String district = mentionedLocation(userTurn, location.district(), true) ? location.district() : null;
-            String poi = admissiblePoi(userTurn, location.poi(), numericSlotEvidence) ? location.poi() : null;
-            DiningCriteria.LocationCriteria trusted = city == null && district == null && poi == null ? null : new DiningCriteria.LocationCriteria(city, district, poi);
+            String city = location!=null && mentionedLocation(userTurn, location.city(), true) ? location.city() : null;
+            String district = location!=null && mentionedLocation(userTurn, location.district(), true) ? location.district() : null;
+            String poi = location!=null && admissiblePoi(userTurn, location.poi(), numericSlotEvidence) ? location.poi() : null;
+            boolean nearby=userTurn.matches("(?s).*(?:附近|周边|周围).*" ) && (location!=null || semantics.requests().stream().anyMatch(UserRequest.RecommendationRequest.class::isInstance));
+            DiningCriteria.LocationCriteria trusted = city == null && district == null && poi == null && !nearby ? null : new DiningCriteria.LocationCriteria(city, district, poi,nearby);
             changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(trusted, patch.cuisine(), patch.budget(), patch.distance(), patch.diningTime(), patch.semanticPreferences(), patch.partySize(),patch.dietaryRestrictions()), criteria.cleared()));
         }
+        if(changes.stream().noneMatch(RequirementChange.CriteriaPatch.class::isInstance) && userTurn.matches("(?s).*(?:附近|周边|周围).*" )
+                && semantics.requests().stream().anyMatch(UserRequest.RecommendationRequest.class::isInstance))
+            changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(new DiningCriteria.LocationCriteria(null,null,null,true),null,null,null,null,null),Set.of()));
         return new TurnSemantics(semantics.taskDirective(), semantics.taskDirectiveEvidence(), changes, semantics.entityFeedback(), semantics.requests(), semantics.relations(), semantics.references());
     }
     /** Provenance is evaluated against all canonical criteria patches in this turn, including deterministic additions. */
@@ -530,6 +553,9 @@ public class SemanticInterpreter {
                         || change.cleared().contains(RequirementChange.ClearedCriterion.CUISINE));
         if (recommendation && !cuisineExpressed && CuisineCanonicalizer.containsKnownCuisineMention(userTurn)) return true;
         if (!recommendation) return false;
+        if(CuisineCanonicalizer.mentionsAlias(userTurn,"面") && semantics.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
+                .map(RequirementChange.CriteriaPatch.class::cast).map(c->c.patch().cuisine()).filter(java.util.Objects::nonNull)
+                .flatMap(c->c.acceptedCuisines().stream()).noneMatch(c->CuisineCanonicalizer.canonicalize(c).equals(CuisineCanonicalizer.canonicalize("面"))))return true;
         Set<String> included=semantics.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
                 .map(RequirementChange.CriteriaPatch.class::cast).filter(c->c.patch().cuisine()!=null)
                 .flatMap(c->c.patch().cuisine().acceptedCuisines().stream()).map(CuisineCanonicalizer::canonicalize)
@@ -566,7 +592,7 @@ public class SemanticInterpreter {
         boolean recommendation=semantics.requests().stream().anyMatch(UserRequest.RecommendationRequest.class::isInstance);
         if (!recommendation) return;
         if (!parties.isEmpty() && patches.stream().noneMatch(p->p.partySize()!=null)) throw violation(Violation.DINING_DETAILS_REQUIRED);
-        if (userTurn.matches("(?s).*(?:明天|后天|今天|今晚|明晚)(?:早上|上午|中午|下午|晚上)?.*")
+        if (userTurn.matches("(?s).*(?:明天|后天|今天|今晚|明晚|周末|(?:这|下)?周[一二三四五六日天])(?:早上|上午|中午|下午|晚上)?.*")
                 && patches.stream().noneMatch(p->p.diningTime()!=null)) throw violation(Violation.DINING_DETAILS_REQUIRED);
         if (userTurn.matches("(?s).*(?:环境|氛围)(?:要|希望|最好|想要).*" )
                 && patches.stream().noneMatch(p->p.semanticPreferences()!=null && !p.semanticPreferences().values().isEmpty()))
@@ -713,11 +739,12 @@ public class SemanticInterpreter {
     private DiningCriteriaPatch criteriaPatch(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) return new DiningCriteriaPatch(null, null, null, null, null, null);
         if (!node.isObject()) throw new IllegalArgumentException("criteria must be an object");
-        Set<String> fields=Set.of("city","district","poi","cuisine","cuisineAnyOf","excludedCuisines","budgetSoft","budgetHard","distanceKm","arrivalTime","partySize","preferences","avoidedIngredients","spiceRequirement");
+        Set<String> fields=Set.of("city","district","poi","nearby","cuisine","cuisineAnyOf","excludedCuisines","budgetSoft","budgetHard","distanceKm","arrivalTime","partySize","preferences","avoidedIngredients","spiceRequirement");
         node.fieldNames().forEachRemaining(key->{if (!fields.contains(key)) throw new IllegalArgumentException("unsupported criteria field: "+key);});
         String city = nonBlankText(node, "city"), district = nonBlankText(node, "district"), poi = nonBlankText(node, "poi");
-        DiningCriteria.LocationCriteria location = city != null || district != null || poi != null
-                ? new DiningCriteria.LocationCriteria(city, district, poi) : null;
+        if(node.has("nearby") && !node.path("nearby").isBoolean())throw new IllegalArgumentException("nearby must be boolean");
+        DiningCriteria.LocationCriteria location = city != null || district != null || poi != null || node.path("nearby").asBoolean()
+                ? new DiningCriteria.LocationCriteria(city, district, poi,node.has("nearby")?node.path("nearby").asBoolean():poi!=null && poi.matches("(?s).*(?:附近|周边|周围).*")) : null;
         String includedCuisine = nonBlankText(node, "cuisine");
         List<String> excludedCuisines = strings(node.path("excludedCuisines")).stream().filter(value -> value != null && !value.isBlank()).toList();
         if(node.hasNonNull("avoidedIngredients")) {
@@ -830,6 +857,8 @@ public class SemanticInterpreter {
     private boolean emptyReference(JsonNode node) { return node == null || node.isMissingNode() || node.isNull() || (node.isObject() && node.isEmpty()); }
     private String repairInstruction(Violation violation) { return switch (violation == null ? Violation.NONE : violation) {
         case NONE -> "";
+        case LOCATION_REFERENCE_REQUIRED -> " Preserve the literal personal place reference in criteria.poi. A company/home/school reference is not the current device location; do not invent an address or coordinates.";
+        case DISTANCE_SOURCE_REQUIRED -> " distanceKm is an explicit user HARD maximum only. Convert metres to km, preserve numeric caps, and omit invented or default nearby radii. Runtime separately supplies defaults.";
         case MERCHANT_FACT_REQUIRED -> " Preserve the actual merchant fact requested: PRICE for price; PRODUCT plus literal question for product attributes. DETAIL cannot replace these queries. Do not invent attributes or change the merchant reference; GENERAL remains only for general knowledge.";
         case HARD_BUDGET_REQUIRED -> " Your previous output violated HARD_BUDGET_REQUIRED: the user stated an explicit budget cap or replacement; output criteria.budgetHard.";
         case BUDGET_CLEAR_REQUIRED -> " Your previous output violated BUDGET_CLEAR_REQUIRED: the user removed the budget constraint; output cleared:[BUDGET] and no budgetSoft/budgetHard.";
@@ -839,7 +868,7 @@ public class SemanticInterpreter {
         case DINING_DETAILS_REQUIRED -> " Your previous output omitted or invented explicit dining conditions. Populate criteria.arrivalTime using the literal user time, partySize from the stated number of diners, and preferences for explicit ambience/occasion requests. Preserve the cuisine alternatives, task directive and old-entity feedback. Do not invent an exact date/hour or number.";
         case GENERIC_CONTRACT -> " Your previous output violated the semantic contract. Return a complete function call and obey enums and required fields exactly.";
     }; }
-    enum Violation { NONE, HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED, CONDITIONAL_FALLBACK_REQUIRED, CUISINE_COVERAGE_REQUIRED, DINING_DETAILS_REQUIRED, DIETARY_COVERAGE_REQUIRED, MERCHANT_FACT_REQUIRED, GENERIC_CONTRACT }
+    enum Violation { NONE, HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED, CONDITIONAL_FALLBACK_REQUIRED, CUISINE_COVERAGE_REQUIRED, DINING_DETAILS_REQUIRED, DIETARY_COVERAGE_REQUIRED, MERCHANT_FACT_REQUIRED, DISTANCE_SOURCE_REQUIRED, LOCATION_REFERENCE_REQUIRED, GENERIC_CONTRACT }
     private static final class SemanticContractViolation extends IllegalArgumentException { private final Violation code; private SemanticContractViolation(Violation code) { super(code.name()); this.code = code; } private Violation code() { return code; } }
     private ObservationPredicate predicate(JsonNode node) {
         node.fieldNames().forEachRemaining(field->{if(!Set.of("type","expected","operator").contains(field))throw new IllegalArgumentException("unsupported predicate field");});
@@ -872,7 +901,8 @@ public class SemanticInterpreter {
         criteriaProperties.put("spiceRequirement",Map.of("type","string","description","Literal forbidden/capped spice requirement only. Omit when absent; positive heat wishes belong in preferences, never duplicate them as a hard prohibition."));
         criteriaProperties.put("budgetSoft", Map.of("type","number","description","Approximate preferred budget only."));
         criteriaProperties.put("budgetHard", Map.of("type","number","description","Mandatory explicit maximum or replacement budget."));
-        criteriaProperties.put("distanceKm", number);
+        criteriaProperties.put("distanceKm", Map.of("type","number","description","Explicit user hard radius only; never supply nearby defaults."));
+        criteriaProperties.put("nearby",Map.of("type","boolean","description","User explicitly asks nearby; numeric defaults belong to runtime policy."));
         criteriaProperties.put("arrivalTime", Map.of("type","string","description","Literal explicitly requested dining time, including relative day/meal; do not invent exact date or hour."));
         criteriaProperties.put("partySize", Map.of("type","integer","minimum",1,"description","Explicit number of diners in this task."));
         criteriaProperties.put("preferences", Map.of("type","array","items",objectSchema(Map.of("criterion",string,

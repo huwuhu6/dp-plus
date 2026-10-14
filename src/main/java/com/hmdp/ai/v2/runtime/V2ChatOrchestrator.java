@@ -161,7 +161,14 @@ public class V2ChatOrchestrator {
             stateGateway.write(task, reduced);
             return PreBuild.persistedResponse(task.getTaskId(), clarification(chatId(request), clarification.message()));
         }
-        reduced = reduced.withSearchAnchor(((V2LocationResolver.Resolution.Resolved) location).anchor());
+        SearchAnchor resolvedAnchor=((V2LocationResolver.Resolution.Resolved) location).anchor();
+        boolean searching=executionSemantics.requests().stream().anyMatch(r->r instanceof com.hmdp.ai.v2.semantic.UserRequest.RecommendationRequest
+                || r instanceof com.hmdp.ai.v2.semantic.UserRequest.AlternativesRequest || r instanceof com.hmdp.ai.v2.semantic.UserRequest.SimilarRequest);
+        if(searching && resolvedAnchor==null){
+            stateGateway.write(task,reduced);
+            return PreBuild.persistedResponse(task.getTaskId(),clarification(chatId(request),"请提供用餐城市、明确地点或当前位置，不能在没有地理范围时搜索任意城市的餐厅。"));
+        }
+        reduced = reduced.withSearchAnchor(resolvedAnchor);
         stateGateway.write(task, reduced);
         return PreBuild.ready(task.getTaskId(), task, grounded);
     }
@@ -482,7 +489,9 @@ public class V2ChatOrchestrator {
     private boolean hasLocationMutation(TurnSemantics semantics) {
         return semantics.requirementChanges().stream().filter(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch.class::isInstance)
                 .map(com.hmdp.ai.v2.semantic.RequirementChange.CriteriaPatch.class::cast)
-                .anyMatch(change -> change.patch().location() != null || change.cleared().contains(com.hmdp.ai.v2.semantic.RequirementChange.ClearedCriterion.LOCATION));
+                .anyMatch(change -> change.patch().location() != null && (change.patch().location().city()!=null
+                        || change.patch().location().district()!=null || change.patch().location().poi()!=null)
+                        || change.cleared().contains(com.hmdp.ai.v2.semantic.RequirementChange.ClearedCriterion.LOCATION));
     }
 
     private List<com.hmdp.ai.v2.semantic.EntityReference> semanticReferences(TurnSemantics semantics) {

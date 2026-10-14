@@ -118,6 +118,7 @@ public class CuisineCanonicalizer {
         CANONICAL_MAP.put("面条", "面食");
         CANONICAL_MAP.put("拉面", "面食");
         CANONICAL_MAP.put("兰州拉面", "面食");
+        CANONICAL_MAP.put("面", "面食");
         CANONICAL_MAP.put("重庆小面", "面食");
         CANONICAL_MAP.put("拌面", "面食");
         CANONICAL_MAP.put("热干面", "面食");
@@ -208,7 +209,10 @@ public class CuisineCanonicalizer {
     /** True only when text explicitly contains a known platform cuisine alias or canonical category. */
     public static boolean containsKnownCuisineMention(String text) {
         if (text == null || text.isBlank()) return false;
-        return CANONICAL_MAP.keySet().stream().anyMatch(text::contains)
+        return CANONICAL_MAP.keySet().stream().anyMatch(alias->mentionsAlias(text,alias))
                 || knownCanonicalValues().stream().anyMatch(text::contains);
     }
+    /** 单字食物需要用餐动作/量词边界，避免将“体面”“方便”等当成面食。 */
+    public static boolean mentionsAlias(String text,String alias){return alias.length()>1?text.contains(alias):
+            java.util.regex.Pattern.compile("(?:吃|来|要|点|或者|或是|或|和|、|/)(?:[一二两三四五六七八九十0-9]*[碗份盘个点])?\\s*"+java.util.regex.Pattern.quote(alias)+"(?=$|[，。！？?\\s])").matcher(text).find();}
 }

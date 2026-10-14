@@ -35,7 +35,8 @@ public class V2ActionHandler implements ActionExecutor {
                 List.of(), null, List.of(), null, result.detail());
         List<Long> ids = result.candidates().stream().map(DecisionRecommendation::getShopId).filter(java.util.Objects::nonNull).toList();
         return new ExecutionObservation(action.requestId(), ids.isEmpty() ? ExecutionObservation.Status.EMPTY : ExecutionObservation.Status.SUCCESS,
-                ids, null, List.of(), null, null, null, result.candidates());
+                ids, null, List.of(), result.metrics()!=null && result.metrics().radiusSource()==com.hmdp.ai.v2.plan.SearchRadiusPolicy.Source.SYSTEM_DEFAULT
+                        && result.metrics().appliedRadiusKm()!=null && result.metrics().appliedRadiusKm()>3D ? "默认3公里范围未找到匹配结果，已按系统策略扩大到5公里。":null, null, null, result.candidates());
     }
     private ExecutionObservation tool(ExecutionAction.ToolAction action) {
         String name = switch (action.fact()) {

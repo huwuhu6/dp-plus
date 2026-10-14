@@ -18,7 +18,9 @@ public record DiningCriteria(LocationCriteria location, CuisineCriteria cuisine,
     }
     public DiningCriteria { if (partySize != null && partySize < 1) throw new IllegalArgumentException("partySize must be positive"); }
     public static DiningCriteria empty() { return new DiningCriteria(null, null, null, null, null, SemanticPreferences.empty()); }
-    public record LocationCriteria(String city, String district, String poi) { }
+    public record LocationCriteria(String city, String district, String poi, boolean nearby) {
+        public LocationCriteria(String city,String district,String poi){this(city,district,poi,poi!=null && poi.matches("(?s).*(?:附近|周边|周围).*"));}
+    }
     public record CuisineCriteria(String include, List<String> exclude, List<String> anyOf) {
         public CuisineCriteria(String include, List<String> exclude) { this(include,exclude,List.of()); }
         public CuisineCriteria {

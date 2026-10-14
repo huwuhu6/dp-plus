@@ -12,7 +12,11 @@ public final class CriteriaPatchApplier {
         if(dietary!=null && dietary.spiceRequirement()!=null && preferences!=null)
             preferences=new DiningCriteria.SemanticPreferences(preferences.values().stream().filter(p->!p.criterion().contains("辣")
                     || p.criterion().matches("(?s).*(?:不|少|忌).*" )).toList(),preferences.priorityOrder());
-        return new DiningCriteria(clear.contains(RequirementChange.ClearedCriterion.LOCATION) ? null : choose(patch.location(), base.location()),
+        var location=choose(patch.location(),base.location());
+        // “附近”只有范围意图，不能顺手删除此前明确的城市/地标身份。
+        if(patch.location()!=null && patch.location().city()==null && patch.location().district()==null && patch.location().poi()==null && base.location()!=null)
+            location=new DiningCriteria.LocationCriteria(base.location().city(),base.location().district(),base.location().poi(),patch.location().nearby());
+        return new DiningCriteria(clear.contains(RequirementChange.ClearedCriterion.LOCATION) ? null : location,
                 clear.contains(RequirementChange.ClearedCriterion.CUISINE) ? null : choose(patch.cuisine(), base.cuisine()),
                 clear.contains(RequirementChange.ClearedCriterion.BUDGET) ? null : choose(patch.budget(), base.budget()),
                 clear.contains(RequirementChange.ClearedCriterion.DISTANCE) ? null : choose(patch.distance(), base.distance()),

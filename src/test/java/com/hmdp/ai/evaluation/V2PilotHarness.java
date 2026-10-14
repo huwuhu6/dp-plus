@@ -34,6 +34,7 @@ final class V2PilotHarness {
     final ShopRetrievalEngine retrieval=mock(ShopRetrievalEngine.class);
     AiWorkingMemory persisted;
     RuntimeException retrievalFailure;
+    ChatLocationInput deviceLocation;
 
     V2PilotHarness() throws Exception {
         this(mock(SemanticInterpreter.class), "test-pilot");
@@ -62,7 +63,12 @@ final class V2PilotHarness {
         when(location.resolve(any(LocationResolutionRequest.class))).thenAnswer(i->{
             LocationResolutionRequest request=i.getArgument(0);ResolvedLocationCandidate candidate=new ResolvedLocationCandidate();
             candidate.setPoiId("TEST-"+request.getRawText());candidate.setCanonicalName(request.getRawText());candidate.setCity("福州市");
-            candidate.setLatitude(26.0);candidate.setLongitude(119.0);candidate.setSource("CONTROLLED_TEST_FIXTURE");return List.of(candidate);
+            candidate.setLatitude(26.0);candidate.setLongitude(119.0);candidate.setSource("CONTROLLED_TEST_FIXTURE");
+            // 旧C06受控场景明确提供测试公司地点资料，区别于公共地图猜一个“公司”。不模拟用户点击或写真实资料。
+            if(request.getRawText().matches("(?:公司|单位)(?:附近)?")){
+                candidate.setCanonicalName("TEST_ONLY 已知公司位置");candidate.setSource("PERSONAL_LOCATION_PROFILE");
+            }
+            return List.of(candidate);
         });
         ShopMapper shops=mock(ShopMapper.class);
         when(shops.selectById(any())).thenAnswer(i->{Shop shop=new Shop();shop.setId(((Number)i.getArgument(0)).longValue());shop.setName("测试门店"+shop.getId());shop.setAddress("仅测试地址");shop.setAvgPrice(40L);shop.setOpenHours("10:00-22:00");return shop;});
@@ -109,6 +115,7 @@ final class V2PilotHarness {
         doAnswer(i->{if(retrievalFailure!=null)throw retrievalFailure;return new ShopRetrievalEngine.RetrievalResult(true,null,candidates,null);})
                 .when(retrieval).retrieve(any(com.hmdp.ai.v2.plan.SearchSpec.class));
         ChatMessageRequest request=new ChatMessageRequest();request.setChatId(chatId);request.setMessage(originalMessage);
+        request.setLocation(deviceLocation);
         ChatMessageResponse response=chat.chat(request,null,null);
         verify(interpreter).interpret(originalMessage);
         ConversationWorkingMemory memory=persisted==null?new ConversationWorkingMemory():json.readValue(persisted.getMemoryJson(),ConversationWorkingMemory.class);

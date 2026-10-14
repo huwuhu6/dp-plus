@@ -101,7 +101,9 @@ class V2ChatOrchestratorOccTest {
                 List.of(new RequirementChange.RelativePreference(DiningCriteria.PreferenceDimension.PRICE, RequirementChange.Direction.LOWER)),
                 List.of(), List.of(new UserRequest.RecommendationRequest("recommend")), List.of()));
 
-        AtomicReference<AiWorkingMemory> current = new AtomicReference<>();
+        // OCC回归需要已知搜索范围；不能靠“无城市也全库搜索”的旧漏洞建立执行前提。
+        AtomicReference<AiWorkingMemory> current = new AtomicReference<>(row(0,json.writeValueAsString(activeMemory(
+                new DiningCriteria(new DiningCriteria.LocationCriteria("福州市",null,null),null,null,null,null,DiningCriteria.SemanticPreferences.empty())))));
         when(versions.latest("chat")).thenAnswer(ignored -> current.get());
         AtomicBoolean postConflictInjected = new AtomicBoolean();
         doAnswer(invocation -> {
