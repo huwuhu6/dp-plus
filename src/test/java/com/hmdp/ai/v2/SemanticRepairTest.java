@@ -23,13 +23,13 @@ class SemanticRepairTest {
     DiningCriteriaPatch patch(TurnSemantics turn) {return assertInstanceOf(RequirementChange.CriteriaPatch.class,turn.requirementChanges().getFirst()).patch();}
 
     @Test void missingTimeRepairCannotSilentlyDeleteSourceCheckedCuisineAndParty() {
-        replies(first,"{\"criteria\":{\"arrivalTime\":\"今晚\"},\"requests\":[]}");
+        replies(first,"{\"arrivalTime\":\"今晚\"}");
         var result=patch(parser.interpret("今晚一个人吃碗面"));
         assertEquals("面",result.cuisine().include());assertEquals(1,result.partySize());assertEquals("今晚",result.diningTime().arrivalTime());
         var traces=parser.takeEvaluationAttempts();assertEquals("VALID",traces.getLast().get("validationResult"));
         assertTrue(traces.getLast().get("fieldDecisions").toString().contains("criteria.cuisine=PRESERVED_FIRST"));
         var inputs=org.mockito.ArgumentCaptor.forClass(List.class);verify(client,times(2)).chatCompletion(inputs.capture(),anyList(),anyMap(),anyString());
-        String sent=inputs.getAllValues().getLast().toString();assertTrue(sent.contains("firstStructuredOutput"));assertTrue(sent.contains("failedDimensions"));assertTrue(sent.contains("criteria.arrivalTime"));assertTrue(sent.contains("sourceCheckedFieldsToPreserve"));
+        String sent=inputs.getAllValues().getLast().toString();assertTrue(sent.contains("arrivalTime"));assertFalse(sent.contains("firstStructuredOutput"));assertFalse(sent.contains("submit_turn_semantics"));
     }
     @Test void wrongFirstPlaceIsCorrectableWhileValidCuisineSurvives() {
         replies("{\"criteria\":{\"cuisine\":\"日料\",\"poi\":\"虚构地点\",\"partySize\":\"bad\"},"+request+"}",
@@ -38,12 +38,12 @@ class SemanticRepairTest {
         assertEquals("日料",result.cuisine().include());assertEquals("大学城",result.location().poi());assertNull(result.partySize());
     }
     @Test void repairExtraBudgetIsRejectedRatherThanBecomingUserCondition() {
-        replies(first,"{\"criteria\":{\"arrivalTime\":\"今晚\",\"budgetHard\":80},"+request+"}");
+        replies(first,"{\"arrivalTime\":\"今晚\",\"budgetHard\":80}");
         var error=assertThrows(SemanticInterpretationException.class,()->parser.interpret("今晚一个人吃碗面"));
         assertTrue(error.getCause().getMessage().contains("criteria.budgetHard"));
     }
     @Test void repairStillMissingTimeFailsFullRevalidation() {
-        replies(first,"{\"criteria\":{},"+request+"}");
+        replies(first,"{\"arrivalTime\":null}");
         var error=assertThrows(SemanticInterpretationException.class,()->parser.interpret("今晚一个人吃碗面"));
         assertEquals("DINING_DETAILS_REQUIRED",error.getCause().getMessage());
     }

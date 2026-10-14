@@ -24,6 +24,9 @@ class C06SemanticContractTest {
     com.fasterxml.jackson.databind.JsonNode response(String raw) {
         return json.valueToTree(Map.of("choices",List.of(Map.of("message",Map.of("tool_calls",List.of(Map.of("function",Map.of("arguments",raw))))))));
     }
+    String extraction() {return """
+ {"cuisine":null,"cuisineAnyOf":["杭帮菜","粤菜"],"excludedCuisines":[]}
+ """;}
     String complete() {return """
         {"taskDirective":"START_NEW","taskDirectiveEvidence":"EXPLICIT_NEW_TASK",
          "criteria":{"poi":"南站","cuisineAnyOf":["杭帮菜","粤菜"],"arrivalTime":"明天中午","partySize":6,
@@ -54,9 +57,12 @@ class C06SemanticContractTest {
     @Test void firstOmissionIsRejectedAndRepairPreservesAllCompoundConditions() throws Exception {
         String missing="""
             {"taskDirective":"START_NEW","taskDirectiveEvidence":"EXPLICIT_NEW_TASK","criteria":{"poi":"南站"},
+             "feedback":[{"target":{"ordinal":2},"kind":"POSITIVE","aspect":"UNSPECIFIED"}],
              "requests":[{"requestId":"r1","type":"RECOMMENDATION","target":{},"fact":"DETAIL"}]}
             """;
-        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(missing),response(complete()));
+        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(missing),response("""
+ {"cuisine":null,"cuisineAnyOf":["杭帮菜","粤菜"],"excludedCuisines":[],"arrivalTime":"明天中午","partySize":6,"preferences":[{"criterion":"环境上档次","importance":"PREFER"}]}
+ """));
         var parser=interpreter();var semantics=parser.interpret(messages().get("C06").get(1));
         var patch=assertInstanceOf(RequirementChange.CriteriaPatch.class,semantics.requirementChanges().getFirst()).patch();
         assertEquals(List.of("杭帮菜","粤菜"),patch.cuisine().anyOf());assertEquals(6,patch.partySize());
@@ -76,7 +82,9 @@ class C06SemanticContractTest {
              "feedback":[{"target":{"ordinal":2},"kind":"POSITIVE","aspect":"UNSPECIFIED"}],
              "requests":[{"requestId":"r1","type":"RECOMMENDATION","target":{},"fact":"DETAIL"}]}
             """;
-        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(missing));
+        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(missing),response("""
+ {"cuisine":null,"cuisineAnyOf":[],"excludedCuisines":[],"arrivalTime":"明天中午","partySize":6,"preferences":[{"criterion":"环境上档次","importance":"PREFER"}]}
+ """));
         var h=new V2PilotHarness(interpreter(),"test-c06-failure");
         h.turn(messages().get("C06").getFirst(),recommend(TaskDirective.START_NEW,"面","公司附近",List.of()),shops("C06",false));
         String before=h.persisted.getMemoryJson();int version=h.persisted.getVersion();
@@ -109,7 +117,7 @@ class C06SemanticContractTest {
     @Test void singleBranchCannotSilentlyEraseExplicitOrAlternative() throws Exception {
         var root=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(complete());
         var criteria=(com.fasterxml.jackson.databind.node.ObjectNode)root.path("criteria");criteria.remove("cuisineAnyOf");criteria.put("cuisine","杭帮菜");
-        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(root.toString()),response(complete()));
+        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(root.toString()),response(extraction()));
         var parser=interpreter();var actual=parser.interpret(messages().get("C06").get(1));
         assertEquals(List.of("杭帮菜","粤菜"),assertInstanceOf(RequirementChange.CriteriaPatch.class,actual.requirementChanges().getFirst()).patch().cuisine().anyOf());
         assertEquals("CUISINE_COVERAGE_REQUIRED",parser.takeEvaluationAttempts().getFirst().get("validationResult"));
@@ -117,10 +125,7 @@ class C06SemanticContractTest {
     @Test void targetedRepairKeepsFirstDetailsAndOldFeedbackThroughRealPrePost() throws Exception {
         var first=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(complete());
         ((com.fasterxml.jackson.databind.node.ObjectNode)first.path("criteria")).remove("cuisineAnyOf");
-        var fixed=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(complete());
-        var changed=(com.fasterxml.jackson.databind.node.ObjectNode)fixed.path("criteria");
-        changed.remove(List.of("arrivalTime","partySize","preferences","poi"));fixed.putArray("feedback");
-        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(first.toString()),response(fixed.toString()));
+        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(first.toString()),response(extraction()));
         var interpreter=interpreter();var h=new V2PilotHarness(interpreter,"test-c06-repair-merge");
         var oldTurn=h.turn(messages().get("C06").getFirst(),recommend(TaskDirective.START_NEW,"面","公司附近",List.of()),shops("C06",false));
         String old=oldTurn.workingMemory().path("activeTaskId").asText();

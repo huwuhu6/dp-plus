@@ -59,6 +59,13 @@ public class SemanticInterpreter {
         } catch (RuntimeException firstFailure) {
             if (isTransportFailure(firstFailure)) throw new SemanticModelAvailabilityException("语义模型暂不可用，请稍后重试",firstFailure);
             Violation failed=violationOf(firstFailure);
+            if (first!=null && (failed==Violation.CUISINE_COVERAGE_REQUIRED || failed==Violation.DINING_DETAILS_REQUIRED)) {
+                try {return extractMissingCriteria(userTurn,first,failed);}
+                catch(RuntimeException failure) {
+                    SemanticInterpretationException error=new SemanticInterpretationException("无法可靠理解这句话，请换一种说法或说明要修改的条件",failure);
+                    error.addSuppressed(firstFailure);throw error;
+                }
+            }
             SemanticRepair repair=new SemanticRepair(first==null?null:first.root(),failedDimensions(failed,userTurn,first==null?null:first.root()),
                     (path,value)->sourceChecked(userTurn,path,value),(path,values)->repairEquivalent(path,values));
             try {
@@ -68,6 +75,92 @@ public class SemanticInterpreter {
                 SemanticInterpretationException error=new SemanticInterpretationException("无法可靠理解这句话，请换一种说法或说明要修改的条件",secondFailure);
                 error.addSuppressed(firstFailure);throw error;
             }
+        }
+    }
+
+    /** 覆盖修复只提取缺失槽位：不让第二次模型调用重写已确定的动作与任务归属。 */
+    private TurnSemantics extractMissingCriteria(String user,CallResult first,Violation failed) {
+        Set<String> fields=new LinkedHashSet<>();
+        if(failed==Violation.CUISINE_COVERAGE_REQUIRED) fields.addAll(List.of("cuisine","cuisineAnyOf","excludedCuisines"));
+        // 同一次有界提取补齐其余明确缺失维度，避免菜系修好后再启动第三次调用。
+        failedDimensions(Violation.DINING_DETAILS_REQUIRED,user,first.root()).forEach(path->fields.add(path.substring("criteria.".length())));
+        Map<String,Object> properties=new LinkedHashMap<>();
+        Map<String,Object> string=Map.of("type","string");
+        for(String field:fields) properties.put(field,switch(field) {
+            case "cuisine","arrivalTime" -> Map.of("type",List.of("string","null"));
+            case "cuisineAnyOf","excludedCuisines" -> Map.of("type","array","items",string,"uniqueItems",true);
+            case "partySize" -> Map.of("type",List.of("integer","null"),"minimum",1);
+            case "preferences" -> Map.of("type","array","items",objectSchema(Map.of("criterion",string,"importance",enumString(DiningCriteria.Importance.values())),"criterion","importance"));
+            default -> throw new IllegalArgumentException("unsupported extraction dimension");
+        });
+        String name="extract_missing_dining_criteria";
+        Map<String,Object> schema=Map.of("type","object","properties",properties,"required",List.copyOf(fields),"additionalProperties",false);
+        String system="Extract ONLY the requested missing dining criteria from the original user message. Dimensions: "+fields+". "
+                +"This is a small field extraction, not a complete turn interpretation. No task directives, feedback, requests, or other fields. "
+                +"When the message appraises an old restaurant then introduces an independent dining arrangement, extract criteria ONLY for the new arrangement, never cuisine from the old restaurant appraisal. "
+                +"cuisine is one accepted cuisine or null; cuisineAnyOf contains ALL expressly accepted alternatives (logical OR, never AND); excludedCuisines contains only explicit exclusions. Do not invent cuisines. "
+                +"arrivalTime retains literal relative time; partySize is explicit diner count; preferences use literal criterion and PREFER for subjective wishes, MUST only for explicit requirements. Use null or [] when not supported. "
+                +"Return only the function parameters defined by the supplied schema.";
+        String arguments=null;
+        JsonNode merged=first.root().deepCopy();
+        Map<String,Object> decisions=new LinkedHashMap<>(),evidence=new LinkedHashMap<>();
+        try {
+            JsonNode response=aiClient.chatCompletion(List.of(Map.of("role","system","content",system),Map.of("role","user","content",user)),
+                    List.of(Map.of("type","function","function",Map.of("name",name,"description","Extract missing dining criteria only","parameters",schema))),
+                    Map.of("type","function","function",Map.of("name",name)),"V2_SEMANTIC_INTERPRETATION");
+            arguments=response.path("choices").path(0).path("message").path("tool_calls").path(0).path("function").path("arguments").asText();
+            JsonNode patch=objectMapper.readTree(arguments);
+            if(patch==null || !patch.isObject()) throw new IllegalArgumentException("extraction must be an object");
+            var keys=patch.fieldNames();while(keys.hasNext()) {String field=keys.next();if(!fields.contains(field))throw new IllegalArgumentException("extraction cannot update criteria."+field);}
+            // 来源检查采用新安排的原文片段；这里只缩小证据范围，不给模型额外历史或标准答案。
+            String source=user;
+            if(first.root().path("taskDirective").asText().equals("START_NEW") && !first.root().path("feedback").isEmpty()) {
+                Matcher boundary=Pattern.compile("(?:对了|另外|此外|另一个|另一项)").matcher(user);
+                if(!boundary.find()) throw new IllegalArgumentException("cannot establish old feedback / new criteria boundary");
+                source=user.substring(boundary.end());
+            }
+            var criteria=(com.fasterxml.jackson.databind.node.ObjectNode)merged.path("criteria");
+            for(String field:fields) {
+                JsonNode value=patch.get(field);
+                if(value==null) throw new IllegalArgumentException("missing extraction field: "+field);
+                boolean supported=sourceChecked(source,"criteria."+field,value);
+                evidence.put("criteria."+field,Map.of("first",first.root().path("criteria").path(field),"extracted",value,"sourceChecked",supported));
+                if(!supported) throw new IllegalArgumentException("unsupported extraction source: criteria."+field);
+                // 小工具的 [] 表示该槽位无值；领域 parser 对非空 OR 列表仍保持原有严格契约。
+                if(field.equals("cuisineAnyOf") && value.isArray() && value.isEmpty()) criteria.remove(field);
+                else criteria.set(field,value);
+                decisions.put("criteria."+field,"EXTRACTED_SOURCE_CHECKED");
+            }
+            if(fields.contains("cuisine")) validateExtractedCuisine(source,patch);
+            first.root().fields().forEachRemaining(entry->{if(!entry.getKey().equals("criteria"))decisions.put(entry.getKey(),"PRESERVED_FIRST");});
+            first.root().path("criteria").fieldNames().forEachRemaining(field->{if(!fields.contains(field))decisions.put("criteria."+field,"PRESERVED_FIRST");});
+            return validateAttempt(user,new CallResult(merged,arguments),failed,null);
+        } catch(RuntimeException failure) {
+            if(evaluationAttempts.get().size()==1) {recordEvaluationAttempt(failed,arguments,isTransportFailure(failure)?"MODEL_TRANSPORT_FAILURE":violationOf(failure).name());traceRepair(merged,null,null,failure.getMessage());}
+            throw failure;
+        } catch(Exception invalidJson) {
+            recordEvaluationAttempt(failed,arguments,"GENERIC_CONTRACT");throw new IllegalArgumentException("invalid extraction json",invalidJson);
+        } finally {
+            Map<String,Object> attempt=evaluationAttempts.get().getLast();attempt.put("attempt","TARGETED_EXTRACTION");
+            attempt.put("missingDimensions",List.copyOf(fields));attempt.put("extractionSchema",schema);
+            attempt.put("fieldDecisions",decisions);attempt.put("fieldEvidence",evidence);
+        }
+    }
+
+    private void validateExtractedCuisine(String source,JsonNode patch) {
+        var normalized=(com.fasterxml.jackson.databind.node.ObjectNode)patch.deepCopy();
+        if(normalized.path("cuisineAnyOf").isArray() && normalized.path("cuisineAnyOf").isEmpty())normalized.remove("cuisineAnyOf");
+        var parsed=criteriaPatch(normalized).cuisine();
+        Set<String> accepted=parsed==null?Set.of():parsed.acceptedCuisines().stream().map(CuisineCanonicalizer::canonicalize).collect(java.util.stream.Collectors.toSet());
+        String aliases=CuisineCanonicalizer.knownAliases().stream().sorted(java.util.Comparator.comparingInt(String::length).reversed())
+                .map(Pattern::quote).collect(java.util.stream.Collectors.joining("|"));
+        Matcher alternatives=Pattern.compile("("+aliases+")\\s*(?:或者|或是|或|/)\\s*("+aliases+")").matcher(source);
+        while(alternatives.find()) if(!accepted.containsAll(List.of(CuisineCanonicalizer.canonicalize(alternatives.group(1)),CuisineCanonicalizer.canonicalize(alternatives.group(2)))))
+            throw violation(Violation.CUISINE_COVERAGE_REQUIRED);
+        for(JsonNode excluded:patch.path("excludedCuisines")) {
+            String name=Pattern.quote(excluded.asText());
+            if(!source.matches("(?s).*(?:(?:不吃|不要|不想吃|排除|避开)[^，。；]{0,8}"+name+"|"+name+"[^，。；]{0,4}(?:不要|不吃)).*"))
+                throw new IllegalArgumentException("unsupported cuisine exclusion");
         }
     }
 
@@ -108,7 +201,7 @@ public class SemanticInterpreter {
                     default -> user.matches("(?s).*(?:环境|氛围)(?:要|希望|最好|想要).*" );
                 };
                 if(value!=null && !value.isNull() && !sourceChecked(user,"criteria."+field,value)
-                        || required && (value==null || value.isNull()))dimensions.add("criteria."+field);
+                        || required && (value==null || value.isNull() || value.isArray() && value.isEmpty() || value.isTextual() && value.asText().isBlank()))dimensions.add("criteria."+field);
             }
             return dimensions;
         }
