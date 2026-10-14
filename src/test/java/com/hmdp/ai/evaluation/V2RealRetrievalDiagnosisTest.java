@@ -95,7 +95,9 @@ class V2RealRetrievalDiagnosisTest {
                     assertEquals("VALID",last.path("validationResult").asText());
                     TurnSemantics captured=ReflectionTestUtils.invokeMethod(interpreter,"normalizeLocationProvenance",input.getValue(),
                             ReflectionTestUtils.invokeMethod(interpreter,"normalizeDeterministicBudget",input.getValue(),interpreter.parse(last.path("effectiveStructuredOutput"))));
-                    assertEquals(last.path("finalSemantics"),json.valueToTree(captured),"replay must exactly preserve previously validated semantics");
+                    // JSON回读会将50.0与BigDecimal 5E+1保存为不同节点类型；只按数值比较，不放宽字段/数组语义。
+                    assertTrue(last.path("finalSemantics").equals((a,b)->a.isNumber()&&b.isNumber()?a.decimalValue().compareTo(b.decimalValue()):a.equals(b)?0:1,
+                            json.valueToTree(captured)),"replay must exactly preserve previously validated semantics");
                     doAnswer(i->{h.actualSemantic=captured;return captured;}).when(semantic).interpret(input.getValue());
                 }
                 if(input.getKey().equals("B"))h.deviceLocation=authorized;
