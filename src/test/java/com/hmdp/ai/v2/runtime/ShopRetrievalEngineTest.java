@@ -28,6 +28,22 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class ShopRetrievalEngineTest {
+    @Test void cuisineAlternativesHardFilterIsOrBeforeSemanticRecall() {
+        ShopMapper shops=mock(ShopMapper.class);AiShopProfileMapper profiles=mock(AiShopProfileMapper.class);
+        AiReviewDocumentMapper reviews=mock(AiReviewDocumentMapper.class);SemanticShopRetriever semantic=mock(SemanticShopRetriever.class);
+        when(shops.selectList(any())).thenReturn(List.of(shop(1L,"A",40L),shop(2L,"B",40L),shop(3L,"C",40L)));
+        when(profiles.selectList(any())).thenReturn(List.of(profile(1L,"杭帮菜",""),profile(2L,"粤菜",""),profile(3L,"烧烤","")));
+        when(reviews.selectList(any())).thenReturn(List.of());
+        when(semantic.recall(anyString(),anyList(),anyMap(),anyMap())).thenReturn(SemanticRecallResult.unavailable());
+        var criteria=new DiningCriteria(null,new DiningCriteria.CuisineCriteria(null,List.of(),List.of("杭帮菜","粤菜")),null,null,null,DiningCriteria.SemanticPreferences.empty());
+        var result=engine(shops,profiles,reviews,semantic).retrieve(new SearchSpec(1,"new",ExecutionAction.SearchKind.RECOMMENDATIONS,3,criteria,List.of(),Set.of(),null,null));
+        assertEquals(Set.of(1L,2L),result.candidates().stream().map(com.hmdp.ai.dto.DecisionRecommendation::getShopId).collect(java.util.stream.Collectors.toSet()));
+        var whitelist=ArgumentCaptor.forClass(List.class);verify(semantic).recall(anyString(),whitelist.capture(),anyMap(),anyMap());
+        assertEquals(2,whitelist.getValue().size());
+        var unrelated=new com.hmdp.ai.dto.DecisionRecommendation();unrelated.setShopId(3L);unrelated.setCuisine("烧烤");
+        var verified=new com.hmdp.ai.v2.verification.DeterministicResultVerifier().verify(new SearchSpec(1,"new",ExecutionAction.SearchKind.RECOMMENDATIONS,3,criteria,List.of(),Set.of(),null,null),List.of(unrelated));
+        assertFalse(verified.hardChecksPassed());assertTrue(verified.verifiedCandidates().isEmpty());
+    }
     @Test
     void keepsHardWhitelistSemanticRecallAndRelativePriceRerank() {
         ShopMapper shops = mock(ShopMapper.class);

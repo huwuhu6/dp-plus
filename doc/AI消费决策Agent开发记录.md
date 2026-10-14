@@ -2547,3 +2547,10 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - 真实模型定向运行进一步暴露：C15 用 RESTORE + TaskRef(EARLIEST) 描述商户详情，原路径把任务身份交给商户工具编译，安全失败但未完成查询。补充原文任务操作证据门控；纯商户事实请求不授权恢复旧条件，只读使用选中历史上下文，TaskRef 没有商户身份证据时澄清。跨任务回归证明实际查询22且当前活动任务/条件保持不变。
 - 同轮 C06 的模型 FIRST/REPAIR 都遗漏用户原文明示菜系，被 CUISINE_COVERAGE_REQUIRED 拒绝；没有进入 PRE，不记为反馈归属修复通过，也不改变 Prompt 或放宽验证。
 - 最终完整 Maven 回归：442 total，439 passed，3 skipped，0 failures/errors。真实模型独立补充 C15 验证（clean 70f0abf…）仍产出 RESTORE+ordinal1，但实际工具查询22且当前需求不变，M2/M4 满足、其余6项未验证。C06 模型契约失败保持未验证，未重复运行；证据与命令见 doc/eval/V2历史引用与复合任务修复-验证记录.md。
+
+### 2026-10-14：C06 真实语义契约补齐
+
+- 根因：原真实 FIRST/REPAIR 都只返回新地点，缺少新菜系；旧 schema 的 cuisine 是不带 OR 契约的可选单值，criteria 本身不必填，时间/人数/环境没有字段。旧 parser 固定丢弃时间与偏好。完整 OR/时间/人数/环境 function 原话回归在修复前实际出现1个 SemanticInterpretationException。
+- 增加互斥的单选 cuisine / cuisineAnyOf（OR）和 arrivalTime、partySize、preferences；schema 要求 criteria，FIRST 与 REPAIR 共用字段定义。保留用户时间文字，不发明日期/时刻。菜系覆盖校验保持严格，并拒绝只保留已采纳 OR 的一个分支；时间/人数/环境遗漏或虚构触发契约 repair，不从原文或答案自动补值。严格拒绝非法/未知字段，位置/预算规范化保留所有新增条件。
+- 需求 reducer/clear 支持人数，真实检索在硬过滤阶段用 OR，结果验证器拦截非 OR 菜系。旧反馈与新任务仍沿用之前原子 PRE 边界，不重构历史 Grounding。结构化接待容量和相对用餐时间的营业证明目前缺失，候选回答明确待核实，相应完整硬验证状态不得报通过；不把保存条件等同商户已满足条件。
+- 原始 C06 回归经过实际 SemanticInterpreter/function parser、Grounding、reducer、工具边界与 PRE/POST；覆盖 FIRST 缺字段后 REPAIR、非法字段、单选/OR、人数/时间/环境、旧反馈归属、非最终选择及失败零部分提交。定向72 passed；完整450 total，447 passed，3 skipped，0 failures/errors。必要 C15 回归正常，冻结规范/Main JSONL/Holdout 不变。

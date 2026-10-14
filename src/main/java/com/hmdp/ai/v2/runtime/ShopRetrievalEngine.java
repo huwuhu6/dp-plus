@@ -118,8 +118,8 @@ public class ShopRetrievalEngine {
 
     private boolean hardMatch(Shop shop, AiShopProfile profile, List<AiReviewDocument> reviews,
                               DiningCriteria criteria, com.hmdp.ai.v2.plan.SearchAnchor anchor) {
-        if (criteria.cuisine() != null && criteria.cuisine().include() != null && !criteria.cuisine().include().isBlank()
-                && !matchesCuisine(profile, criteria.cuisine().include())) return false;
+        if (criteria.cuisine() != null && !criteria.cuisine().acceptedCuisines().isEmpty()
+                && criteria.cuisine().acceptedCuisines().stream().noneMatch(c->matchesCuisine(profile,c))) return false;
         if (criteria.cuisine() != null) for (String excluded : criteria.cuisine().exclude()) if (matchesCuisine(profile, excluded)) return false;
         if (criteria.distance() != null && criteria.distance().hardMaxKm() != null
                 && distance(anchor.latitude(), anchor.longitude(), shop.getY(), shop.getX()) > criteria.distance().hardMaxKm().doubleValue()) return false;
@@ -152,7 +152,8 @@ public class ShopRetrievalEngine {
         }
         if (request.semanticQuery() != null && !request.semanticQuery().isBlank()) return request.semanticQuery();
         List<String> terms = new ArrayList<>(); DiningCriteria c = request.criteria();
-        if (c.cuisine() != null) { if (c.cuisine().include() != null) terms.add(c.cuisine().include()); terms.addAll(c.cuisine().exclude()); }
+        if (c.cuisine() != null) { terms.addAll(c.cuisine().acceptedCuisines()); terms.addAll(c.cuisine().exclude()); }
+        if (c.partySize() != null) terms.add(c.partySize()+"人聚餐");
         if (c.preferences() != null) c.preferences().values().forEach(p -> terms.add(p.criterion()));
         if (c.diningTime() != null && c.diningTime().arrivalTime() != null) terms.add(c.diningTime().arrivalTime());
         return String.join(" ", terms).trim();
@@ -172,7 +173,7 @@ public class ShopRetrievalEngine {
             double target = criteria.budget().softTarget().doubleValue(); score += 20D * (1D - ((double) shop.getAvgPrice() / Math.max(1D, target)) * 0.3D);
             item.getMatchedReasons().add("人均 " + shop.getAvgPrice() + " 元，符合预算偏好");
         }
-        if (profile != null && criteria.cuisine() != null && criteria.cuisine().include() != null) item.getMatchedReasons().add("菜系：" + profile.getCuisine());
+        if (profile != null && criteria.cuisine() != null && !criteria.cuisine().acceptedCuisines().isEmpty()) item.getMatchedReasons().add("菜系：" + profile.getCuisine());
         if (criteria.preferences() != null && profile != null) {
             for (DiningCriteria.SemanticPreference preference : criteria.preferences().values()) if (hasTag(profile, preference.criterion())) {
                 score += 8D; item.getMatchedReasons().add("特征匹配：" + preference.criterion());

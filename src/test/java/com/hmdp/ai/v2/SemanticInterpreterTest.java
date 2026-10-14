@@ -340,7 +340,7 @@ class SemanticInterpreterTest {
         SemanticInterpreter interpreter = new SemanticInterpreter();
         Map<String, Object> schema = (Map<String, Object>) ReflectionTestUtils.invokeMethod(interpreter, "schema");
         Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
-        assertEquals(List.of("taskDirective", "taskDirectiveEvidence", "cleared", "relativePreferences", "relaxationAuthorizations",
+        assertEquals(List.of("taskDirective", "taskDirectiveEvidence", "criteria", "cleared", "relativePreferences", "relaxationAuthorizations",
                 "requirementLocks", "feedback", "requests", "relations", "conditionalRequirementChanges", "references"),
                 schema.get("required"));
 

@@ -10,7 +10,8 @@ public final class CriteriaPatchApplier {
                 clear.contains(RequirementChange.ClearedCriterion.BUDGET) ? null : choose(patch.budget(), base.budget()),
                 clear.contains(RequirementChange.ClearedCriterion.DISTANCE) ? null : choose(patch.distance(), base.distance()),
                 clear.contains(RequirementChange.ClearedCriterion.DINING_TIME) ? null : choose(patch.diningTime(), base.diningTime()),
-                clear.contains(RequirementChange.ClearedCriterion.SEMANTIC_PREFERENCES) ? DiningCriteria.SemanticPreferences.empty() : choose(patch.semanticPreferences(), base.preferences()));
+                clear.contains(RequirementChange.ClearedCriterion.SEMANTIC_PREFERENCES) ? DiningCriteria.SemanticPreferences.empty() : choose(patch.semanticPreferences(), base.preferences()),
+                clear.contains(RequirementChange.ClearedCriterion.PARTY_SIZE) ? null : choose(patch.partySize(), base.partySize()));
     }
     private static <T> T choose(T patch, T base) { return patch == null ? base : patch; }
 }

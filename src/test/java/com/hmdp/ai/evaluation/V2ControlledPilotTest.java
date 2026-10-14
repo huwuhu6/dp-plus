@@ -232,7 +232,8 @@ class V2ControlledPilotTest {
         if (old.equals(current)||task(after,current)==null) return null;
         // 旧安排不变与新安排独立分别取证；无需强制合法OR分支或偏好字段序列化完全一致。
         JsonNode criteria=task(after,current).path("v2Criteria");
-        return List.of("杭帮菜","粤菜").contains(criteria.path("cuisine").path("include").asText())
+        Set<String> alternatives=new HashSet<>();criteria.path("cuisine").path("anyOf").forEach(c->alternatives.add(c.asText()));
+        return (List.of("杭帮菜","粤菜").contains(criteria.path("cuisine").path("include").asText()) || alternatives.equals(Set.of("杭帮菜","粤菜")))
                 && criteria.path("location").path("poi").asText().contains("南站")
                 && !criteria.path("preferences").toString().contains("单人");
     }

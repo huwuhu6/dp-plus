@@ -51,6 +51,13 @@ public final class DeterministicResultVerifier implements ResultVerifier {
                     failures.add("HARD_DISTANCE:shop:" + id); valid = false;
                 }
             }
+            if (candidate != null && spec.criteria().cuisine()!=null && !spec.criteria().cuisine().anyOf().isEmpty()) {
+                String cuisine=candidate.getCuisine();
+                boolean matches=cuisine!=null && java.util.Arrays.stream(cuisine.split(","))
+                        .map(com.hmdp.ai.util.CuisineCanonicalizer::canonicalize).anyMatch(actual->spec.criteria().cuisine().anyOf().stream()
+                                .map(com.hmdp.ai.util.CuisineCanonicalizer::canonicalize).anyMatch(actual::equals));
+                if (!matches) { failures.add("HARD_CUISINE_OR:shop:"+id); valid=false; }
+            }
             if (candidate != null && valid) verified.add(candidate);
             if (candidate != null) addEvidenceGaps(spec, candidate, evidenceGaps);
         }

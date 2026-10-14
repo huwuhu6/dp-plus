@@ -78,6 +78,7 @@ public class SemanticInterpreter {
         try {
         TurnSemantics semantics = normalizeLocationProvenance(userTurn, normalizeDeterministicBudget(userTurn, parse(call.root())));
         if (requiresCuisineCoverage(userTurn, semantics)) throw violation(Violation.CUISINE_COVERAGE_REQUIRED);
+        validateDiningDetails(userTurn, semantics);
         if (requiresHardBudget(userTurn) && !hasHardBudget(semantics)) throw violation(Violation.HARD_BUDGET_REQUIRED);
         if (requiresBudgetClear(userTurn) && !hasBudgetClearWithoutReplacement(semantics)) throw violation(Violation.BUDGET_CLEAR_REQUIRED);
         if (requiresConditionalFallback(userTurn) && semantics.requirementChanges().stream()
@@ -115,7 +116,7 @@ public class SemanticInterpreter {
             String district = mentionedLocation(userTurn, location.district(), true) ? location.district() : null;
             String poi = admissiblePoi(userTurn, location.poi(), numericSlotEvidence) ? location.poi() : null;
             DiningCriteria.LocationCriteria trusted = city == null && district == null && poi == null ? null : new DiningCriteria.LocationCriteria(city, district, poi);
-            changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(trusted, patch.cuisine(), patch.budget(), patch.distance(), patch.diningTime(), patch.semanticPreferences()), criteria.cleared()));
+            changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(trusted, patch.cuisine(), patch.budget(), patch.distance(), patch.diningTime(), patch.semanticPreferences(), patch.partySize()), criteria.cleared()));
         }
         return new TurnSemantics(semantics.taskDirective(), semantics.taskDirectiveEvidence(), changes, semantics.entityFeedback(), semantics.requests(), semantics.relations(), semantics.references());
     }
@@ -129,6 +130,7 @@ public class SemanticInterpreter {
                         if (patch.budget().softTarget() != null) values.add(patch.budget().softTarget());
                     }
                     if (patch.distance() != null && patch.distance().hardMaxKm() != null) values.add(patch.distance().hardMaxKm());
+                    if (patch.partySize() != null) values.add(BigDecimal.valueOf(patch.partySize()));
                 });
         return values;
     }
@@ -169,7 +171,7 @@ public class SemanticInterpreter {
             if (change instanceof RequirementChange.CriteriaPatch criteria && requiresBudgetClear(userTurn)) {
                 DiningCriteriaPatch patch = criteria.patch();
                 changes.add(new RequirementChange.CriteriaPatch(new DiningCriteriaPatch(patch.location(), patch.cuisine(), null,
-                        patch.distance(), patch.diningTime(), patch.semanticPreferences()), unionBudgetClear(criteria.cleared())));
+                        patch.distance(), patch.diningTime(), patch.semanticPreferences(), patch.partySize()), unionBudgetClear(criteria.cleared())));
             } else changes.add(change);
         }
         if (requiresBudgetClear(userTurn)) {
@@ -199,7 +201,49 @@ public class SemanticInterpreter {
         boolean cuisineExpressed = semantics.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
                 .map(RequirementChange.CriteriaPatch.class::cast).anyMatch(change -> change.patch().cuisine() != null
                         || change.cleared().contains(RequirementChange.ClearedCriterion.CUISINE));
-        return recommendation && !cuisineExpressed && CuisineCanonicalizer.containsKnownCuisineMention(userTurn);
+        if (recommendation && !cuisineExpressed && CuisineCanonicalizer.containsKnownCuisineMention(userTurn)) return true;
+        if (!recommendation) return false;
+        Set<String> included=semantics.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
+                .map(RequirementChange.CriteriaPatch.class::cast).filter(c->c.patch().cuisine()!=null)
+                .flatMap(c->c.patch().cuisine().acceptedCuisines().stream()).map(CuisineCanonicalizer::canonicalize)
+                .collect(java.util.stream.Collectors.toSet());
+        String aliases=CuisineCanonicalizer.knownAliases().stream().sorted(java.util.Comparator.comparingInt(String::length).reversed())
+                .map(Pattern::quote).collect(java.util.stream.Collectors.joining("|"));
+        Matcher alternatives=Pattern.compile("("+aliases+")\\s*(?:或者|或是|或|/)\\s*("+aliases+")").matcher(userTurn);
+        while (alternatives.find()) {
+            Set<String> pair=new LinkedHashSet<>(List.of(CuisineCanonicalizer.canonicalize(alternatives.group(1)),CuisineCanonicalizer.canonicalize(alternatives.group(2))));
+            // 只检查模型自己声称采纳的 OR；旧任务的其他菜系反馈不能污染新任务的条件。
+            if (pair.stream().anyMatch(included::contains) && !included.containsAll(pair)) return true;
+        }
+        return false;
+    }
+    /** 只校验来源与覆盖，不从原文或测试答案补写模型遗漏字段。 */
+    private void validateDiningDetails(String userTurn, TurnSemantics semantics) {
+        List<DiningCriteriaPatch> patches=semantics.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
+                .map(RequirementChange.CriteriaPatch.class::cast).map(RequirementChange.CriteriaPatch::patch).toList();
+        var matcher=Pattern.compile("([0-9]+)\\s*(?:个)?(?:人|位|名)").matcher(userTurn);
+        Set<Integer> parties=new LinkedHashSet<>();
+        while (matcher.find()) parties.add(Integer.parseInt(matcher.group(1)));
+        if (userTurn.matches("(?s).*(?:一个人|独自|单人).*")) parties.add(1);
+        var chinese=Pattern.compile("([一二三四五六七八九十两]+)\\s*(?:个)?(?:人|位|名)").matcher(userTurn);
+        while (chinese.find()) {
+            String value=chinese.group(1).replace('两','二');int ten=value.indexOf('十');
+            if (value.length()==1) parties.add("一二三四五六七八九十".indexOf(value)+1);
+            else if (ten>=0 && value.length()<=3) parties.add((ten==0?1:"一二三四五六七八九".indexOf(value.substring(0,ten))+1)*10
+                    +(ten==value.length()-1?0:"一二三四五六七八九".indexOf(value.substring(ten+1))+1));
+        }
+        for (var patch:patches) {
+            if (patch.partySize()!=null && !parties.contains(patch.partySize())) throw violation(Violation.DINING_DETAILS_REQUIRED);
+            if (patch.diningTime()!=null && !userTurn.contains(patch.diningTime().arrivalTime())) throw violation(Violation.DINING_DETAILS_REQUIRED);
+        }
+        boolean recommendation=semantics.requests().stream().anyMatch(UserRequest.RecommendationRequest.class::isInstance);
+        if (!recommendation) return;
+        if (!parties.isEmpty() && patches.stream().noneMatch(p->p.partySize()!=null)) throw violation(Violation.DINING_DETAILS_REQUIRED);
+        if (userTurn.matches("(?s).*(?:明天|后天|今天|今晚|明晚)(?:早上|上午|中午|下午|晚上)?.*")
+                && patches.stream().noneMatch(p->p.diningTime()!=null)) throw violation(Violation.DINING_DETAILS_REQUIRED);
+        if (userTurn.matches("(?s).*(?:环境|氛围)(?:要|希望|最好|想要).*" )
+                && patches.stream().noneMatch(p->p.semanticPreferences()!=null && !p.semanticPreferences().values().isEmpty()))
+            throw violation(Violation.DINING_DETAILS_REQUIRED);
     }
     private boolean hasHardBudget(TurnSemantics semantics) { return semantics.requirementChanges().stream()
             .filter(RequirementChange.CriteriaPatch.class::isInstance).map(RequirementChange.CriteriaPatch.class::cast)
@@ -215,13 +259,16 @@ public class SemanticInterpreter {
     private boolean isEmpty(RequirementChange.CriteriaPatch change) {
         DiningCriteriaPatch patch = change.patch();
         return patch.location() == null && patch.cuisine() == null && patch.budget() == null
-                && patch.distance() == null && patch.diningTime() == null && patch.semanticPreferences() == null
+                && patch.distance() == null && patch.diningTime() == null && patch.semanticPreferences() == null && patch.partySize() == null
                 && change.cleared().isEmpty();
     }
 
     /** Deterministic schema boundary, also used by contract tests without a model. */
     public TurnSemantics parse(JsonNode root) {
         if (root == null || !root.isObject()) throw new IllegalArgumentException("semantic output must be an object");
+        Set<String> rootFields=Set.of("taskDirective","taskDirectiveEvidence","criteria","cleared","relativePreferences","relaxationAuthorizations",
+                "requirementLocks","feedback","requests","relations","conditionalRequirementChanges","references");
+        root.fieldNames().forEachRemaining(key->{if (!rootFields.contains(key)) throw new IllegalArgumentException("unsupported semantic field: "+key);});
         TaskDirective directive = enumValue(TaskDirective.class, root.path("taskDirective").asText("CONTINUE"));
         var directiveEvidence = enumValue(com.hmdp.ai.v2.semantic.TaskDirectiveEvidence.class,
                 root.path("taskDirectiveEvidence").asText("NONE"));
@@ -272,6 +319,11 @@ public class SemanticInterpreter {
         Map<String, Object> tool = Map.of("type", "function", "function", function);
         Map<String, Object> choice = Map.of("type", "function", "function", Map.of("name", FUNCTION));
         String system = "You are a semantic parser for a dining assistant. Output only the function call. "
+                + "Extract all explicitly stated requirements, including alternative cuisines, literal dining time, party size, and ambience/occasion preferences. criteria must always be present, using {} when untouched. "
+                + "For accepted alternatives use criteria.cuisineAnyOf (OR: any one is acceptable), not a single cuisine and not AND. Use cuisine only for a single accepted cuisine. Never simultaneously populate cuisine and cuisineAnyOf. "
+                + "arrivalTime preserves the explicit user time expression without inventing a clock time or date; partySize is the explicit positive integer; preferences preserve user ambience/occasion text with MUST/PREFER importance. "
+                + "Relative or subjective ambience/occasion preferences use PREFER; MUST is reserved for explicit categorical hard requirements, not subjective gradability. "
+                + "A compound turn may give POSITIVE feedback on a previously visible entity AND start an independent dining task. Keep the old entity ordinal in feedback; put only the new task requirements in criteria. Positive appraisal is not SELECT. Neither action may erase the other. "
                 + "Use exact uppercase enum values from the schema; do not replace them with natural-language labels such as find or fact. "
                 + "taskDirectiveEvidence is NONE for CONTINUE. START_NEW is permitted only for an explicitly independent new decision task and then taskDirectiveEvidence must be EXPLICIT_NEW_TASK; RESTORE/ABANDON likewise require EXPLICIT_RESTORE/EXPLICIT_ABANDON. A constraint edit, clear, feedback, ordinal follow-up, alternatives request, similar request, or conditional fallback is CONTINUE with NONE, never START_NEW. "
                 + "A dining recommendation request must use type RECOMMENDATION; a general-information question must use type GENERAL with its topic, never FACT. "
@@ -318,18 +370,52 @@ public class SemanticInterpreter {
 
     private DiningCriteriaPatch criteriaPatch(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) return new DiningCriteriaPatch(null, null, null, null, null, null);
+        if (!node.isObject()) throw new IllegalArgumentException("criteria must be an object");
+        Set<String> fields=Set.of("city","district","poi","cuisine","cuisineAnyOf","excludedCuisines","budgetSoft","budgetHard","distanceKm","arrivalTime","partySize","preferences");
+        node.fieldNames().forEachRemaining(key->{if (!fields.contains(key)) throw new IllegalArgumentException("unsupported criteria field: "+key);});
         String city = nonBlankText(node, "city"), district = nonBlankText(node, "district"), poi = nonBlankText(node, "poi");
         DiningCriteria.LocationCriteria location = city != null || district != null || poi != null
                 ? new DiningCriteria.LocationCriteria(city, district, poi) : null;
         String includedCuisine = nonBlankText(node, "cuisine");
         List<String> excludedCuisines = strings(node.path("excludedCuisines")).stream().filter(value -> value != null && !value.isBlank()).toList();
-        DiningCriteria.CuisineCriteria cuisine = includedCuisine != null || !excludedCuisines.isEmpty()
-                ? new DiningCriteria.CuisineCriteria(includedCuisine, excludedCuisines) : null;
+        if (includedCuisine!=null && includedCuisine.matches("(?s).*(?:或者|或是|或|/).*"))
+            throw new IllegalArgumentException("alternative cuisines must use cuisineAnyOf");
+        List<String> alternatives=stringArray(node,"cuisineAnyOf");
+        DiningCriteria.CuisineCriteria cuisine = includedCuisine != null || !excludedCuisines.isEmpty() || !alternatives.isEmpty()
+                ? new DiningCriteria.CuisineCriteria(includedCuisine, excludedCuisines, alternatives) : null;
         DiningCriteria.BudgetCriteria budget = any(node, "budgetSoft", "budgetHard")
                 ? new DiningCriteria.BudgetCriteria(decimal(node, "budgetSoft"), decimal(node, "budgetHard")) : null;
         DiningCriteria.DistanceCriteria distance = node.hasNonNull("distanceKm")
                 ? new DiningCriteria.DistanceCriteria(decimal(node, "distanceKm")) : null;
-        return new DiningCriteriaPatch(location, cuisine, budget, distance, null, null);
+        String arrival=nonBlankText(node,"arrivalTime");
+        Integer party=null;
+        if (node.hasNonNull("partySize")) {
+            if (!node.path("partySize").isIntegralNumber() || !node.path("partySize").canConvertToInt()) throw new IllegalArgumentException("partySize must be an integer");
+            party=node.path("partySize").intValue();
+        }
+        List<DiningCriteria.SemanticPreference> preferences=new ArrayList<>();
+        if (node.hasNonNull("preferences")) {
+            if (!node.path("preferences").isArray()) throw new IllegalArgumentException("preferences must be an array");
+            for (JsonNode item:node.path("preferences")) {
+                item.fieldNames().forEachRemaining(key->{if (!Set.of("criterion","importance").contains(key)) throw new IllegalArgumentException("unsupported preference field");});
+                preferences.add(new DiningCriteria.SemanticPreference(requiredText(item,"criterion"), enumValue(DiningCriteria.Importance.class,requiredText(item,"importance"))));
+            }
+        }
+        return new DiningCriteriaPatch(location, cuisine, budget, distance,
+                arrival==null?null:new DiningCriteria.DiningTimeCriteria(arrival),
+                node.hasNonNull("preferences")?new DiningCriteria.SemanticPreferences(preferences,List.of()):null,party);
+    }
+
+    private List<String> stringArray(JsonNode node,String field) {
+        if (!node.hasNonNull(field)) return List.of();
+        if (!node.path(field).isArray()) throw new IllegalArgumentException(field+" must be an array");
+        List<String> values=new ArrayList<>();
+        for (JsonNode item:node.path(field)) {
+            if (!item.isTextual() || item.asText().isBlank()) throw new IllegalArgumentException(field+" requires non-empty strings");
+            values.add(item.asText());
+        }
+        if (values.isEmpty()) throw new IllegalArgumentException(field+" cannot be empty when supplied");
+        return values;
     }
 
     private List<EntityFeedback> feedback(JsonNode items) {
@@ -399,10 +485,11 @@ public class SemanticInterpreter {
         case HARD_BUDGET_REQUIRED -> " Your previous output violated HARD_BUDGET_REQUIRED: the user stated an explicit budget cap or replacement; output criteria.budgetHard.";
         case BUDGET_CLEAR_REQUIRED -> " Your previous output violated BUDGET_CLEAR_REQUIRED: the user removed the budget constraint; output cleared:[BUDGET] and no budgetSoft/budgetHard.";
         case CONDITIONAL_FALLBACK_REQUIRED -> " Your previous output violated CONDITIONAL_FALLBACK_REQUIRED: emit a conditional fallback with non-empty fallback criteria or cleared fields.";
-        case CUISINE_COVERAGE_REQUIRED -> " Your previous output omitted an explicitly mentioned known cuisine from a dining recommendation. Re-evaluate whether it is an include, exclusion, replacement, or explicit clear and return the corresponding cuisine semantics.";
+        case CUISINE_COVERAGE_REQUIRED -> " Your previous output omitted an explicitly mentioned known cuisine from a dining recommendation. Populate criteria.cuisine for one included cuisine, criteria.cuisineAnyOf for accepted OR alternatives, excludedCuisines for exclusion, or cleared only for explicit removal. Preserve every explicitly stated alternative and all other new-task conditions and old-entity feedback. Extract from this user message only; never use merchant feedback cuisine as a replacement for the new request.";
+        case DINING_DETAILS_REQUIRED -> " Your previous output omitted or invented explicit dining conditions. Populate criteria.arrivalTime using the literal user time, partySize from the stated number of diners, and preferences for explicit ambience/occasion requests. Preserve the cuisine alternatives, task directive and old-entity feedback. Do not invent an exact date/hour or number.";
         case GENERIC_CONTRACT -> " Your previous output violated the semantic contract. Return a complete function call and obey enums and required fields exactly.";
     }; }
-    enum Violation { NONE, HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED, CONDITIONAL_FALLBACK_REQUIRED, CUISINE_COVERAGE_REQUIRED, GENERIC_CONTRACT }
+    enum Violation { NONE, HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED, CONDITIONAL_FALLBACK_REQUIRED, CUISINE_COVERAGE_REQUIRED, DINING_DETAILS_REQUIRED, GENERIC_CONTRACT }
     private static final class SemanticContractViolation extends IllegalArgumentException { private final Violation code; private SemanticContractViolation(Violation code) { super(code.name()); this.code = code; } private Violation code() { return code; } }
     private ObservationPredicate predicate(JsonNode node) {
         String type = requiredText(node, "type");
@@ -422,14 +509,23 @@ public class SemanticInterpreter {
                 "ordinal", Map.of("type", "integer"), "focused", Map.of("type", "boolean"), "lastVisible", Map.of("type", "boolean"),
                 "name", string, "taskSelector", enumString("EARLIEST", "ACTIVE", "MATCH_CONTEXT"),
                 "goalCategory", string, "city", string));
-        Map<String, Object> criteria = Map.of("type", "object", "properties", Map.of(
-                "city", Map.of("type", "string", "description", "Explicit user-stated city administrative location only."),
-                "district", Map.of("type", "string", "description", "Explicit user-stated district/county administrative location only."),
-                "poi", Map.of("type", "string", "description", "Explicit user-stated named physical place, landmark, institution, road, or mall only; never cuisine, budget, distance, device placeholder, explanation text, or another criterion."), "cuisine", string,
-                "excludedCuisines", Map.of("type", "array", "items", string),
-                "budgetSoft", Map.of("type", "number", "description", "Preference target only; requires explicit approximate/preferred wording"),
-                "budgetHard", Map.of("type", "number", "description", "Mandatory maximum for stated budgets and all ‘以内/不超过/改成N’ constraints"),
-                "distanceKm", number));
+        Map<String, Object> criteriaProperties = new LinkedHashMap<>();
+        criteriaProperties.put("city", Map.of("type","string","description","Explicit city only."));
+        criteriaProperties.put("district", Map.of("type","string","description","Explicit district only."));
+        criteriaProperties.put("poi", Map.of("type","string","description","Explicit place/landmark only, never cuisine, party size, device placeholder or another slot."));
+        criteriaProperties.put("cuisine", Map.of("type","string","description","Single accepted cuisine; omit for OR alternatives."));
+        criteriaProperties.put("cuisineAnyOf", Map.of("type","array","items",string,"minItems",1,"uniqueItems",true,
+                "description","Explicitly accepted alternative cuisines, logical OR. Preserve every alternative; omit cuisine."));
+        criteriaProperties.put("excludedCuisines", Map.of("type","array","items",string));
+        criteriaProperties.put("budgetSoft", Map.of("type","number","description","Approximate preferred budget only."));
+        criteriaProperties.put("budgetHard", Map.of("type","number","description","Mandatory explicit maximum or replacement budget."));
+        criteriaProperties.put("distanceKm", number);
+        criteriaProperties.put("arrivalTime", Map.of("type","string","description","Literal explicitly requested dining time, including relative day/meal; do not invent exact date or hour."));
+        criteriaProperties.put("partySize", Map.of("type","integer","minimum",1,"description","Explicit number of diners in this task."));
+        criteriaProperties.put("preferences", Map.of("type","array","items",objectSchema(Map.of("criterion",string,
+                "importance",enumString(DiningCriteria.Importance.values())),"criterion","importance"),
+                "description","Explicit ambience and dining occasion requirements/preferences; preserve user's wording, no merchant facts."));
+        Map<String,Object> criteria = objectSchema(criteriaProperties);
         Map<String, Object> predicate = objectSchema(Map.of("type", enumString("RESULT_STATE", "BOOLEAN", "NUMERIC", "CATEGORY"),
                 "expected", string, "operator", enumString(ObservationPredicate.NumericOperator.values())), "type", "expected");
         Map<String, Object> relation = objectSchema(Map.of("observedRequestId", string,
@@ -466,7 +562,7 @@ public class SemanticInterpreter {
         properties.put("relations", Map.of("type", "array", "items", relation));
         properties.put("conditionalRequirementChanges", Map.of("type", "array", "items", conditional));
         properties.put("references", Map.of("type", "array", "items", target));
-        return objectSchema(properties, "taskDirective", "taskDirectiveEvidence", "cleared", "relativePreferences", "relaxationAuthorizations",
+        return objectSchema(properties, "taskDirective", "taskDirectiveEvidence", "criteria", "cleared", "relativePreferences", "relaxationAuthorizations",
                 "requirementLocks", "feedback", "requests", "relations", "conditionalRequirementChanges", "references");
     }
 
@@ -502,7 +598,11 @@ public class SemanticInterpreter {
         if (value == null || value.isBlank()) throw new IllegalArgumentException("missing " + field);
         return value;
     }
-    private String text(JsonNode node, String field) { return node.hasNonNull(field) ? node.path(field).asText() : null; }
+    private String text(JsonNode node, String field) {
+        if (!node.hasNonNull(field)) return null;
+        if (!node.path(field).isTextual()) throw new IllegalArgumentException(field+" must be a string");
+        return node.path(field).asText();
+    }
     private String nonBlankText(JsonNode node, String field) { String value = text(node, field); return value == null || value.isBlank() ? null : value; }
     private boolean any(JsonNode node, String... fields) { for (String field : fields) if (node.hasNonNull(field)) return true; return false; }
     private List<String> strings(JsonNode node) { List<String> result = new ArrayList<>(); for (JsonNode item : node) result.add(item.asText()); return result; }

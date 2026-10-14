@@ -4,4 +4,11 @@ package com.hmdp.ai.v2.semantic;
 public record DiningCriteriaPatch(DiningCriteria.LocationCriteria location, DiningCriteria.CuisineCriteria cuisine,
                                   DiningCriteria.BudgetCriteria budget, DiningCriteria.DistanceCriteria distance,
                                   DiningCriteria.DiningTimeCriteria diningTime,
-                                  DiningCriteria.SemanticPreferences semanticPreferences) { }
+                                  DiningCriteria.SemanticPreferences semanticPreferences, Integer partySize) {
+    public DiningCriteriaPatch(DiningCriteria.LocationCriteria location, DiningCriteria.CuisineCriteria cuisine,
+                               DiningCriteria.BudgetCriteria budget, DiningCriteria.DistanceCriteria distance,
+                               DiningCriteria.DiningTimeCriteria diningTime, DiningCriteria.SemanticPreferences semanticPreferences) {
+        this(location,cuisine,budget,distance,diningTime,semanticPreferences,null);
+    }
+    public DiningCriteriaPatch { if (partySize != null && partySize < 1) throw new IllegalArgumentException("partySize must be positive"); }
+}

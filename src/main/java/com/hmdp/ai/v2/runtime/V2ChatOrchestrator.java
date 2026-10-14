@@ -237,6 +237,7 @@ public class V2ChatOrchestrator {
         List<ExecutionObservation> observations = new ArrayList<>();
         List<String> failures = new ArrayList<>();
         boolean verificationAttempted = false;
+        boolean unsupportedHardEvidence = false;
         for (ExecutionObservation observation : execution.observations()) {
             SearchSpec spec = searches.get(observation.requestId());
             if (spec == null || observation.recommendations().isEmpty()) {
@@ -248,6 +249,9 @@ public class V2ChatOrchestrator {
                 continue;
             }
             verificationAttempted = true;
+            // 目前商户事实没有结构化接待人数，也没有相对日期解析；保留需求但不能声称硬验证完成。
+            unsupportedHardEvidence |= spec.criteria().partySize()!=null && spec.criteria().partySize()>1
+                    || spec.criteria().diningTime()!=null && !spec.criteria().diningTime().arrivalTime().matches("\\d{1,2}:\\d{2}");
             var report = verifier.verify(spec, observation.recommendations());
             failures.addAll(report.failedHardChecks());
             List<DecisionRecommendation> safe = report.verifiedCandidates();
@@ -260,6 +264,7 @@ public class V2ChatOrchestrator {
         com.hmdp.ai.evaluation.VerificationStatus status = searches.isEmpty()
                 ? com.hmdp.ai.evaluation.VerificationStatus.NOT_APPLICABLE
                 : !verificationAttempted ? com.hmdp.ai.evaluation.VerificationStatus.NOT_EXECUTED
+                : failures.isEmpty() && unsupportedHardEvidence ? com.hmdp.ai.evaluation.VerificationStatus.NOT_EXECUTED
                 : failures.isEmpty() ? com.hmdp.ai.evaluation.VerificationStatus.VERIFIED_PASS
                 : com.hmdp.ai.evaluation.VerificationStatus.VERIFIED_FAIL;
         return new VerifiedExecution(new StaticPlanExecutor.ExecutionResult(execution.groups(), List.copyOf(observations)),
@@ -299,7 +304,19 @@ public class V2ChatOrchestrator {
         }
         String selectedName = selectedId == null ? null : candidateName(task, selectedId);
         ResponseSpec spec = new ResponseSpec(recommendations, fact, selectedId, selectedName, general, null, error, unsupported);
-        return renderer.render(chatId, spec);
+        ChatMessageResponse response = renderer.render(chatId, spec);
+        if (!recommendations.isEmpty()) {
+            List<String> unverified=new ArrayList<>();
+            if (task.getV2Criteria().partySize()!=null && task.getV2Criteria().partySize()>1)
+                unverified.add("接待"+task.getV2Criteria().partySize()+"人的能力");
+            if (task.getV2Criteria().diningTime()!=null && !task.getV2Criteria().diningTime().arrivalTime().matches("\\d{1,2}:\\d{2}"))
+                unverified.add("“"+task.getV2Criteria().diningTime().arrivalTime()+"”的具体到店时间及营业情况");
+            if (!unverified.isEmpty()) {
+                String answer=response.getAnswer()+" "+String.join("、",unverified)+"尚未核实，请向商户确认；环境偏好仅作检索参考。";
+                response.setAnswer(answer);response.getDecision().setAnswer(answer);
+            }
+        }
+        return response;
     }
 
     private String candidateName(DecisionTaskState task, Long shopId) {
@@ -441,6 +458,7 @@ public class V2ChatOrchestrator {
         if (patch.location() != null) dimensions.add("LOCATION"); if (patch.cuisine() != null) dimensions.add("CUISINE");
         if (patch.budget() != null) dimensions.add("BUDGET"); if (patch.distance() != null) dimensions.add("DISTANCE");
         if (patch.diningTime() != null) dimensions.add("DINING_TIME"); if (patch.semanticPreferences() != null) dimensions.add("SEMANTIC_PREFERENCES");
+        if (patch.partySize() != null) dimensions.add("PARTY_SIZE");
         return dimensions;
     }
     private boolean hasLocationMutation(TurnSemantics semantics) {

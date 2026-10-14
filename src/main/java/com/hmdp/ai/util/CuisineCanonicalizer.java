@@ -202,6 +202,8 @@ public class CuisineCanonicalizer {
     public static java.util.Set<String> knownCanonicalValues() {
         return new java.util.LinkedHashSet<>(CANONICAL_MAP.values());
     }
+    /** 供语义覆盖校验使用已有词表，只作验证，不补写模型输出。 */
+    public static java.util.Set<String> knownAliases() { return java.util.Set.copyOf(CANONICAL_MAP.keySet()); }
 
     /** True only when text explicitly contains a known platform cuisine alias or canonical category. */
     public static boolean containsKnownCuisineMention(String text) {
