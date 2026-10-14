@@ -33,7 +33,10 @@ class ControlledFourFixturesTest {
                 """;
             when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(json.valueToTree(Map.of("choices",List.of(Map.of("message",Map.of("tool_calls",List.of(Map.of("function",Map.of("arguments",args)))))))));
             var h=new V2PilotHarness(spy(interpreter),"test-price-"+known);var reads=ControlledFourFixtures.configure(h,"S02",known,null);
-            var messages=V2ControlledPilotTest.messages().get("S02");var first=h.turn(messages.getFirst(),ControlledFourFixtures.first("S02"),ControlledFourFixtures.shops("S02",false));
+            var messages=V2ControlledPilotTest.messages().get("S02");var initial=ControlledFourFixtures.shops("S02",false);
+            // 未知分支的实际展示也不携带价格，避免一边显示已知人均价、一边宣称事实未知。
+            if(!known)initial.forEach(s->s.setAvgPrice(null));
+            var first=h.turn(messages.getFirst(),ControlledFourFixtures.first("S02"),initial);
             var last=h.turn(messages.get(1),List.of());String id=first.workingMemory().path("activeTaskId").asText();
             var criteria=task(last,id).path("v2Criteria");assertEquals(2,criteria.path("partySize").asInt());assertEquals("晚上",criteria.path("diningTime").path("arrivalTime").asText());
             assertEquals("不能吃辣",criteria.path("dietaryRestrictions").path("spiceRequirement").asText());

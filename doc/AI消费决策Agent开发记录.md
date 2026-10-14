@@ -2606,3 +2606,11 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - 唯一真实定向real-c03-c23-dietary-20261014-once，代码aeae9c850f3a525012335eec7cec6233b425edc1、0731模型、60000ms。C03首轮把正求辣偏好重复放硬槽位而失败；第二轮正确提取海鲜/内脏与不能吃太辣，真实保存，但不能宣称继承旧条件或供应已验证。C23 FIRST正确输出主餐查询+布尔条件选择，因无第二家而澄清，未调用商户工具、未选店；本次6次模型调用传输均成功。
 - 正辣重复问题随后最小归并：只删除与已保存PREFER完全相同且有原文来源的重复硬槽位，禁止/强制/MUST不受影响；字段正常化有诊断记录。该最终版本以真实FIRST参数的确定性回归验证，没有再重抽模型样本。单项解除限制、后续补证恢复意愿、菜单事实提供者与场景前提准备留为后续工作。
 - 最终定向85 passed；完整mvn -q test为486 passed、5 skipped、0 failures、0 errors，含24条Main/10条semantic加载契约及C06/C15。新增Fixture的Mock覆盖错误独立纠正，没有修改预期掩盖业务错误。报告doc/eval/V2门控与饮食语义修复-20261014.md，门控回放及模型结果在本Worktree的target/eval-pilot；在fix/v2-dietary-conditions提交，不合并、不推送main。
+
+### 2026-10-14：安全整合与四场景受控真实后续轮
+
+- main从b8e86be安全Fast-forward至4cfda4c，未覆盖并行提交；合并后完整回归486 passed/5 skipped。新增TEST_ONLY测试配置在test/v2-controlled-four，不修改Production、Prompt、冻结标准或Main数据，不接触Holdout。首轮用冻结原话与显式受控语义/检索经真实POST生成展示及批次，后续原话调用真实解释器；不再要求真实首轮碰巧生成固定名单。
+- real-controlled-four-20261014-once，运行代码27cb6c9307499ffa7a6f68ed69e1ab7d4a28d714，0731模型、60000ms，四场景各一次真实后续轮；5次逻辑/HTTP调用均成功，无重抽。S02具体商户价格仍被GENERAL误分类，虽忌辣与2人晚餐保留却未查询价格；S06正确工具22但DETAIL丢无骨诉求，基础回答没有菜单未知说明。
+- C03真实定向提取补全海鲜/内脏/不能吃太辣，同一任务保留今晚及万象城锚点，旧重辣PREFER清除；回复候选明确待核实，不证明现实菜单安全。C23真实正式语义、同店主餐证据、guard及POST选择22正确，不改全局条件；首轮真实省略语理解未测，最终事实回复未明确承接选择，仍不宣称完整通过。
+- 人工逐项证据审核15满足、6不满足、3未验证；受控就绪4/4、就绪通过1/4、完整验收2/4（包含完整判定的失败场景），与旧端到端首轮覆盖0/10严格分开。运行器原report保持未验证占位，另存reviewed-report及完整证据；JUnit成功只表示记录完成。
+- 定向71 passed/1 skipped；最终完整mvn -q test为488 passed/6 skipped、0 failures/errors，Main24条和semantic10条加载正常。未修改C15/C06机制。下一阶段优先具体商户问答分类、商品属性/未知事实契约、FIRST硬条件来源校验（C04虚构距离），另保留事实回答遮盖选择表达的renderer线索。本轮不继续针对单场景加Prompt。详见doc/eval/V2四场景受控真实语义结果-20261014.md；运行产物仅保留target，不提交。
