@@ -2570,3 +2570,13 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - 第二轮 FIRST 有南站、环境 PREFER、ordinal2 POSITIVE、START_NEW，但缺菜系/时间/人数。REPAIR 补出了“明天中午”和6人，保住 FIRST 的地点、环境、反馈、指令和 request 关联。mergeCompleted=true，逐字段证据标明 FIRST 保留与 REPAIR 新增来源；不是通过错误合并删除字段。但 FIRST/REPAIR 都没有生成 cuisine/cuisineAnyOf，完整校验仍为 CUISINE_COVERAGE_REQUIRED，不能自行补标准菜系值或降低校验。
 - 准确失败层为模型菜系生成遗漏，合并策略正常完成而覆盖校验正确拦截。第二轮0次 PRE/POST/工具调用，Working Memory 与执行前完全一致，C06 8项仍未验证；就绪1/1（显示/记忆身份门控），就绪通过0/1、全量完成0/1。未建立新任务或持久化本轮旧反馈，不将语义字段已经识别等同业务完成。
 - 原始 FIRST/REPAIR 参数、真实 REPAIR 请求/响应、合并候选、字段来源和决策、校验错误、PRE/POST/完整回答在 target/eval-pilot/real-semantic-c06-context-repair-20261014/C06-turns.json；同目录 metadata/plan/report/C06-result/junit-real-run 完整保留。没有通过完整契约的候选只记录 effectiveStructuredOutput，不伪称 finalSemantics 已生效。完整回归原始日志 semantic-repair-full-final.log，定向日志 semantic-repair-targeted-final.log。旧实验保持原样，main 不变。
+
+### 2026-10-14：缺失条件改用独立小 Schema 提取
+
+- C06 reasoning_content 仅作诊断，不作为结构化参数。覆盖错误改为一次 `extract_missing_dining_criteria`，仅暴露缺失菜系及明确缺失的时间、人数、环境槽位，不让模型重写完整 TurnSemantics；非法 JSON/指令等非覆盖错误保留原有来源受控 REPAIR。
+- 提取输入仅为原始用户消息、维度与输出契约。只合并目标槽位，检查原文来源、新旧安排边界及 OR 完整性，保留 FIRST 的动作、反馈、地点及其他条件，随后完整重校验。独立工具的空 OR 数组转换为领域字段未提供，领域 parser 的非空 OR 契约不变。
+- 定向 71 passed；完整 Maven 461 passed、3 skipped、0 failures、0 errors，含 C15 历史引用回归。代码提交 `cbc276d5093177de06691c1d05930448607438dd`。
+- 唯一真实运行 `real-semantic-c06-targeted-extraction-20261014`，模型 deepseek-v4-flash-0731、60000ms、原始两轮文字与隔离 Fixture，未注入额外历史或答案。第二轮 FIRST 缺菜系、时间、人数；小工具一次返回 cuisineAnyOf=[杭帮菜,粤菜]、明天中午、6人，通过来源与完整校验。
+- 实际 PRE/POST 证据：旧任务 shopId22 的 POSITIVE 持久化且未选店；新任务独立建立，保留南站与环境 PREFER，旧任务条件未变。受控商户返回仍不证明接待能力、营业事实或真实地理唯一性。
+- 新发现：第一轮 FIRST 遗漏“面”和“公司附近”，仍被原覆盖校验判为 VALID，属于尚未解决的首轮语义覆盖缺口，不宣称 C06 完整通过。现有业务统计为 2 满足、6 未验证、0 不满足，1/1 就绪、0/1 完整验收；旧汇总器 M2 的未验证原因文字早于时间/人数契约，保留原结果并在补充证据文件说明，不扩展评测框架。
+- 完整模型输入、独立 Schema/参数、来源与合并语义、PRE/POST、工具证据及结果保留于 `target/eval-pilot/real-semantic-c06-targeted-extraction-20261014/`，新增 `C06-targeted-verification.json` 只核对第二轮目标证据，不替换冻结验收评分。main、冻结规范、正式数据集与 Holdout 未修改。
