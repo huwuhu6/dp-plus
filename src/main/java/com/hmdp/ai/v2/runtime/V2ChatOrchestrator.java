@@ -98,6 +98,16 @@ public class V2ChatOrchestrator {
     }
 
     private PreBuild preparePre(ChatMessageRequest request, ConversationWorkingMemory memory, TurnSemantics semantics) {
+        boolean factLookup = !semantics.requests().isEmpty() && semantics.requests().stream()
+                .allMatch(com.hmdp.ai.v2.semantic.UserRequest.FactQueryRequest.class::isInstance);
+        // 商户详情查询不授权恢复历史任务及其全部条件。模型的任务枚举还需原文任务操作证据。
+        if (factLookup && semantics.taskDirective()==TaskDirective.RESTORE
+                && !request.getMessage().matches("(?s).*(?:恢复|切回|回到|继续).*(?:任务|安排|需求|条件|搜索).*" )
+                && memory.getTasks().stream().flatMap(t->t.getRecommendationBatches().stream())
+                .flatMap(b->b.getCandidates().stream()).anyMatch(c->c.getShopName()!=null
+                        && !c.getShopName().isBlank() && request.getMessage().contains(c.getShopName())))
+            semantics = new TurnSemantics(TaskDirective.CONTINUE, com.hmdp.ai.v2.semantic.TaskDirectiveEvidence.NONE,
+                    semantics.requirementChanges(), semantics.entityFeedback(), semantics.requests(), semantics.relations(), semantics.references());
         List<TaskView> views = taskViews(memory);
         EffectiveTaskContextResult contextResult = taskContextResolver.resolveResult(memory.getActiveTaskId(), views, semantics);
         if (contextResult instanceof EffectiveTaskContextResult.NeedsClarification clarification)
@@ -109,7 +119,8 @@ public class V2ChatOrchestrator {
         if (memory.activeTask() == null && directive == TaskDirective.CONTINUE) directive = TaskDirective.START_NEW;
         // START_NEW 改变的是新需求归属，不是用户刚看到的商户身份。
         // 先在旧上下文验证反馈；任何歧义都在生命周期修改与 PRE 提交之前返回。
-        DecisionTaskState feedbackTask = directive == TaskDirective.START_NEW && context.task() != null
+        DecisionTaskState feedbackTask = (directive == TaskDirective.START_NEW
+                || directive == TaskDirective.CONTINUE && factLookup && context.restoredForThisTurn()) && context.task() != null
                 ? findTask(memory, context.task().taskId()) : null;
         GroundedTurn oldFeedback = null;
         TurnSemantics executionSemantics = semantics;
@@ -130,7 +141,8 @@ public class V2ChatOrchestrator {
         }
         if (directive == TaskDirective.ABANDON) return PreBuild.abandon(task.getTaskId());
 
-        EffectiveTaskContext currentContext = new EffectiveTaskContext(view(task, memory.getTasks().indexOf(task)),
+        EffectiveTaskContext currentContext = new EffectiveTaskContext(directive == TaskDirective.CONTINUE && factLookup && context.task()!=null
+                ? context.task() : view(task, memory.getTasks().indexOf(task)),
                 context.restoredForThisTurn());
         GroundingResult grounding = groundingResolver.resolve(executionSemantics, currentContext, request.getMessage());
         if (grounding instanceof GroundingResult.NeedsClarification clarification)

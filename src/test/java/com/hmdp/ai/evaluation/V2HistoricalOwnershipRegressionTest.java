@@ -88,4 +88,18 @@ class V2HistoricalOwnershipRegressionTest {
         assertTrue(boundToFirstB(h,last));
         org.mockito.Mockito.verify(client).chatCompletion(org.mockito.ArgumentMatchers.anyList(),org.mockito.ArgumentMatchers.anyList(),org.mockito.ArgumentMatchers.anyMap(),org.mockito.ArgumentMatchers.anyString());
     }
+    @Test void originalC15ModelTaskRefMustQueryMerchantWithoutRestoringOldTask() throws Exception {
+        V2PilotHarness h=new V2PilotHarness();
+        var first=h.turn(messages().get("C15").getFirst(),recommend(TaskDirective.START_NEW,"牛排","国贸",List.of()),shops("C15",false));
+        String old=first.workingMemory().path("activeTaskId").asText();
+        var second=h.turn("新开一项需求找南站杭帮菜",recommend(TaskDirective.START_NEW,"杭帮菜","南站",List.of()),shops("C06",true));
+        String current=second.workingMemory().path("activeTaskId").asText();
+        var taskRef=new EntityReference.TaskRef(new TaskSelector.Earliest());
+        var last=h.turn(messages().get("C15").get(2),new TurnSemantics(TaskDirective.RESTORE,List.of(),List.of(),
+                List.of(new UserRequest.FactQueryRequest("r1",taskRef,UserRequest.FactType.DETAIL)),List.of(),List.of(taskRef)),List.of());
+        assertTrue(boundToFirstB(h,last));assertEquals(current,last.workingMemory().path("activeTaskId").asText());
+        assertEquals(task(second,current).path("v2Criteria"),task(last,current).path("v2Criteria"));
+        assertEquals(task(first,old).path("v2Criteria"),task(last,old).path("v2Criteria"));
+        assertEquals("SUSPENDED",task(last,old).path("v2Lifecycle").asText());
+    }
 }

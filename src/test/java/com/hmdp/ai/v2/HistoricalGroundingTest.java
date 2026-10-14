@@ -45,6 +45,8 @@ class HistoricalGroundingTest {
     @Test void ambiguousHistoricalWithoutScopeCannotGuess() {assertInstanceOf(GroundingResult.NeedsClarification.class,resolve(new EntityReference.OrdinalRef(1),"之前推荐的那家店地址",normal()));}
     @Test void inventedCurrentOrdinalCannotExecuteForAmbiguousUserReference() {assertInstanceOf(GroundingResult.NeedsClarification.class,resolve(new EntityReference.OrdinalRef(1),"那家店地址",normal()));}
     @Test void historicalRoundOrdinalWithoutBatchEvidenceCannotBecomeCurrentOrdinal() {assertInstanceOf(GroundingResult.NeedsClarification.class,resolve(new EntityReference.OrdinalRef(1),"上次第一家地址",normal()));}
+    @Test void modelTaskSelectorDoesNotBypassMerchantEvidence() {identity(new EntityReference.TaskRef(new TaskSelector.Earliest()),"最开始推荐的澳洲牛排馆地址",normal(),22,"B1");}
+    @Test void taskIdentityWithoutMerchantCannotReachDetailTool() {assertInstanceOf(GroundingResult.NeedsClarification.class,resolve(new EntityReference.TaskRef(new TaskSelector.Active()),"查询这个任务",normal()));}
     @Test void nonexistentNamedCannotExecute() {assertInstanceOf(GroundingResult.NeedsClarification.class,resolve(new EntityReference.NamedEntityRef("不存在"),"不存在地址",normal()));}
     @Test void modelNameConflictsWithUserName() {assertInstanceOf(GroundingResult.NeedsClarification.class,resolve(new EntityReference.NamedEntityRef("社区西餐吧"),"澳洲牛排馆地址",normal()));}
     @Test void namedReferenceMustRespectUserOrdinalToo() {assertInstanceOf(GroundingResult.NeedsClarification.class,resolve(new EntityReference.NamedEntityRef("精酿牛排小馆"),"第一家精酿牛排小馆地址",normal()));}

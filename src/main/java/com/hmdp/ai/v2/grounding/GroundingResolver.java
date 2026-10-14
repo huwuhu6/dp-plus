@@ -43,7 +43,6 @@ public final class GroundingResolver {
     }
     private GroundedReference resolve(EntityReference ref, TaskView task, String userTurn) {
         if (task == null) throw new ReferenceIssue(Ambiguity.Kind.UNRESOLVED_REFERENCE, "reference has no task context");
-        if (ref instanceof EntityReference.TaskRef) return new GroundedReference.TaskIdentity(task.taskId());
         if (ref instanceof EntityReference.NamedOrdinalRef joint) {
             GroundedReference.ShopIdentity named = (GroundedReference.ShopIdentity) resolve(new EntityReference.NamedEntityRef(joint.name()), task, userTurn);
             GroundedReference.ShopIdentity ordinal = (GroundedReference.ShopIdentity) resolve(new EntityReference.OrdinalRef(joint.ordinal()), task, userTurn);
@@ -53,6 +52,8 @@ public final class GroundingResolver {
         }
         GroundedReference evidence = evidencedReference(ref, task, userTurn);
         if (evidence != null) return evidence;
+        if (ref instanceof EntityReference.TaskRef)
+            throw new ReferenceIssue(Ambiguity.Kind.UNRESOLVED_REFERENCE,"task identity is not a merchant identity");
         if (ref instanceof EntityReference.OrdinalRef ordinal) {
             // Only the projection knows which batch remains visible to a user; resolver must not infer persistence lifecycle.
             TaskView.RecommendationBatchView batch = task.currentVisibleBatch();
