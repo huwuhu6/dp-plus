@@ -2614,3 +2614,13 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - C03真实定向提取补全海鲜/内脏/不能吃太辣，同一任务保留今晚及万象城锚点，旧重辣PREFER清除；回复候选明确待核实，不证明现实菜单安全。C23真实正式语义、同店主餐证据、guard及POST选择22正确，不改全局条件；首轮真实省略语理解未测，最终事实回复未明确承接选择，仍不宣称完整通过。
 - 人工逐项证据审核15满足、6不满足、3未验证；受控就绪4/4、就绪通过1/4、完整验收2/4（包含完整判定的失败场景），与旧端到端首轮覆盖0/10严格分开。运行器原report保持未验证占位，另存reviewed-report及完整证据；JUnit成功只表示记录完成。
 - 定向71 passed/1 skipped；最终完整mvn -q test为488 passed/6 skipped、0 failures/errors，Main24条和semantic10条加载正常。未修改C15/C06机制。下一阶段优先具体商户问答分类、商品属性/未知事实契约、FIRST硬条件来源校验（C04虚构距离），另保留事实回答遮盖选择表达的renderer线索。本轮不继续针对单场景加Prompt。详见doc/eval/V2四场景受控真实语义结果-20261014.md；运行产物仅保留target，不提交。
+
+### 2026-10-14：商户问价、商品属性与选店回复修复
+
+- 在独立fix/v2-merchant-fact-requests分支基于601ad62实施；main保持4cfda4c。原始S02 GENERAL、S06 DETAIL和C23事实遮盖选择的三项回归在修复前均实际失败，未降低冻结验收标准。
+- 增加PRICE和带原文字面question的PRODUCT请求，将商户引用与事实主题分开。FIRST不能用DETAIL静默替代问价/商品属性，已有REPAIR只纠正requests且重新验证来源与覆盖；不让模型产出商品有无或数据库ID。原样GENERAL问价只有在原话、主题及真实推荐历史共同支持具体商户时才上下文纠正，仍经过Grounding验证；一般价格知识保留GENERAL，同名或名称/序号冲突澄清。描述引用只用实际名称/菜系字面值，不用宽泛菜系归一化猜身份。
+- PRICE来自现有只读商户事实源，明确人均及来源，未知不输出null或猜总价，不新增外部网络查询。PRODUCT实际执行携带属性；同店、同属性、有来源的类型化证据才能形成已知结论，缺记录、错店、错属性、空来源都UNKNOWN而不是不存在。ExecutionObservation保留请求对象、属性、KNOWN/UNKNOWN与来源；目前真实商品菜单提供者尚未接入，可靠缓存证据可由只读提供者供给，未新建缓存体系。
+- 回复累积多项事实，不相互覆盖；事实、推荐和本轮实际选择效果可合并。选择确认只使用本轮成功执行并POST提交的效果，不从历史selected状态推断，也不承诺订座/下单。问价时同步确认已保留忌辣并说明食材/辣度未核实。
+- 定向118 passed；完整mvn -q test：500 passed、6 skipped、0 failures/errors，C06/C15、S13、原FIRST/REPAIR/提取及24条Main/10条semantic加载正常。正反例覆盖已知/未知价格、一般知识/未展示商户、歧义/冲突、历史批次不恢复条件、商品错对象/错属性/缺来源/明确有无、属性遗漏与编造零提交、多请求保留及无选择不虚报。
+- 一次真实real-merchant-fact-fix-20261014-once，代码f04f94ea47240664149b6e578c7ac5bc75d57def，deepseek-v4-flash-0731、60000ms；保持原话、原TEST_ONLY事实分支和隔离会话。S02 FIRST为FACT PRICE/name椰子鸡，实际工具22、人均40、忌辣/2人/晚上/热食均保留；S06 FIRST为PRODUCT/“无骨的”/ordinal2，实际工具22，明确无法确认且未查到不等于没有；C23 FIRST为同店主餐事实+BOOLEAN true guard，PRE未选/POST选22，完整回复同时说明主餐证据与已选米线。三次逻辑/HTTP调用均成功，均FIRST VALID，无repair或传输重试。JUnit入口通过只代表记录完成，另以实际语义、对象、值、PRE/POST及完整回复验证本轮修复目标。
+- 原始参数、真实输入/响应、工具和状态证据、JUnit XML及repair-goal-verification在target/eval-pilot/real-merchant-fact-fix-20261014-once；旧实验未覆盖。没有重测真实首轮、现实菜单或全部冻结项目，不把三个修复目标通过当成完整场景/端到端通过。属性证据仍按原文字面匹配，复杂词形由事实提供者适配或保持未知；C04距离来源、C06首轮覆盖及地理/菜单事实缺口仍待后续，不继续扩展本轮。
