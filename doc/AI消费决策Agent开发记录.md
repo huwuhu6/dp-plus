@@ -2558,3 +2558,10 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - 第2轮 FIRST 已输出 ordinal2 POSITIVE、START_NEW、明天中午、6人、南站及环境 PREFER，但仍未输出 cuisine/cuisineAnyOf；REPAIR 仍缺菜系且丢失时间/人数，两个结果均触发 CUISINE_COVERAGE_REQUIRED。失败明确位于模型生成与 repair 输出，不是新 parser 丢掉已提供菜系，也不是 reducer/Grounding 故障；第2轮0次 PRE/POST/工具调用，Working Memory 与执行前完全一致。C06 8项保持未验证，不宣称真实模型通过。
 - 第1轮 FIRST 因遗漏今晚用餐时间触发 DINING_DETAILS_REQUIRED，REPAIR 补回“今晚下班”及1人后执行；但它还丢掉 FIRST 已表达的“面”，且两次均没有公司地点。当前显示批次/记忆身份门控1/1成立，不等于首轮完整需求覆盖成功；旧任务的菜系/地点表达仍不完整。最终就绪通过0/1、全量完成0/1，不能把该实验称为C06完整能力修复成功。
 - 证据：target/eval-pilot/real-semantic-c06-contract-fixed-20261014/（metadata、plan、C06-turns、C06-result、report、junit-real-run）；原始日志 target/eval-pilot/real-semantic-c06-contract-fixed-20261014.log，定向/全量日志分别 c06-contract-targeted-verified.log、c06-contract-full.log。原话由冻结规范读取，Fixture、旧实验、Main数据和Holdout均未变。当前可验证的是新增字段的确定性转换与任务隔离；真实模型遗漏菜系及 repair 丢条件仍未解决。
+
+### 2026-10-14：上下文感知的字段级语义修复
+
+- 原机制只把违例类型交给第二次生成，没有 FIRST 结构化输出，能在补时间时无声删除已识别菜系，也能在修菜系时丢时间/人数。改为给 REPAIR 原始 user、FIRST 完整结构、具体失败维度及通过类型/原文来源检查的保留字段；没有加入历史聊天、评测答案或商户身份。
+- 新 SemanticRepair 只保护有可靠来源且未处于冲突/失败维度的字段；REPAIR 遗漏/清空这些字段时从 FIRST 保留，非等价覆盖拒绝。非法/无来源/冲突 FIRST 字段不保护，允许纠正或删除；新增字段须通过用户来源检查。最终合并后再次运行全部现有契约验证，不能用保留已知字段掩盖仍缺菜系等失败。数组作为完整字段保留，不能默默把旧正反馈改成选店或改变 request 关联。
+- 日志记录原始函数参数、具体校验错误、effectiveStructuredOutput、finalSemantics、mergeCompleted、逐字段 FIRST/REPAIR/final 值及保留/修改/丢弃依据。来源检查使用原文、既有菜系别名及有限可核对语义证据；复杂自由改写/关联不猜测，保守拒绝，不把这些检查当作所有自然语言业务正确性的证明。
+- 回归覆盖保留菜系+补时间、保留时间/人数/环境/反馈+补 OR、错误字段允许纠正、拒绝额外预算/MUST升级/选店、仍缺语义保持失败，以及原始 C06 真实 parser→Grounding→reducer→PRE/POST。定向65 passed；最终全量458 total、455 passed、3 skipped、0 failures/errors。C15身份回归正常，冻结规范/Main JSONL/Holdout不变。

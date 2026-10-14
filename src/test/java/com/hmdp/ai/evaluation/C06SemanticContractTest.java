@@ -114,4 +114,22 @@ class C06SemanticContractTest {
         assertEquals(List.of("杭帮菜","粤菜"),assertInstanceOf(RequirementChange.CriteriaPatch.class,actual.requirementChanges().getFirst()).patch().cuisine().anyOf());
         assertEquals("CUISINE_COVERAGE_REQUIRED",parser.takeEvaluationAttempts().getFirst().get("validationResult"));
     }
+    @Test void targetedRepairKeepsFirstDetailsAndOldFeedbackThroughRealPrePost() throws Exception {
+        var first=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(complete());
+        ((com.fasterxml.jackson.databind.node.ObjectNode)first.path("criteria")).remove("cuisineAnyOf");
+        var fixed=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(complete());
+        var changed=(com.fasterxml.jackson.databind.node.ObjectNode)fixed.path("criteria");
+        changed.remove(List.of("arrivalTime","partySize","preferences","poi"));fixed.putArray("feedback");
+        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(first.toString()),response(fixed.toString()));
+        var interpreter=interpreter();var h=new V2PilotHarness(interpreter,"test-c06-repair-merge");
+        var oldTurn=h.turn(messages().get("C06").getFirst(),recommend(TaskDirective.START_NEW,"面","公司附近",List.of()),shops("C06",false));
+        String old=oldTurn.workingMemory().path("activeTaskId").asText();
+        var last=h.turn(messages().get("C06").get(1),shops("C06",true));
+        assertTrue(positiveOldFeedback(last,old));assertEquals(task(oldTurn,old).path("v2Criteria"),task(last,old).path("v2Criteria"));
+        var fresh=task(last,last.workingMemory().path("activeTaskId").asText()).path("v2Criteria");
+        assertEquals(6,fresh.path("partySize").asInt());assertEquals("明天中午",fresh.path("diningTime").path("arrivalTime").asText());
+        assertEquals("南站",fresh.path("location").path("poi").asText());assertEquals(2,fresh.path("cuisine").path("anyOf").size());
+        assertEquals(2,fresh.path("preferences").path("values").size());assertEquals(2,h.commits.size());
+        assertTrue(interpreter.takeEvaluationAttempts().getLast().get("fieldDecisions").toString().contains("feedback=PRESERVED_FIRST"));
+    }
 }
