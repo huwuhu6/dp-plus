@@ -85,8 +85,8 @@ class DietaryAndConditionalChoiceTest {
         var displayed=candidates("米线");displayed.get(0).setCuisine("酸菜鱼");displayed.get(0).setShopName("TEST ONLY 酸菜鱼");
         displayed.get(2).setCuisine("炸鸡汉堡");displayed.get(2).setShopName("TEST ONLY 炸鸡汉堡");
         var mapper=(com.hmdp.mapper.ShopMapper)ReflectionTestUtils.getField(tool,"shopMapper");
-        when(mapper.selectById(any())).thenAnswer(i->{var c=displayed.stream().filter(s->s.getShopId().equals(((Number)i.getArgument(0)).longValue())).findFirst().orElseThrow();
-            var shop=new com.hmdp.entity.Shop();shop.setId(c.getShopId());shop.setName(c.getShopName());shop.setAvgPrice(40L);shop.setAddress("TEST_ONLY_ADDRESS");return shop;});
+        doAnswer(i->{var c=displayed.stream().filter(s->s.getShopId().equals(((Number)i.getArgument(0)).longValue())).findFirst().orElseThrow();
+            var shop=new com.hmdp.entity.Shop();shop.setId(c.getShopId());shop.setName(c.getShopName());shop.setAvgPrice(40L);shop.setAddress("TEST_ONLY_ADDRESS");return shop;}).when(mapper).selectById(any());
         var original=V2ControlledPilotTest.messages().get("C23");h.turn(original.get(0),displayed);
         return h.turn(original.get(1),List.of());
     }
@@ -106,5 +106,12 @@ class DietaryAndConditionalChoiceTest {
     @Test void inventedClearingAndIngredientInCuisineSlotCannotPass() throws Exception {
         when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response("{\"criteria\":{},\"cleared\":[\"DIETARY_RESTRICTIONS\"]}"));
         assertThrows(SemanticInterpretationException.class,()->interpreter.interpret("还是这个安排，找更便宜的"));
+    }
+    @Test void duplicatedPositiveSpicePreferenceFromRealFirstTurnDoesNotBecomeHardProhibition() throws Exception {
+        String first=rec("{\"cuisine\":\"川菜\",\"poi\":\"万象城\",\"spiceRequirement\":\"够麻够辣\",\"preferences\":[{\"criterion\":\"够麻够辣\",\"importance\":\"PREFER\"}]}");
+        when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(response(first),response("{\"arrivalTime\":\"今晚下班\"}"));
+        var semantic=interpreter.interpret(V2ControlledPilotTest.messages().get("C03").get(0));
+        var patch=((RequirementChange.CriteriaPatch)semantic.requirementChanges().getFirst()).patch();
+        assertNull(patch.dietaryRestrictions());assertEquals("够麻够辣",patch.semanticPreferences().values().getFirst().criterion());assertEquals("今晚下班",patch.diningTime().arrivalTime());
     }
 }

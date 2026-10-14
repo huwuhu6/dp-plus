@@ -104,7 +104,7 @@ public class SemanticInterpreter {
                 +"This is a small field extraction, not a complete turn interpretation. No task directives, feedback, requests, or other fields. "
                 +"When the message appraises an old restaurant then introduces an independent dining arrangement, extract criteria ONLY for the new arrangement, never cuisine from the old restaurant appraisal. "
                 +"cuisine is one accepted cuisine or null; cuisineAnyOf contains ALL expressly accepted alternatives (logical OR, never AND); excludedCuisines contains only explicit exclusions. Do not invent cuisines. "
-                +"avoidedIngredients contains EVERY expressly forbidden ingredient, not cuisine; spiceRequirement is the literal mandatory spice restriction or null. Do not infer restrictions from medical diagnoses. "
+                +"avoidedIngredients contains EVERY expressly forbidden ingredient, not cuisine; spiceRequirement is the literal mandatory forbidden/capped spice restriction or null. Positive heat wishes already in preferences are not prohibitions: return null for this slot. Do not infer restrictions from medical diagnoses. "
                 +"arrivalTime retains literal relative time; partySize is explicit diner count; preferences use literal criterion and PREFER for subjective wishes, MUST only for explicit requirements. Use null or [] when not supported. "
                 +"Return only the function parameters defined by the supplied schema.";
         String arguments=null;
@@ -148,6 +148,7 @@ public class SemanticInterpreter {
             recordEvaluationAttempt(failed,arguments,"GENERIC_CONTRACT");throw new IllegalArgumentException("invalid extraction json",invalidJson);
         } finally {
             Map<String,Object> attempt=evaluationAttempts.get().getLast();attempt.put("attempt","TARGETED_EXTRACTION");
+            if(attempt.containsKey("normalizations"))decisions.put("criteria.spiceRequirement","REMOVED_DUPLICATE_PREFER: original preference retained");
             attempt.put("missingDimensions",List.copyOf(fields));attempt.put("extractionSchema",schema);
             attempt.put("fieldDecisions",decisions);attempt.put("fieldEvidence",evidence);
         }
@@ -202,8 +203,10 @@ public class SemanticInterpreter {
 
     private TurnSemantics validateAttempt(String userTurn,CallResult call,Violation failed,SemanticRepair repair) {
         JsonNode effective=call.root();
+        boolean removedDuplicate=false;
         try {
             if (repair!=null) effective=repair.merge(call.root());
+            JsonNode normalized=removeDuplicatedSpicePreference(userTurn,effective);removedDuplicate=normalized!=effective;effective=normalized;
             TurnSemantics semantics=normalizeLocationProvenance(userTurn,normalizeDeterministicBudget(userTurn,parse(effective)));
             validateDietary(userTurn,semantics);validateConditionalMeal(userTurn,semantics);
             if (requiresCuisineCoverage(userTurn,semantics)) throw violation(Violation.CUISINE_COVERAGE_REQUIRED);
@@ -215,9 +218,11 @@ public class SemanticInterpreter {
                     .map(RequirementChange.ConditionalRequirementChange.class::cast).noneMatch(change->!isEmpty(change.change())))
                 throw violation(Violation.CONDITIONAL_FALLBACK_REQUIRED);
             recordEvaluationAttempt(failed,call.arguments(),"VALID");
+            if(removedDuplicate)evaluationAttempts.get().getLast().put("normalizations",List.of("criteria.spiceRequirement: duplicate of source-backed PREFER removed; preference unchanged"));
             traceRepair(effective,repair,semantics,null);return semantics;
         } catch (RuntimeException failure) {
             recordEvaluationAttempt(failed,call.arguments(),violationOf(failure).name());
+            if(removedDuplicate)evaluationAttempts.get().getLast().put("normalizations",List.of("criteria.spiceRequirement: duplicate of source-backed PREFER removed; preference unchanged"));
             traceRepair(effective,repair,null,failure.getMessage());throw failure;
         }
     }
@@ -226,6 +231,18 @@ public class SemanticInterpreter {
         if (repair!=null) {attempt.put("mergeCompleted",repair.mergeCompleted());attempt.put("fieldDecisions",repair.decisions());attempt.put("fieldEvidence",repair.evidence());}
         if (semantics!=null) attempt.put("finalSemantics",objectMapper.valueToTree(semantics));
         if (detail!=null) attempt.put("validationDetail",detail);
+    }
+    /** 同一个已明确保存的 PREFER 不得又被模型复制成硬禁忌；只去重，不补写偏好或削弱禁止。 */
+    private JsonNode removeDuplicatedSpicePreference(String user,JsonNode root) {
+        String spice=root.path("criteria").path("spiceRequirement").asText("");
+        if(spice.isBlank() || !user.contains(spice) || DietaryRestrictionSource.requiredSpice(user)!=null
+                || user.matches("(?s).*(?:必须|一定|不能|不可).*" ))return root;
+        for(JsonNode preference:root.path("criteria").path("preferences"))
+            if(spice.equals(preference.path("criterion").asText()) && preference.path("importance").asText().equals("PREFER")) {
+                var copy=(com.fasterxml.jackson.databind.node.ObjectNode)root.deepCopy();
+                ((com.fasterxml.jackson.databind.node.ObjectNode)copy.path("criteria")).remove("spiceRequirement");return copy;
+            }
+        return root;
     }
     private List<String> failedDimensions(Violation failure,String user,JsonNode first) {
         if (failure==Violation.DINING_DETAILS_REQUIRED) {
@@ -830,7 +847,7 @@ public class SemanticInterpreter {
                 "description","Explicitly accepted alternative cuisines, logical OR. Preserve every alternative; omit cuisine."));
         criteriaProperties.put("excludedCuisines", Map.of("type","array","items",string));
         criteriaProperties.put("avoidedIngredients",Map.of("type","array","items",string,"description","Explicit forbidden ingredients, never inferred from a disease."));
-        criteriaProperties.put("spiceRequirement",Map.of("type","string","description","Literal mandatory spice restriction, not a cuisine and not a soft preference."));
+        criteriaProperties.put("spiceRequirement",Map.of("type","string","description","Literal forbidden/capped spice requirement only. Omit when absent; positive heat wishes belong in preferences, never duplicate them as a hard prohibition."));
         criteriaProperties.put("budgetSoft", Map.of("type","number","description","Approximate preferred budget only."));
         criteriaProperties.put("budgetHard", Map.of("type","number","description","Mandatory explicit maximum or replacement budget."));
         criteriaProperties.put("distanceKm", number);
