@@ -98,7 +98,7 @@ final class V2PilotHarness {
     }
 
     TurnEvidence turn(String originalMessage,TurnSemantics semantic,List<DecisionRecommendation> candidates) throws Exception {
-        when(interpreter.interpret(originalMessage)).thenReturn(semantic);
+        doReturn(semantic).when(interpreter).interpret(originalMessage);
         actualSemantic=semantic;
         return turn(originalMessage,candidates);
     }

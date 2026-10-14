@@ -46,7 +46,10 @@ class V2RealModelPilotTest {
         // 已启动的run不允许覆盖，避免完整基线失败后反复跑并挑最好结果。
         Files.writeString(directory.resolve("STARTED.json"),"{\"startedAt\":\""+java.time.Instant.now()+"\"}",StandardOpenOption.CREATE_NEW);
         var originals=messages();List<Plan> plans=new ArrayList<>();
-        for(String id:List.of("S04","S08","S09","S13","C06","C15")) {
+        List<String> selected=List.of(System.getProperty("v2.pilot.scenarios","S04,S08,S09,S13,C06,C15").split(","));
+        assertTrue(!selected.isEmpty() && selected.stream().distinct().count()==selected.size()
+                && List.of("S04","S08","S09","S13","C06","C15").containsAll(selected),"unknown or duplicate pilot scenario");
+        for(String id:selected) {
             Plan a=plan(id);List<String> boundaries=new ArrayList<>(a.controlledBoundaries());boundaries.remove("SemanticInterpreter");
             Map<String,String> facts=new LinkedHashMap<>(a.contextFacts());
             facts.put("modelHistory","Production: system + current user message only; no injected conversation history");
@@ -103,7 +106,7 @@ class V2RealModelPilotTest {
             }
             write(json,directory.resolve("report.json"),report(plans,results));
             save(directory.resolve("COMPLETED.json"),Map.of("completedAt",java.time.Instant.now().toString(),"scenarioCount",results.size()));
-            assertEquals(6,results.size()); // JUnit只验证运行/记录完成，不要求业务通过。
+            assertEquals(selected.size(),results.size()); // JUnit只验证运行/记录完成，不要求业务通过。
         } finally { ReflectionTestUtils.setField(productionInterpreter,"aiClient",productionClient); }
     }
 

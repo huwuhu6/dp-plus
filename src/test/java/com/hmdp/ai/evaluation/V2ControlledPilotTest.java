@@ -68,8 +68,10 @@ class V2ControlledPilotTest {
                     last=h.turn(MESSAGES.get(id).get(1),sem(TaskDirective.START_NEW,criteria("杭帮菜", "南站", "明天中午",List.of("6人聚餐","上档次")),List.of(feedback),recommend()),shops(id,true));
                     checked.put("M1",positiveOldFeedback(last,oldTask));
                     checked.put("M3",arrangementIsolation(h,first,last,oldTask));
-                    reasons.put("M1","actual START_NEW grounds ordinal feedback in empty new task, returns identity clarification, no old-task positive feedback committed");
-                    reasons.put("M3","old task retained but new arrangement not established; separation is UNVERIFIED, not evidence of condition pollution");
+                    assertTrue(positiveOldFeedback(last,oldTask));
+                    assertEquals(Boolean.TRUE,arrangementIsolation(h,first,last,oldTask));
+                    reasons.put("M1","real PRE grounds feedback against pre-turn task and atomically persists it with the new arrangement");
+                    reasons.put("M3","old criteria retained and independent new arrangement established; missing arrangement still remains UNVERIFIED in its separate negative test");
                 }
                 default -> {
                     DiningCriteria changed=new DiningCriteria(initial.location(),initial.cuisine(),initial.budget(),null,null,
@@ -81,7 +83,8 @@ class V2ControlledPilotTest {
                     last=h.turn(MESSAGES.get(id).get(2),historicalQuery(new EntityReference.NamedEntityRef("澳洲牛排馆")),List.of());
                     checked.put("M2",boundToFirstB(h,last));
                     checked.put("M4",h.matches(Map.of("criteria",Map.of("equals",h.taskProjection(second,oldTask).get("criteria")),"selectedShopId",Map.of("null",true)),h.taskProjection(last,oldTask)));
-                    reasons.put("M2","B exists in historical memory but real Grounding receives latest D/E only; actual clarification, no B query executed");
+                    assertTrue(boundToFirstB(h,last));
+                    reasons.put("M2","historical B identity independently grounded and actual detail tool receives shopId 22");
                 }
             }
             List<ItemResult> items=new ArrayList<>();
@@ -94,12 +97,12 @@ class V2ControlledPilotTest {
             results.add(finish(plan,gate,h.turns,items));
         }
         Report report=report(plans,results);
-        write(new com.fasterxml.jackson.databind.ObjectMapper(),Path.of("target/eval-pilot/controlled-v1.json"),report);
+        write(new com.fasterxml.jackson.databind.ObjectMapper(),Path.of("target/eval-pilot/controlled-production-fixed-v1.json"),report);
         assertEquals(6,report.summary().planned());assertEquals(6,report.summary().ready());
         assertEquals(0,report.summary().corePassed());assertEquals(0,report.summary().fullyAdjudicated());
-        assertEquals(2,report.summary().businessFailed());
+        assertEquals(0,report.summary().businessFailed());
         assertTrue(report.scenarios().stream().allMatch(s->s.items().stream().anyMatch(i->i.status()==Status.UNVERIFIED)));
-        write(new com.fasterxml.jackson.databind.ObjectMapper(),Path.of("target/eval-pilot/controlled-v1.json"),report);
+        write(new com.fasterxml.jackson.databind.ObjectMapper(),Path.of("target/eval-pilot/controlled-production-fixed-v1.json"),report);
     }
 
     @Test void cancelledHotpotStillEffectiveFailsActualPredicate() throws Exception {
@@ -125,9 +128,13 @@ class V2ControlledPilotTest {
         V2PilotHarness h=new V2PilotHarness();
         h.turn(MESSAGES.get("S13").get(0),sem(TaskDirective.START_NEW,criteria("早餐","地铁口",null,List.of()),List.of(),recommend()),shops("S13",false));
         TurnEvidence actual=h.turn(MESSAGES.get("S13").get(1),sem(TaskDirective.CONTINUE,null,List.of(),List.of(new UserRequest.SelectRequest("choose",new EntityReference.OrdinalRef(1)),new UserRequest.FactQueryRequest("address",new EntityReference.OrdinalRef(1),UserRequest.FactType.DETAIL))),List.of());
-        assertFalse(identityClarification(actual));assertFalse(actual.executionCalls().isEmpty());
+        assertTrue(identityClarification(actual));assertTrue(actual.executionCalls().isEmpty());
         String id=actual.workingMemory().path("activeTaskId").asText();
-        assertFalse(h.matches(Map.of("selectedShopId",Map.of("null",true)),h.taskProjection(actual,id)));
+        assertTrue(h.matches(Map.of("selectedShopId",Map.of("null",true)),h.taskProjection(actual,id)));
+        // 真正选择/查询第一家不构成澄清：观察器仍能拒绝已执行的选择结果冒充澄清。
+        TurnEvidence selected=h.turn("就去第一家，把地址发我",sem(TaskDirective.CONTINUE,null,List.of(),List.of(new UserRequest.SelectRequest("choose",new EntityReference.OrdinalRef(1)),new UserRequest.FactQueryRequest("address",new EntityReference.OrdinalRef(1),UserRequest.FactType.DETAIL))),List.of());
+        assertFalse(identityClarification(selected));assertFalse(selected.executionCalls().isEmpty());
+        assertFalse(h.matches(Map.of("selectedShopId",Map.of("null",true)),h.taskProjection(selected,id)));
     }
 
     @Test void independentArrangementPassesIsolationWhileContinuingIntoOldTaskFails() throws Exception {
@@ -147,7 +154,9 @@ class V2ControlledPilotTest {
         V2PilotHarness h=new V2PilotHarness();
         h.turn(MESSAGES.get("C15").get(0),sem(TaskDirective.START_NEW,criteria("牛排","国贸",null,List.of()),List.of(),recommend()),shops("C15",false));
         h.turn(MESSAGES.get("C15").get(1),sem(TaskDirective.CONTINUE,null,List.of(),List.of(new UserRequest.AlternativesRequest("alternatives",2))),shops("C15",true));
-        TurnEvidence actual=h.turn(MESSAGES.get("C15").get(2),historicalQuery(new EntityReference.OrdinalRef(2)),List.of());
+        // 身份谓词负例：真实执行当前 E，再要求它证明历史 B，必须失败。
+        // 原 C15 原话的错误序号现在被 Production 防护纠正，另有专门原话回归验证。
+        TurnEvidence actual=h.turn("当前第二家地址和详情",historicalQuery(new EntityReference.OrdinalRef(2)),List.of());
         assertEquals(2,actual.executionCalls().size());
         assertEquals(55,actual.executionCalls().getFirst().action().path("shop").path("shopId").asInt());
         assertEquals("address",actual.executionCalls().getFirst().action().path("requestId").asText());

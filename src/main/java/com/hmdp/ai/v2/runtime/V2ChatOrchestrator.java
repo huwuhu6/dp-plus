@@ -107,6 +107,21 @@ public class V2ChatOrchestrator {
         String restoreTaskId = context.task() == null ? null : context.task().taskId();
         TaskDirective directive = semantics.taskDirective();
         if (memory.activeTask() == null && directive == TaskDirective.CONTINUE) directive = TaskDirective.START_NEW;
+        // START_NEW 改变的是新需求归属，不是用户刚看到的商户身份。
+        // 先在旧上下文验证反馈；任何歧义都在生命周期修改与 PRE 提交之前返回。
+        DecisionTaskState feedbackTask = directive == TaskDirective.START_NEW && context.task() != null
+                ? findTask(memory, context.task().taskId()) : null;
+        GroundedTurn oldFeedback = null;
+        TurnSemantics executionSemantics = semantics;
+        if (feedbackTask != null && !semantics.entityFeedback().isEmpty()) {
+            TurnSemantics feedbackOnly = new TurnSemantics(TaskDirective.CONTINUE, List.of(), semantics.entityFeedback(), List.of(), List.of());
+            GroundingResult result = groundingResolver.resolve(feedbackOnly, context, request.getMessage());
+            if (result instanceof GroundingResult.NeedsClarification clarification)
+                return PreBuild.response(clarification(chatId(request), "请明确旧安排中是哪一家或哪一批推荐：" + clarification.ambiguities().getFirst().detail()));
+            oldFeedback = ((GroundingResult.Grounded) result).turn();
+            executionSemantics = new TurnSemantics(semantics.taskDirective(), semantics.taskDirectiveEvidence(),
+                    semantics.requirementChanges(), List.of(), semantics.requests(), semantics.relations(), semantics.references());
+        }
         final DecisionTaskState task;
         try {
             task = lifecycleReducer.apply(memory, directive, restoreTaskId);
@@ -117,12 +132,14 @@ public class V2ChatOrchestrator {
 
         EffectiveTaskContext currentContext = new EffectiveTaskContext(view(task, memory.getTasks().indexOf(task)),
                 context.restoredForThisTurn());
-        GroundingResult grounding = groundingResolver.resolve(semantics, currentContext);
+        GroundingResult grounding = groundingResolver.resolve(executionSemantics, currentContext, request.getMessage());
         if (grounding instanceof GroundingResult.NeedsClarification clarification)
             return PreBuild.response(clarification(chatId(request), "请明确是哪一家或哪一批推荐：" + clarification.ambiguities().getFirst().detail()));
         GroundedTurn grounded = ((GroundingResult.Grounded) grounding).turn();
 
-        V2TaskState reduced = preReducer.reduce(stateGateway.read(task), semantics, grounded);
+        V2TaskState reduced = preReducer.reduce(stateGateway.read(task), executionSemantics, grounded);
+        if (oldFeedback != null)
+            stateGateway.write(feedbackTask, preReducer.reduce(stateGateway.read(feedbackTask), oldFeedback.semantics(), oldFeedback));
         V2LocationResolver.Resolution location = locationResolver.resolve(reduced.criteria(), request.getLocation(), reduced.searchAnchor(),
                 hasLocationMutation(semantics));
         if (location instanceof V2LocationResolver.Resolution.NeedsClarification clarification) {
@@ -315,9 +332,17 @@ public class V2ChatOrchestrator {
         TaskView.RecommendationBatchView visible = batch == null ? null : new TaskView.RecommendationBatchView(batchId,
                 batch.getCandidates().stream().filter(c -> c.getShopId() != null)
                         .map(c -> new TaskView.ShopView(c.getShopId(), c.getShopName())).toList());
+        List<TaskView.RecommendationBatchView> history = new ArrayList<>();
+        for (int i=0; i<task.getRecommendationBatches().size(); i++) {
+            RecommendationBatch historical = task.getRecommendationBatches().get(i);
+            String id = historical.getBatchId();
+            if (id == null || id.isBlank()) id = "batch-" + (i+1);
+            history.add(new TaskView.RecommendationBatchView(id, historical.getCandidates().stream()
+                    .filter(c -> c.getShopId()!=null).map(c -> new TaskView.ShopView(c.getShopId(),c.getShopName())).toList()));
+        }
         return new TaskView(task.getTaskId(), index, "DINING",
                 task.getV2Criteria().location() == null ? null : task.getV2Criteria().location().city(), visible,
-                task.getV2SelectedShopId());
+                task.getV2SelectedShopId(), history);
     }
 
     private DecisionTaskState findTask(ConversationWorkingMemory memory, String taskId) {

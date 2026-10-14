@@ -379,6 +379,8 @@ public class SemanticInterpreter {
 
     private EntityReference reference(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) throw new IllegalArgumentException("request target is required");
+        if (node.has("ordinal") && node.hasNonNull("name"))
+            return new EntityReference.NamedOrdinalRef(node.path("name").asText(), node.path("ordinal").asInt());
         if (node.has("ordinal")) return new EntityReference.OrdinalRef(node.path("ordinal").asInt());
         if (node.path("lastVisible").asBoolean(false)) return new EntityReference.LastVisibleRef();
         if (node.path("focused").asBoolean(false)) return new EntityReference.FocusedEntityRef();
