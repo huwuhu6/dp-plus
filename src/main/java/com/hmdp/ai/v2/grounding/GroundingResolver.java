@@ -73,7 +73,7 @@ public final class GroundingResolver {
             List<GroundedReference.ShopIdentity> matches = new ArrayList<>();
             for (TaskView.RecommendationBatchView batch : task.recommendationBatches()) for (int i = 0; i < batch.candidates().size(); i++) {
                 TaskView.ShopView candidate = batch.candidates().get(i);
-                if (candidate.name() != null && candidate.name().contains(named.name()))
+                if (candidate.matchesDescription(named.name()))
                     matches.add(new GroundedReference.ShopIdentity(candidate.shopId(), batch.batchId(), i + 1));
             }
             if (matches.stream().map(GroundedReference.ShopIdentity::shopId).distinct().count() == 1) return matches.getLast();
@@ -98,7 +98,8 @@ public final class GroundingResolver {
         List<GroundedReference.ShopIdentity> mentioned = new ArrayList<>();
         for (var batch : batches) for (int i=0; i<batch.candidates().size(); i++) {
             var shop=batch.candidates().get(i);
-            if (shop.name()!=null && !shop.name().isBlank() && text.contains(shop.name()))
+            if (shop.name()!=null && !shop.name().isBlank() && text.contains(shop.name())
+                    || ref instanceof EntityReference.NamedEntityRef named && text.contains(named.name()) && shop.matchesDescription(named.name()))
                 mentioned.add(new GroundedReference.ShopIdentity(shop.shopId(),batch.batchId(),i+1));
         }
         long identities=mentioned.stream().map(GroundedReference.ShopIdentity::shopId).distinct().count();
@@ -109,7 +110,7 @@ public final class GroundingResolver {
         if (identities==1) {
             var match=mentioned.getLast();
             if (ref instanceof EntityReference.NamedEntityRef named && batches.stream().flatMap(b->b.candidates().stream())
-                    .noneMatch(s->s.shopId()==match.shopId() && s.name()!=null && s.name().contains(named.name())))
+                    .noneMatch(s->s.shopId()==match.shopId() && s.matchesDescription(named.name())))
                 throw new ReferenceIssue(Ambiguity.Kind.AMBIGUOUS_REFERENCE,"model name conflicts with user-named merchant");
             if (statedOrdinal>0) {
                 var batch=historical ? batches.isEmpty()?null:batches.getLast() : task.currentVisibleBatch();

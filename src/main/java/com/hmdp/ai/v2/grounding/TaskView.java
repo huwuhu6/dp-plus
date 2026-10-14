@@ -15,5 +15,9 @@ public record TaskView(String taskId, int creationOrder, String goalCategory, St
     public record RecommendationBatchView(String batchId, List<ShopView> candidates) {
         public RecommendationBatchView { candidates = candidates == null ? List.of() : List.copyOf(candidates); }
     }
-    public record ShopView(long shopId, String name) { }
+    public record ShopView(long shopId, String name,String cuisine) {
+        public ShopView(long shopId,String name){this(shopId,name,null);}
+        public boolean matchesDescription(String literal){return name!=null && name.contains(literal)
+                || cuisine!=null && java.util.Arrays.stream(cuisine.split("[,，、]")).anyMatch(c->c.trim().equals(literal));}
+    }
 }

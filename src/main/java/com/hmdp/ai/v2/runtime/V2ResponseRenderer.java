@@ -22,6 +22,15 @@ public class V2ResponseRenderer {
         else if (spec.clarification() != null) response.setAnswer(spec.clarification());
         else if (spec.completionMessage() != null) response.setAnswer(spec.completionMessage());
         else response.setAnswer(spec.partialError() == null ? "暂时没有满足条件的结果。" : spec.partialError());
+        // 本轮实际执行效果才授权选店确认；历史 selected 状态、未知事实和被 guard 跳过的 SELECT 不授权。
+        if(!spec.recommendations().isEmpty() && spec.factAnswer()!=null)
+            response.setAnswer(response.getAnswer()+" "+spec.factAnswer());
+        if((spec.factAnswer()!=null || !spec.recommendations().isEmpty()) && spec.selectedShopId()!=null)
+            response.setAnswer(response.getAnswer()+" 按你的意愿，"+(spec.selectedShopName()==null?"已选定该商户。":"已为你选定："+spec.selectedShopName()+"。"));
+        if(spec.generalAnswer()!=null && (spec.factAnswer()!=null || !spec.recommendations().isEmpty() || spec.selectedShopId()!=null))
+            response.setAnswer(response.getAnswer()+" "+spec.generalAnswer());
+        if(spec.partialError()!=null && (spec.factAnswer()!=null || !spec.recommendations().isEmpty() || spec.selectedShopId()!=null || spec.generalAnswer()!=null))
+            response.setAnswer(response.getAnswer()+" "+spec.partialError());
         decision.setAnswer(response.getAnswer()); response.setDecision(decision);
         return response;
     }

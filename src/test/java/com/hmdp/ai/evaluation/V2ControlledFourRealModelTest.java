@@ -33,9 +33,11 @@ class V2ControlledFourRealModelTest {
         Path dir=Path.of("target/eval-pilot",run);Files.createDirectories(dir);
         Files.writeString(dir.resolve("STARTED.json"),"{\"startedAt\":\""+java.time.Instant.now()+"\"}",StandardOpenOption.CREATE_NEW);
         var originals=V2ControlledPilotTest.messages();var plans=new ArrayList<Plan>();
+        List<String> selected=List.of(System.getProperty("v2.controlledFour.scenarios","S02,S06,C03,C23").split(","));
+        assertTrue(!selected.isEmpty() && selected.stream().distinct().count()==selected.size() && ControlledFourFixtures.IDS.containsAll(selected));
         String sha=git("rev-parse","HEAD"),spec=Files.readString(Path.of("doc/eval/V2自然语言多轮评测-业务验收规范-v1.md"));
         boolean dirty=!git("status","--porcelain").isBlank();
-        for(String id:ControlledFourFixtures.IDS){
+        for(String id:selected){
             Matcher section=Pattern.compile("(?ms)^### "+id+"｜(.*?)(?=^### [SC]\\d{2}｜|^## 第三)").matcher(spec);assertTrue(section.find());
             Matcher items=Pattern.compile("(?m)^- ([MF]\\d+)\\b").matcher(section.group(1));List<ItemPlan> planned=new ArrayList<>();
             while(items.find())planned.add(new ItemPlan(id+"-"+items.group(1),true,true,true));
@@ -98,7 +100,7 @@ class V2ControlledFourRealModelTest {
                 save(dir.resolve(id+"-result.json"),result);write(json,dir.resolve("report.json"),report(plans,results));
             }
             save(dir.resolve("COMPLETED.json"),Map.of("scenarioCount",results.size(),"completedAt",java.time.Instant.now().toString()));
-            assertEquals(4,results.size());assertEquals(4,report(plans,results).summary().ready());
+            assertEquals(selected.size(),results.size());assertEquals(selected.size(),report(plans,results).summary().ready());
         }finally{ReflectionTestUtils.setField(interpreter,"aiClient",client);}
     }
     static String git(String... args)throws Exception{var cmd=new ArrayList<String>();cmd.add("git");cmd.addAll(List.of(args));var p=new ProcessBuilder(cmd).start();String out=new String(p.getInputStream().readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);assertEquals(0,p.waitFor());return out.trim();}

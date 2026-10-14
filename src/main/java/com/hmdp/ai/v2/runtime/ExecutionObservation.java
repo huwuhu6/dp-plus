@@ -9,12 +9,17 @@ import java.util.List;
 public record ExecutionObservation(String requestId, Status status, List<Long> candidateShopIds,
                                    EvidenceBundle evidence, List<ExecutionAction.DomainEffect> effects,
                                    String generalAnswer, String detail, ObservationValue value,
-                                   List<DecisionRecommendation> recommendations) {
+                                   List<DecisionRecommendation> recommendations,MerchantFactObservation merchantFact) {
     public enum Status { SUCCESS, EMPTY, FAILURE, TIMEOUT, CANCELLED, SKIPPED, UNSUPPORTED }
     public ExecutionObservation {
         candidateShopIds = candidateShopIds == null ? List.of() : List.copyOf(candidateShopIds);
         effects = effects == null ? List.of() : List.copyOf(effects);
         recommendations = recommendations == null ? List.of() : List.copyOf(recommendations);
+    }
+    public ExecutionObservation(String requestId,Status status,List<Long> candidateShopIds,EvidenceBundle evidence,
+                                List<ExecutionAction.DomainEffect> effects,String generalAnswer,String detail,ObservationValue value,
+                                List<DecisionRecommendation> recommendations){
+        this(requestId,status,candidateShopIds,evidence,effects,generalAnswer,detail,value,recommendations,null);
     }
     public ExecutionObservation(String requestId, Status status, List<Long> candidateShopIds,
                                 EvidenceBundle evidence, List<ExecutionAction.DomainEffect> effects,

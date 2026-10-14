@@ -78,18 +78,19 @@ public class V2ChatOrchestrator {
     private PreOutcome prePhase(ChatMessageRequest request, String chatId, TurnSemantics semantics) {
         for (int attempt = 0; attempt < 2; attempt++) {
             VersionedMemory loaded = load(chatId);
-            PreBuild built = preparePre(request, loaded.memory(), semantics);
+            TurnSemantics effective=new MerchantPriceContextResolver().resolve(request.getMessage(),semantics,taskViews(loaded.memory()));
+            PreBuild built = preparePre(request, loaded.memory(), effective);
             if (built.response() != null && !built.persistBeforeResponse()) return new PreOutcome(null, built.response());
             try {
                 AiWorkingMemory committed = versions.append(chatId, userId(), loaded.version(), loaded.memory(),
-                        ConversationEventType.STATE_REDUCED, preEvent(semantics),
+                        ConversationEventType.STATE_REDUCED, preEvent(effective),
                         Map.of("taskId", built.taskId()));
                 if (built.response() != null) return new PreOutcome(null, built.response());
                 if (built.abandon()) return new PreOutcome(null, renderer.render(chatId,
                         ResponseSpec.completed("当前推荐任务已结束。")));
                 PlanningSnapshot snapshot = snapshot(built.task(), loaded.memory(), committed.getVersion());
                 return new PreOutcome(new PreparedTurn(loaded.memory(), committed.getVersion(), built.taskId(),
-                        loaded.memory().getActiveTaskId(), semantics, built.grounded(), snapshot), null);
+                        loaded.memory().getActiveTaskId(), effective, built.grounded(), snapshot), null);
             } catch (VersionConflictException conflict) {
                 if (attempt == 1) return new PreOutcome(null, retryResponse(chatId));
             }
@@ -290,8 +291,8 @@ public class V2ChatOrchestrator {
         for (ExecutionObservation observation : execution.observations()) {
             recommendations.addAll(observation.recommendations());
             if (observation.generalAnswer() != null) {
-                if (observation.requestId().startsWith("general")) general = observation.generalAnswer();
-                else fact = observation.generalAnswer();
+                if (observation.requestId().startsWith("general")) general = general==null?observation.generalAnswer():general+"\n"+observation.generalAnswer();
+                else fact = fact==null?observation.generalAnswer():fact+"\n"+observation.generalAnswer();
             }
             if (observation.status() == ExecutionObservation.Status.FAILURE
                     || observation.status() == ExecutionObservation.Status.TIMEOUT
@@ -306,6 +307,16 @@ public class V2ChatOrchestrator {
         String selectedName = selectedId == null ? null : candidateName(task, selectedId);
         ResponseSpec spec = new ResponseSpec(recommendations, fact, selectedId, selectedName, general, null, error, unsupported);
         ChatMessageResponse response = renderer.render(chatId, spec);
+        if(recommendations.isEmpty() && task.getV2Criteria().dietaryRestrictions()!=null
+                && task.getV2Criteria().dietaryRestrictions().present()
+                && execution.observations().stream().anyMatch(o->o.merchantFact()!=null)){
+            var diet=task.getV2Criteria().dietaryRestrictions();
+            String answer=response.getAnswer()+" 已保留本次用餐的饮食限制"
+                    +(diet.avoidedIngredients().isEmpty()?"":"：避开"+diet.avoidedIngredients())
+                    +(diet.spiceRequirement()==null?"":"，"+diet.spiceRequirement())
+                    +"；该商户食材与辣度尚未核实，不能仅凭店名判断餐食适合。";
+            response.setAnswer(answer);response.getDecision().setAnswer(answer);
+        }
         if (!recommendations.isEmpty()) {
             List<String> unverified=new ArrayList<>();
             if (task.getV2Criteria().partySize()!=null && task.getV2Criteria().partySize()>1)
@@ -367,14 +378,14 @@ public class V2ChatOrchestrator {
         if (batch != null && (batchId == null || batchId.isBlank())) batchId = "batch-" + task.getRecommendationBatches().size();
         TaskView.RecommendationBatchView visible = batch == null ? null : new TaskView.RecommendationBatchView(batchId,
                 batch.getCandidates().stream().filter(c -> c.getShopId() != null)
-                        .map(c -> new TaskView.ShopView(c.getShopId(), c.getShopName())).toList());
+                        .map(c -> new TaskView.ShopView(c.getShopId(), c.getShopName(),c.getCuisine())).toList());
         List<TaskView.RecommendationBatchView> history = new ArrayList<>();
         for (int i=0; i<task.getRecommendationBatches().size(); i++) {
             RecommendationBatch historical = task.getRecommendationBatches().get(i);
             String id = historical.getBatchId();
             if (id == null || id.isBlank()) id = "batch-" + (i+1);
             history.add(new TaskView.RecommendationBatchView(id, historical.getCandidates().stream()
-                    .filter(c -> c.getShopId()!=null).map(c -> new TaskView.ShopView(c.getShopId(),c.getShopName())).toList()));
+                    .filter(c -> c.getShopId()!=null).map(c -> new TaskView.ShopView(c.getShopId(),c.getShopName(),c.getCuisine())).toList()));
         }
         return new TaskView(task.getTaskId(), index, "DINING",
                 task.getV2Criteria().location() == null ? null : task.getV2Criteria().location().city(), visible,

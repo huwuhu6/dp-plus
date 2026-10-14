@@ -29,7 +29,7 @@ class ControlledFourFixturesTest {
             ObjectMapper json=new ObjectMapper();var client=mock(OpenAiCompatibleClient.class);var interpreter=new SemanticInterpreter();
             ReflectionTestUtils.setField(interpreter,"objectMapper",json);ReflectionTestUtils.setField(interpreter,"aiClient",client);
             String args="""
-                {"criteria":{"spiceRequirement":"不能吃辣"},"requests":[{"requestId":"price","type":"FACT","fact":"DETAIL","target":{"name":"椰子鸡"}}]}
+                {"criteria":{"spiceRequirement":"不能吃辣"},"requests":[{"requestId":"price","type":"FACT","fact":"PRICE","target":{"name":"椰子鸡"}}]}
                 """;
             when(client.chatCompletion(anyList(),anyList(),anyMap(),anyString())).thenReturn(json.valueToTree(Map.of("choices",List.of(Map.of("message",Map.of("tool_calls",List.of(Map.of("function",Map.of("arguments",args)))))))));
             var h=new V2PilotHarness(spy(interpreter),"test-price-"+known);var reads=ControlledFourFixtures.configure(h,"S02",known,null);

@@ -67,7 +67,7 @@ public final class ExecutionPlanCompiler {
     private ExecutionAction action(GroundedRequest grounded, PlanningSnapshot snapshot) {
         UserRequest request = grounded.request();
         return switch (request) {
-            case UserRequest.FactQueryRequest fact -> new ExecutionAction.ToolAction(fact.requestId(), shop(grounded), fact.fact());
+            case UserRequest.FactQueryRequest fact -> new ExecutionAction.ToolAction(fact.requestId(), shop(grounded), fact.fact(),fact.question());
             case UserRequest.AlternativesRequest alternatives -> search(alternatives.requestId(), ExecutionAction.SearchKind.ALTERNATIVES, alternatives.count(), grounded, snapshot);
             case UserRequest.RecommendationRequest recommendation -> search(recommendation.requestId(), ExecutionAction.SearchKind.RECOMMENDATIONS, 0, grounded, snapshot);
             case UserRequest.SimilarRequest similar -> search(similar.requestId(), ExecutionAction.SearchKind.SIMILAR, 0, grounded, snapshot);

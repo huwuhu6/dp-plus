@@ -43,7 +43,11 @@ public class V2ActionHandler implements ActionExecutor {
             case EVIDENCE, REVIEW, QUEUE -> "search_shop_evidence";
             default -> "get_shop_detail";
         };
-        AgentToolResult result = toolRegistry.find(name).execute(Map.of("shopId", action.shop().shopId()));
+        Map<String,Object> input=new java.util.LinkedHashMap<>();input.put("shopId",action.shop().shopId());
+        if(action.question()!=null)input.put("attribute",action.question());
+        AgentToolResult result = toolRegistry.find(name).execute(input);
+        if(action.fact()==com.hmdp.ai.v2.semantic.UserRequest.FactType.PRICE || action.fact()==com.hmdp.ai.v2.semantic.UserRequest.FactType.PRODUCT)
+            return merchantFact(action,result);
         if(action.fact()==com.hmdp.ai.v2.semantic.UserRequest.FactType.NON_SPICY_MAIN_MEAL) {
             Object raw=result.getFacts()==null?null:result.getFacts().get("mainMealSpiceEvidence");
             var evidence=raw instanceof com.hmdp.ai.v2.evidence.MainMealSpiceEvidence e && e.admissibleFor(action.shop().shopId())?e:null;
@@ -55,6 +59,26 @@ public class V2ActionHandler implements ActionExecutor {
         }
         return new ExecutionObservation(action.requestId(), ExecutionObservation.Status.SUCCESS, List.of(), null, List.of(),
                 result.getDisplayText(), result.getSummary(), typedValue(action.fact(), result.getFacts()));
+    }
+    private ExecutionObservation merchantFact(ExecutionAction.ToolAction action,AgentToolResult result){
+        Map<String,Object> facts=result.getFacts()==null?Map.of():result.getFacts();long id=action.shop().shopId();
+        Object rawShop=facts.get("shop");var shop=rawShop instanceof com.hmdp.entity.Shop s && s.getId()!=null && s.getId()==id?s:null;
+        String merchant=shop==null?"该店":shop.getName();String answer,source=null;ObservationValue value=null;
+        if(action.fact()==com.hmdp.ai.v2.semantic.UserRequest.FactType.PRICE){
+            if(shop!=null && shop.getAvgPrice()!=null && shop.getAvgPrice()>0 && facts.get("shopSource") instanceof String s && !s.isBlank()){
+                source=String.valueOf(facts.getOrDefault("fixtureSource",facts.get("shopSource")));
+                value=new ObservationValue.NumericValue(BigDecimal.valueOf(shop.getAvgPrice()));
+                answer=merchant+"：人均 "+shop.getAvgPrice()+" 元（来源："+source+"）；这是人均参考价，不是两人总价或具体套餐报价。";
+            }else answer="无法确认"+merchant+"的具体商户价格，现有资料没有可靠人均或套餐价格。";
+        }else{
+            Object raw=facts.get("productAttributeEvidence");
+            var evidence=raw instanceof com.hmdp.ai.v2.evidence.ProductAttributeEvidence e && e.supports(id,action.question())?e:null;
+            if(evidence!=null){source=evidence.source();value=new ObservationValue.BooleanValue(evidence.available());
+                answer=merchant+(evidence.available()?"有":"已确认没有")+"符合“"+action.question()+"”的商品（来源："+source+"）。";
+            }else answer="无法确认"+merchant+"是否提供符合“"+action.question()+"”的商品；暂无可核验的菜单资料，未查到记录不等于没有。";
+        }
+        return new ExecutionObservation(action.requestId(),ExecutionObservation.Status.SUCCESS,List.of(),null,List.of(),answer,null,value,List.of(),
+                new MerchantFactObservation(id,action.fact(),action.question(),value==null?MerchantFactObservation.State.UNKNOWN:MerchantFactObservation.State.KNOWN,source));
     }
     private ObservationValue typedValue(com.hmdp.ai.v2.semantic.UserRequest.FactType fact, Map<String, Object> facts) {
         if (facts == null) return null;

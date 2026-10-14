@@ -17,6 +17,7 @@ public class GetShopDetailTool extends BaseAgentTool {
     @Override public Map<String, Object> parameterSchema() {
         Map<String, Object> properties = new LinkedHashMap<String, Object>();
         properties.put("shopId", property("integer", "商户 ID；用户说这家时可以省略，系统会使用当前聚焦商户。"));
+        properties.put("attribute",property("string","用户原文中的商品属性。基础资料不提供菜单证明，V2 事实处理器须保留未知状态。"));
         return objectSchema(properties);
     }
     @Override public AgentToolResult execute(Map<String, Object> input) {
@@ -32,6 +33,7 @@ public class GetShopDetailTool extends BaseAgentTool {
         delta.setFocusedShopId(shop.getId()); delta.setFocusedShopName(shop.getName());
         result.setStateDelta(delta);
         result.getFacts().put("shop", shop);
+        result.getFacts().put("shopSource", "SHOP_REPOSITORY");
         return result;
     }
 }

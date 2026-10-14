@@ -209,6 +209,7 @@ public class SemanticInterpreter {
             JsonNode normalized=removeDuplicatedSpicePreference(userTurn,effective);removedDuplicate=normalized!=effective;effective=normalized;
             TurnSemantics semantics=normalizeLocationProvenance(userTurn,normalizeDeterministicBudget(userTurn,parse(effective)));
             validateDietary(userTurn,semantics);validateConditionalMeal(userTurn,semantics);
+            validateMerchantQueries(userTurn,semantics);
             if (requiresCuisineCoverage(userTurn,semantics)) throw violation(Violation.CUISINE_COVERAGE_REQUIRED);
             validateDiningDetails(userTurn,semantics);
             if (requiresHardBudget(userTurn) && !hasHardBudget(semantics)) throw violation(Violation.HARD_BUDGET_REQUIRED);
@@ -224,6 +225,22 @@ public class SemanticInterpreter {
             recordEvaluationAttempt(failed,call.arguments(),violationOf(failure).name());
             if(removedDuplicate)evaluationAttempts.get().getLast().put("normalizations",List.of("criteria.spiceRequirement: duplicate of source-backed PREFER removed; preference unchanged"));
             traceRepair(effective,repair,null,failure.getMessage());throw failure;
+        }
+    }
+    private void validateMerchantQueries(String user,TurnSemantics semantics){
+        Matcher attribute=Pattern.compile("(?:有没有|是否提供|卖不卖|有)([^，。？?]{1,24}?)(?:吗|[？?]|$)").matcher(user);
+        List<String> asked=new ArrayList<>();while(attribute.find())asked.add(attribute.group(1).replaceFirst("(?:的|款)$",""));
+        boolean hasPrice=semantics.requests().stream().anyMatch(r->r instanceof UserRequest.FactQueryRequest f && f.fact()==UserRequest.FactType.PRICE);
+        boolean hasProduct=semantics.requests().stream().anyMatch(r->r instanceof UserRequest.FactQueryRequest f && f.fact()==UserRequest.FactType.PRODUCT);
+        for(UserRequest request:semantics.requests())if(request instanceof UserRequest.FactQueryRequest fact){
+            if(fact.fact()==UserRequest.FactType.PRODUCT && (fact.question()==null || !user.contains(fact.question())
+                    || !asked.isEmpty() && asked.stream().noneMatch(fact.question()::contains)))
+                throw violation(Violation.MERCHANT_FACT_REQUIRED);
+            if(fact.fact()==UserRequest.FactType.PRICE && !user.matches("(?s).*(?:多少钱|价格|价钱|费用|人均).*"))
+                throw violation(Violation.MERCHANT_FACT_REQUIRED);
+            if(fact.fact()==UserRequest.FactType.DETAIL && (!hasPrice && user.matches("(?s).*(?:多少钱|价格|价钱).*" )
+                    || !hasProduct && user.matches("(?s).*(?:有没有|有[^，。？?]{1,20}吗|是否提供|卖不卖).*")))
+                throw violation(Violation.MERCHANT_FACT_REQUIRED);
         }
     }
     private void traceRepair(JsonNode effective,SemanticRepair repair,TurnSemantics semantics,String detail) {
@@ -270,6 +287,7 @@ public class SemanticInterpreter {
             return dimensions;
         }
         return switch(failure) {
+            case MERCHANT_FACT_REQUIRED -> List.of("requests");
             case DIETARY_COVERAGE_REQUIRED -> List.of("criteria.avoidedIngredients","criteria.spiceRequirement");
             case CUISINE_COVERAGE_REQUIRED -> List.of("criteria.cuisine","criteria.cuisineAnyOf","criteria.excludedCuisines");
             case HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED -> List.of("criteria.budgetHard","criteria.budgetSoft","cleared");
@@ -337,7 +355,9 @@ public class SemanticInterpreter {
                 for(JsonNode item:value) {
                     String type=item.path("type").asText();
                     if (type.equals("SELECT") && !user.matches("(?s).*(?:就去|选定|选这|就这家|决定去).*" )) return false;
-                    if (type.equals("FACT") && !user.matches("(?s).*(?:地址|营业|详情|几点|招牌|评价|插座|包间|排队|优惠|距离|辣|无骨|食材).*" )) return false;
+                    if (type.equals("FACT") && !user.matches("(?s).*(?:地址|营业|详情|几点|招牌|评价|插座|包间|排队|优惠|距离|辣|无骨|食材|多少钱|价格|价钱|费用|人均|有没有|有[^，。？?]{1,20}吗|是否提供|卖不卖).*" )) return false;
+                    if(type.equals("FACT") && item.path("fact").asText().equals("PRODUCT")
+                            && (item.path("question").asText().isBlank() || !user.contains(item.path("question").asText())))return false;
                     if (Set.of("SELECT","FACT","SIMILAR").contains(type) && !referenceSource(user,item.path("target"))) return false;
                     if (type.equals("RECOMMENDATION") && !user.matches("(?s).*(?:找|吃|推荐|餐厅|聚餐|有没有|改|换).*" )) return false;
                     if (type.equals("ALTERNATIVES") && !user.matches("(?s).*(?:换|其他|别的|再来).*" )) return false;
@@ -637,7 +657,8 @@ public class SemanticInterpreter {
                 + "Every request needs requestId, type, and topic; topic must be non-empty for GENERAL and empty for other request types. "
                 + "For RESTORE, emit a task selector only when the user explicitly specifies earliest, active, or a uniquely identifying context. If the target task is not uniquely specified, emit RESTORE with empty references so runtime asks for clarification; never default to EARLIEST. "
                 + "Every request must include target and fact: use a valid reference for FACT, SELECT, SIMILAR, and COMPARE; use {} and fact DETAIL for other types. For EXPLORE with unboundedContinuation=true, target may be empty because research is not scoped to a visible entity. For bounded/entity-scoped EXPLORE, provide a valid target. A reference with lastVisible:true means the final candidate in the current visible batch; never convert it to a guessed ordinal. "
-                + "For FACT, fact must describe the requested fact using its enum. "
+                + "For FACT, fact must describe the requested fact using its enum. Use PRICE for merchant price questions, not GENERAL or DETAIL. Merchant references may be a literal name, cuisine description, or explicit ordinal; grounding will validate them against actual recommendation history, never invent an ordinal. GENERAL is only general knowledge, e.g. history or typical market prices, not a named restaurant's price. "
+                + "For a merchant's product/menu attribute question use fact PRODUCT and question containing the literal queried attribute copied from the user message. Never discard the attribute into DETAIL or generic information; identifying a merchant does not answer its product question. Omit question for other fact types. Do not assert product availability or extract merchant facts yourself. "
                 + "Every feedback item must include target, kind, aspect, batch, and polarity. For a single entity use its reference, batch false, and polarity NEGATIVE as an ignored placeholder; for a batch use target {}, kind REJECT as an ignored placeholder, batch true, and the requested polarity. "
                 + "Examples: ‘找附近的餐厅’ -> CONTINUE/NONE plus requests [{requestId: r1, type: RECOMMENDATION, topic: '', target: {}, fact: DETAIL}]; runtime creates a task only when no active task exists. ‘新开一个任务找日料’ -> START_NEW/EXPLICIT_NEW_TASK. "
                 + "‘第一家几点营业？’ -> CONTINUE/NONE plus requests [{requestId: r1, type: FACT, topic: '', target: {ordinal: 1}, fact: DETAIL}]; "
@@ -768,7 +789,7 @@ public class SemanticInterpreter {
                 case "RECOMMENDATION" -> result.add(new UserRequest.RecommendationRequest(id));
                 case "ALTERNATIVES" -> result.add(new UserRequest.AlternativesRequest(id, item.path("count").asInt(2)));
                 case "FACT" -> result.add(new UserRequest.FactQueryRequest(id, reference(item.path("target")),
-                        enumValue(UserRequest.FactType.class, requiredText(item, "fact"))));
+                        enumValue(UserRequest.FactType.class, requiredText(item, "fact")),text(item,"question")));
                 case "COMPARE" -> result.add(new UserRequest.CompareRequest(id, references(item.path("targets")),
                         factTypes(item.path("dimensions"))));
                 case "SELECT" -> result.add(new UserRequest.SelectRequest(id, reference(item.path("target"))));
@@ -809,6 +830,7 @@ public class SemanticInterpreter {
     private boolean emptyReference(JsonNode node) { return node == null || node.isMissingNode() || node.isNull() || (node.isObject() && node.isEmpty()); }
     private String repairInstruction(Violation violation) { return switch (violation == null ? Violation.NONE : violation) {
         case NONE -> "";
+        case MERCHANT_FACT_REQUIRED -> " Preserve the actual merchant fact requested: PRICE for price; PRODUCT plus literal question for product attributes. DETAIL cannot replace these queries. Do not invent attributes or change the merchant reference; GENERAL remains only for general knowledge.";
         case HARD_BUDGET_REQUIRED -> " Your previous output violated HARD_BUDGET_REQUIRED: the user stated an explicit budget cap or replacement; output criteria.budgetHard.";
         case BUDGET_CLEAR_REQUIRED -> " Your previous output violated BUDGET_CLEAR_REQUIRED: the user removed the budget constraint; output cleared:[BUDGET] and no budgetSoft/budgetHard.";
         case CONDITIONAL_FALLBACK_REQUIRED -> " Your previous output violated CONDITIONAL_FALLBACK_REQUIRED: emit a conditional fallback with non-empty fallback criteria or cleared fields.";
@@ -817,7 +839,7 @@ public class SemanticInterpreter {
         case DINING_DETAILS_REQUIRED -> " Your previous output omitted or invented explicit dining conditions. Populate criteria.arrivalTime using the literal user time, partySize from the stated number of diners, and preferences for explicit ambience/occasion requests. Preserve the cuisine alternatives, task directive and old-entity feedback. Do not invent an exact date/hour or number.";
         case GENERIC_CONTRACT -> " Your previous output violated the semantic contract. Return a complete function call and obey enums and required fields exactly.";
     }; }
-    enum Violation { NONE, HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED, CONDITIONAL_FALLBACK_REQUIRED, CUISINE_COVERAGE_REQUIRED, DINING_DETAILS_REQUIRED, DIETARY_COVERAGE_REQUIRED, GENERIC_CONTRACT }
+    enum Violation { NONE, HARD_BUDGET_REQUIRED, BUDGET_CLEAR_REQUIRED, CONDITIONAL_FALLBACK_REQUIRED, CUISINE_COVERAGE_REQUIRED, DINING_DETAILS_REQUIRED, DIETARY_COVERAGE_REQUIRED, MERCHANT_FACT_REQUIRED, GENERIC_CONTRACT }
     private static final class SemanticContractViolation extends IllegalArgumentException { private final Violation code; private SemanticContractViolation(Violation code) { super(code.name()); this.code = code; } private Violation code() { return code; } }
     private ObservationPredicate predicate(JsonNode node) {
         node.fieldNames().forEachRemaining(field->{if(!Set.of("type","expected","operator").contains(field))throw new IllegalArgumentException("unsupported predicate field");});
@@ -874,6 +896,7 @@ public class SemanticInterpreter {
                 "targets", Map.of("type", "array", "items", target),
                 "dimensions", Map.of("type", "array", "items", enumString(UserRequest.FactType.values())),
                 "topic", Map.of("type", "string", "description", "Non-empty when type is GENERAL; empty string otherwise"),
+                "question",Map.of("type","string","description","For FACT PRODUCT only: literal queried product attribute copied from current user message; required for PRODUCT. Merchant identity is target, not this field."),
                 "unboundedContinuation", Map.of("type", "boolean")), "requestId", "type", "topic", "target", "fact");
         Map<String, Object> relativePreference = objectSchema(Map.of(
                 "dimension", enumString(DiningCriteria.PreferenceDimension.values()),

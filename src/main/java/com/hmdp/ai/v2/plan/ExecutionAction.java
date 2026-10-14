@@ -7,7 +7,9 @@ import java.util.List;
 public sealed interface ExecutionAction permits ExecutionAction.ToolAction, ExecutionAction.SearchAction,
         ExecutionAction.CompareAction, ExecutionAction.GeneralAnswerAction, ExecutionAction.EmitDomainEffectAction {
     String requestId();
-    record ToolAction(String requestId, GroundedReference.ShopIdentity shop, UserRequest.FactType fact) implements ExecutionAction { }
+    record ToolAction(String requestId, GroundedReference.ShopIdentity shop, UserRequest.FactType fact, String question) implements ExecutionAction {
+        public ToolAction(String requestId,GroundedReference.ShopIdentity shop,UserRequest.FactType fact){this(requestId,shop,fact,null);}
+    }
     record SearchAction(String requestId, SearchSpec spec) implements ExecutionAction { }
     record CompareAction(String requestId, List<GroundedReference.ShopIdentity> shops, List<UserRequest.FactType> dimensions) implements ExecutionAction { public CompareAction { shops = List.copyOf(shops); dimensions = List.copyOf(dimensions); } }
     /** Open-domain answer is explicitly labelled general knowledge and cannot masquerade as merchant evidence. */
