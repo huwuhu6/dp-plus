@@ -86,6 +86,20 @@ class V2LocationResolverTest {
                 resolver.resolve(criteria(new DiningCriteria.LocationCriteria(null, "仓山区", null), null), null, null));
     }
 
+    @Test
+    void exactPoiIdentityWinsOverRelatedBuildingsButDuplicateIdentityStillClarifies() {
+        var provider=mock(LocationResolutionProvider.class);when(provider.isAvailable()).thenReturn(true);
+        var resolver=new V2LocationResolver(provider);
+        var criteria=criteria(new DiningCriteria.LocationCriteria("福州市",null,"某大学旗山校区"),null);
+        var exact=candidate("campus","某大学（旗山校区）","福州市");
+        when(provider.resolve(any(LocationResolutionRequest.class))).thenReturn(List.of(candidate("building","某大学旗山校区学院","福州市"),exact));
+        assertEquals("campus",assertInstanceOf(V2LocationResolver.Resolution.Resolved.class,resolver.resolve(criteria,null,null)).anchor().poiId());
+        when(provider.resolve(any(LocationResolutionRequest.class))).thenReturn(List.of(exact,candidate("other","某大学(旗山校区)","福州市")));
+        assertInstanceOf(V2LocationResolver.Resolution.NeedsClarification.class,resolver.resolve(criteria,null,null));
+        when(provider.resolve(any(LocationResolutionRequest.class))).thenReturn(List.of(candidate("wrongCity","某大学旗山校区","厦门市"),candidate("building","某大学旗山校区学院","福州市")));
+        assertInstanceOf(V2LocationResolver.Resolution.NeedsClarification.class,resolver.resolve(criteria,null,null));
+    }
+
     private DiningCriteria criteria(DiningCriteria.LocationCriteria location, DiningCriteria.DistanceCriteria distance) {
         return new DiningCriteria(location, null, null, distance, null, DiningCriteria.SemanticPreferences.empty());
     }

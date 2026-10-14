@@ -60,6 +60,12 @@ public class V2LocationResolver {
             List<ResolvedLocationCandidate> candidates = locations.resolve(new LocationResolutionRequest(poi, context, "POI"));
             if (candidates == null || candidates.isEmpty())
                 return new Resolution.NeedsClarification("没有找到“" + poi + "”对应的地点，请补充城市或更明确的名称。");
+            // 文本搜索会同时返回主体及其院系/楼宇；唯一的完整名称匹配不是模糊候选猜测。
+            // 只忽略排版括号与空白，不能把不同分校、建筑后缀或同名异地实体归并。
+            String exactName=poiIdentityName(poi);
+            List<ResolvedLocationCandidate> exact=candidates.stream().filter(c->exactName.equals(poiIdentityName(c.getCanonicalName()))
+                    && (!hasText(requested.city()) || cityIdentity(requested.city()).equals(cityIdentity(c.getCity())))).toList();
+            if(exact.size()==1)candidates=exact;
             if (candidates.size() != 1)
                 return new Resolution.NeedsClarification("“" + poi + "”对应多个地点，请补充城市、区县或完整地点名。");
             ResolvedLocationCandidate candidate = candidates.getFirst();
@@ -124,6 +130,8 @@ public class V2LocationResolver {
     }
     private boolean validCoordinates(SearchAnchor anchor) { return anchor != null && anchor.latitude() != null && anchor.longitude() != null
             && Double.isFinite(anchor.latitude()) && Double.isFinite(anchor.longitude()) && Math.abs(anchor.latitude())<=90 && Math.abs(anchor.longitude())<=180; }
+    private String poiIdentityName(String value) { return value==null?"":value.replaceAll("[\\s()（）]",""); }
+    private String cityIdentity(String value) { return value==null?"":value.replaceFirst("市$",""); }
     private boolean hasText(String value) { return value != null && !value.isBlank(); }
     private String firstText(String first, String second, String fallback) {
         if (hasText(first)) return first;

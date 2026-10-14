@@ -46,9 +46,11 @@ class V2RealRetrievalDiagnosisTest {
         String run=System.getProperty("v2.pilot.runId","");assertTrue(run.matches("[A-Za-z0-9_-]+"));
         Path dir=Path.of("target/eval-pilot",run);Files.createDirectories(dir);
         Files.writeString(dir.resolve("STARTED.json"),"{}",StandardOpenOption.CREATE_NEW);
+        boolean replay=Boolean.getBoolean("v2.retrievalDiagnosis.replay");
         save(dir,"metadata",Map.of("repositorySha",V2ControlledFourRealModelTest.git("rev-parse","HEAD"),
                 "model",properties.getModel(),"timeoutMs",properties.getTimeoutMs(),"persistence","isolated test sessions; real DB SELECT only",
-                "locationAuthorization","user supplied 福州大学旗山校区附近; real geocoding, not measured device GPS"));
+                "locationAuthorization","user supplied 福州大学旗山校区附近; real geocoding, not measured device GPS",
+                "mode",replay?"archived validated semantics replay; zero new model calls":"real model once"));
         try {
             var rows=shops.selectList(new QueryWrapper<>());
             var p=profiles.selectList(new QueryWrapper<>());
@@ -56,6 +58,7 @@ class V2RealRetrievalDiagnosisTest {
             rows.forEach(s->cities.merge(Objects.toString(s.getCity(),"UNKNOWN"),1L,Long::sum));
             p.forEach(s->cuisines.merge(Objects.toString(s.getCuisine(),"UNKNOWN"),1L,Long::sum));
             save(dir,"inventory",Map.of("shops",rows.size(),"profiles",p.size(),"cities",cities,"profileCuisines",cuisines,
+                    "sampleShopNames",rows.stream().limit(8).map(Shop::getName).toList(),"provenance","existing DB records; real-world freshness/authenticity not independently verified",
                     "shopsWithoutProfile",rows.stream().filter(s->p.stream().noneMatch(x->Objects.equals(x.getShopId(),s.getId()))).count(),
                     "shopsWithoutCoordinates",rows.stream().filter(s->s.getX()==null||s.getY()==null).count()));
         } catch(RuntimeException e) {
@@ -72,9 +75,12 @@ class V2RealRetrievalDiagnosisTest {
             var candidates=locations.resolve(new LocationResolutionRequest("福州大学旗山校区",context,"POI"));
             save(dir,"authorized-location",Map.of("providerAvailable",locations.isAvailable(),"candidates",candidates,
                     "authorization","user-confirmed named place, not actual device measurement"));
-            if(candidates.size()==1 && candidates.getFirst().getLatitude()!=null && candidates.getFirst().getLongitude()!=null){
-                authorized=new ChatLocationInput();authorized.setLatitude(candidates.getFirst().getLatitude());
-                authorized.setLongitude(candidates.getFirst().getLongitude());authorized.setSource("USER_CONFIRMED_POI_GEOCODE");
+            var resolution=new V2LocationResolver(locations).resolve(new DiningCriteria(new DiningCriteria.LocationCriteria("福州市",null,"福州大学旗山校区"),
+                    null,null,null,null,DiningCriteria.SemanticPreferences.empty()),null,null);
+            save(dir,"authorized-location-resolution",resolution);
+            if(resolution instanceof V2LocationResolver.Resolution.Resolved resolved){
+                authorized=new ChatLocationInput();authorized.setLatitude(resolved.anchor().latitude());
+                authorized.setLongitude(resolved.anchor().longitude());authorized.setSource("USER_CONFIRMED_POI_GEOCODE");
             }
         } catch(RuntimeException e){save(dir,"authorized-location",Map.of("status","DEPENDENCY_BLOCKED","errorType",e.getClass().getName()));}
         Map<String,String> inputs=new LinkedHashMap<>();inputs.put("A","在福州市三坊七巷附近找面馆，人均50元以内。");
@@ -83,9 +89,21 @@ class V2RealRetrievalDiagnosisTest {
             for(var input:inputs.entrySet()) {
                 model.calls.clear();var semantic=spy(interpreter);var h=new V2PilotHarness(semantic,"test-retrieval-"+run+"-"+input.getKey());
                 doAnswer(i->{h.actualSemantic=(TurnSemantics)i.callRealMethod();return h.actualSemantic;}).when(semantic).interpret(anyString());
+                if(replay){
+                    Path source=Path.of("target/eval-pilot",System.getProperty("v2.retrievalDiagnosis.sourceRun"),input.getKey()+".json");
+                    JsonNode attempts=json.readTree(source.toFile()).path("semanticAttempts");JsonNode last=attempts.get(attempts.size()-1);
+                    assertEquals("VALID",last.path("validationResult").asText());
+                    TurnSemantics captured=ReflectionTestUtils.invokeMethod(interpreter,"normalizeLocationProvenance",input.getValue(),
+                            ReflectionTestUtils.invokeMethod(interpreter,"normalizeDeterministicBudget",input.getValue(),interpreter.parse(last.path("effectiveStructuredOutput"))));
+                    assertEquals(last.path("finalSemantics"),json.valueToTree(captured),"replay must exactly preserve previously validated semantics");
+                    doAnswer(i->{h.actualSemantic=captured;return captured;}).when(semantic).interpret(input.getValue());
+                }
                 if(input.getKey().equals("B"))h.deviceLocation=authorized;
                 Object runtime=ReflectionTestUtils.getField(h.chat,"v2ChatOrchestrator");
-                ReflectionTestUtils.setField(runtime,"shopMapper",shops);ReflectionTestUtils.setField(runtime,"locationResolver",new V2LocationResolver(locations));
+                List<Map<String,Object>> geography=new ArrayList<>();var observedLocations=spy(locations);
+                doAnswer(i->{var result=i.callRealMethod();geography.add(Map.of("request",i.getArgument(0),"candidates",result));return result;})
+                        .when(observedLocations).resolve(any(LocationResolutionRequest.class));
+                ReflectionTestUtils.setField(runtime,"shopMapper",shops);ReflectionTestUtils.setField(runtime,"locationResolver",new V2LocationResolver(observedLocations));
                 List<Map<String,Object>> searches=new ArrayList<>();var engine=spy(productionEngine);
                 doAnswer(i->{SearchSpec spec=i.getArgument(0);Map<String,Object> trace=new LinkedHashMap<>();trace.put("searchSpec",spec);searches.add(trace);
                     try {var result=(ShopRetrievalEngine.RetrievalResult)i.callRealMethod();trace.put("result",result);return result;}
@@ -109,6 +127,15 @@ class V2RealRetrievalDiagnosisTest {
                 if(input.getKey().equals("B")&&authorized==null)out.put("requestedDeviceExperiment","DEPENDENCY_BLOCKED: no uniquely resolved authorized coordinates; no invented GPS");
                 try{out.put("evidence",h.turn(input.getValue(),List.of()));out.put("returned",true);}
                 catch(RuntimeException e){out.put("returned",false);out.put("failureType",e.getClass().getName());}
+                out.put("geography",geography);
+                if(replay && !input.getKey().equals("B")){
+                    var cuisine=input.getKey().equals("A")?"面食":"酸菜鱼";
+                    var probe=new SearchSpec(0,"read-only-coverage-probe",ExecutionAction.SearchKind.RECOMMENDATIONS,3,
+                            new DiningCriteria(new DiningCriteria.LocationCriteria("福州市",null,null),new DiningCriteria.CuisineCriteria(cuisine,List.of()),null,null,null,DiningCriteria.SemanticPreferences.empty()),
+                            List.of(),Set.of(),null,new SearchAnchor(null,null,null,null,null,"福州市",null,SearchAnchor.AnchorSource.NAMED_LOCATION));
+                    out.put("coverageProbeScope","separate citywide production query; not original model output or end-to-end success");
+                    out.put("coverageProbe",engine.retrieve(probe));
+                }
                 out.put("searches",searches);out.put("modelCalls",List.copyOf(model.calls));out.put("semanticAttempts",semantic.takeEvaluationAttempts());
                 out.put("commits",h.commits);out.put("events",h.events);save(dir,input.getKey(),out);
             }
