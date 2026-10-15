@@ -2657,3 +2657,12 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - 唯一真实模型实验 `real-first-food-category-20261015-once`，clean SHA为上述ce143598，deepseek-v4-flash-0731、60000ms，原文“福州市三坊七巷附近找面馆，人均50以内”。FIRST遗漏菜系并输出非法spiceRequirement="None"；一次TARGETED_EXTRACTION返回cuisine=面馆及JSON null辣度，来源和完整契约VALID。最终SearchSpec及POST均保留面馆、人均硬上限50；没有借旧任务或Fixture补条件，没有额外模型重跑。
 - 实际地图唯一主体三坊七巷B024F0VEQ4，坐标26.081958/119.296623，来源POI；真实SQL按福建省/福州市/鼓楼区/人均≤50取回4家，菜系过滤0家，默认3km与有界5km均0家，排序/展示0家。结果明确为ZERO_RESULT；没有删除菜系限制、没有候选可执行Verifier，不能把COMPLETED状态或JUnit成功当作推荐业务成功。硬白名单为空，Milvus未调用。FIRST仍有模型生成遗漏，但不再能无声执行无菜系搜索。
 - 本地证据：`target/eval-pilot/fuzhou-food-category-audit-20261015/`为零模型只读审计；唯一真实实验目录含原始FIRST/定向Schema及参数、字段来源、最终语义、SQL/SearchSpec、POI、分段计数、完整回复与POST、详细分类审计及verification-summary.json。完整回归日志 `food-coverage-full.log`，汇总 `food-coverage-full-summary.json`，定向 `food-coverage-directed-final.log`。生成物不进入提交；本轮没有扩大评测DSL或引入新的平台。
+
+### 2026-10-15：V2 当前阶段最终评测与冻结收尾
+
+- 菜系修复安全Fast-forward至本地main，冻结代码 `27c2599de0d101e17df1e94b699782cd6eb30695`；该SHA完整 `mvn -q test` 为530 passed、8 skipped、0 failures/errors。本轮之后只提交文档与一次性运行配置，不修改Production、Prompt、参数、验证器、规范、Main数据或Holdout，不推送。
+- 最终真实模型run `real-v2-stage-closure-20261015-once`：沿用六试点及四场景Fixture，真实PRE/POST建立首轮展示/批次，10/10受控前提就绪。随后10场景共11个原始后续业务轮各执行一次，deepseek-v4-flash-0731，沿用60000ms；14次模型调用/14次传输均返回，包含3次Production自身的有界提取，无runner重跑或挑选。首轮语义、候选、事实与持久化为TEST_ONLY边界，不能宣传成真实自然语言首轮端到端通过率。
+- 按冻结项目逐项审查语义、Grounding、工具对象、前后状态与完整回复：预定分支完整通过S02/S06/S13/C23；S08/C03失败且尚有未验证项；S04/S09/C06/C15未完整验收。就绪10/10、就绪通过4/10、全量完成4/10。目标60项为44满足、3不满足、13未验证；全93项为44满足、3不满足、46未验证，未运行其余6场景的33项未补分。
+- 必须保留的失败：S08 FIRST及提取均正确输出冷面OR寿司，OR别名正则从“冷面或者寿司”后缀匹配“面或者寿司”，错误要求面食，拒绝整轮。C03 FIRST遗漏海鲜/内脏，提取补齐但将“不能吃太辣”改写为“不能太辣”，字面来源校验拒绝。两轮均零提交、内存不变；不算模型不可用，也不因安全失败而算请求完成。本轮遵守止损，不追加规则或Prompt修复。
+- 已取得的关键证据：C06旧店22正反馈与独立新安排原子提交，时间/6人/OR/环境进入实际执行且旧条件不变；C15第一批B22与第二批44/55独立展示，历史详情/招牌菜工具均读取22，当前条件不变；C23同店主餐事实true后实际选择22并同时回复事实和选店。真实南站、楼层、经营属性/菜单、通用详情Fixture及用户界面价格口径等缺口仍按项未验证，不把正常内部状态当完整业务验收。
+- 最终报告 `doc/eval/DineWise-V2-阶段收尾评测.md` 保留93项编号对账、A代码/B受控模型/C历史实库三类统计、根因与5项限制；实际输入、输出、Schema、工具返回、PRE/POST、门控和逐项审核留在对应忽略run目录。版本化一次性运行器仅组合既有Fixture，不加入Maven测试集或新平台。当前定位为可复现多轮Agent研究/求职演示原型，尚未完成生产验收；本开发阶段结束。
