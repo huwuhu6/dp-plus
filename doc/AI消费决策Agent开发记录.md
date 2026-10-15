@@ -2646,3 +2646,14 @@ Run173–186 的 raw trace 中有 19 条 location-bearing 输出，17 条为 bud
 - C仍因无定位澄清，主轮没有检索。独立福州全市只读覆盖探针（与原始请求执行分开）对面食、酸菜鱼均为SQL330→画像菜系过滤0→最终0，不放宽成任意川菜或小吃。准确归因为PROFILE/DATA_COVERAGE，而不是语义未识别酸菜鱼；原无锚点问题另外记录为LOCATION_CONTEXT。本轮没有用评论中的菜品词反向证明整店菜系或菜单可用。
 - A/B的语义查询词为空，覆盖探针则在硬过滤后归零，所以本轮没有调用Milvus召回，不能宣称向量服务端到端已验证。MySQL、模型与地理服务实际可用，Milvus容器健康只证明容器状态；额外边界包括模型面馆覆盖遗漏、菜系画像粒度不足，以及POI附近查询自动采用锚点行政区的跨区漏召回风险（未证实有效候选被排除，本轮未修改）。
 - 最终完整 `mvn -q test` 为518 passed、8 skipped、0 failures/errors；新增opt-in只读诊断默认跳过，真实实验JUnit成功只证明证据已记录。完整日志 `retrieval-merge-full.log`、`retrieval-fix-directed.log`、`retrieval-final-full.log` 及汇总位于target/eval-pilot；首次模型证据和回放目录保留inputs、modelCalls、semanticAttempts、SearchSpec、SQL参数/候选ID、硬过滤分段计数、结果、完整回复、POST及展示一致性。所有运行生成物留在忽略目录，不进入提交。
+
+### 2026-10-15：明确餐饮类别覆盖与福州画像粒度审计
+
+- POI主体匹配修复安全Fast-forward至本地main `8072b2a21e4c17ac01d7ec9f32a5a618c4fa40fd`；合并后完整回归518 passed、8 skipped、0 failures/errors。新修复位于独立分支 `fix/v2-food-category-coverage`，代码提交 `ce143598e6e5d400f1d6470f2c213f06e81158d0`，未合并或推送。冻结规范、Main数据集及Holdout均未修改。
+- 根因是既有覆盖校验依赖闭集词表，缺少面馆、酸菜鱼等表达；已有任一食物字段也可能掩盖明确品类遗漏。复用 CuisineCanonicalizer 补齐类别/同义表达，并用正向用餐请求中的最长已知词验证覆盖，不根据标准答案填值。“面馆→面食”属于餐饮类型同义；米线、酸菜鱼、炸鸡及韩式炸鸡保留具体粒度，不能折叠成粉面、川菜、快餐或韩餐来证明菜单可用。其他历史类别映射未整体重构，这仍是有限词表，不是完整自然语言/菜单本体。
+- SemanticInterpreter 继续复用独立小Schema提取。即使最早错误是非法辣度，也在同一次有界提取中一并请求已确认缺失的菜系槽位，避免修完第一个错误仍丢菜系；已验证预算、地点、反馈及请求不重写。提取结果必须重新通过来源/OR/新旧任务边界和完整校验；仍缺食物或无原文依据则零提交。修复前负例实际5项失败；最终定向131 passed、完整530 passed、8 skipped、0 failures/errors，覆盖C06/C15、商户事实、数据集契约、无指定菜系、取消限制、OR、失败零提交及具体餐品不能由上位类别冒充。
+- 只读数据库审计：福州Shop330、画像330，无缺画像；Shop类别330条均为“美食”，描述/场景标签/环境标签各330条。画像单值咖啡、日料、火锅、烧烤、粤菜、西餐各50条，其余30条为闽菜/本地小吃/水煮鱼等组合标签，完整原值分布保存在审计JSON。面馆、面食、粉面、米线、酸菜鱼、炸鸡、韩式炸鸡的Production画像匹配均为0；330→0发生在SQL取回后的 `ShopRetrievalEngine.hardMatch→matchesCuisine`，不是MySQL查不到商户，也不是Milvus或排序删除候选。
+- 数据证据必须细分：福州没有缺画像造成的漏召回；也没有“已有面食标签仅因面馆名称不同”这类可直接修复的数据实例。酸菜鱼在shopId87大丰收脆鱼的两条评论中被正向提及，但画像只有“川菜,水煮鱼”；炸鸡块在shopId73花潮日料的一条评论被提及，但画像只有“日料,自助”。因此不能宣称没有相关商户/餐品，属于店铺画像粒度与菜品级可验证证据缺口。评论线索不自动升级为当前菜单，不把水煮鱼当酸菜鱼同义词，也不把所有日料店当成炸鸡店。本轮无数据库或画像写入；后续应核实菜单/有效期与来源，再维护细粒度餐品事实，而非批量放宽标签匹配。
+- 唯一真实模型实验 `real-first-food-category-20261015-once`，clean SHA为上述ce143598，deepseek-v4-flash-0731、60000ms，原文“福州市三坊七巷附近找面馆，人均50以内”。FIRST遗漏菜系并输出非法spiceRequirement="None"；一次TARGETED_EXTRACTION返回cuisine=面馆及JSON null辣度，来源和完整契约VALID。最终SearchSpec及POST均保留面馆、人均硬上限50；没有借旧任务或Fixture补条件，没有额外模型重跑。
+- 实际地图唯一主体三坊七巷B024F0VEQ4，坐标26.081958/119.296623，来源POI；真实SQL按福建省/福州市/鼓楼区/人均≤50取回4家，菜系过滤0家，默认3km与有界5km均0家，排序/展示0家。结果明确为ZERO_RESULT；没有删除菜系限制、没有候选可执行Verifier，不能把COMPLETED状态或JUnit成功当作推荐业务成功。硬白名单为空，Milvus未调用。FIRST仍有模型生成遗漏，但不再能无声执行无菜系搜索。
+- 本地证据：`target/eval-pilot/fuzhou-food-category-audit-20261015/`为零模型只读审计；唯一真实实验目录含原始FIRST/定向Schema及参数、字段来源、最终语义、SQL/SearchSpec、POI、分段计数、完整回复与POST、详细分类审计及verification-summary.json。完整回归日志 `food-coverage-full.log`，汇总 `food-coverage-full-summary.json`，定向 `food-coverage-directed-final.log`。生成物不进入提交；本轮没有扩大评测DSL或引入新的平台。
