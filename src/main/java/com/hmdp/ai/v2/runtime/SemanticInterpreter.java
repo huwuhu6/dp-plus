@@ -86,7 +86,8 @@ public class SemanticInterpreter {
             for(JsonNode excluded:first.root().path("criteria").path("excludedCuisines"))
                 if(DietaryRestrictionSource.ingredientTerm(excluded.asText()))fields.add("excludedCuisines");
         }
-        if(failed==Violation.CUISINE_COVERAGE_REQUIRED) fields.addAll(List.of("cuisine","cuisineAnyOf","excludedCuisines"));
+        if(failed==Violation.CUISINE_COVERAGE_REQUIRED || requiresCuisineCoverage(user,parse(first.root())))
+            fields.addAll(List.of("cuisine","cuisineAnyOf","excludedCuisines"));
         // 同一次有界提取补齐其余明确缺失维度，避免菜系修好后再启动第三次调用。
         failedDimensions(Violation.DINING_DETAILS_REQUIRED,user,first.root()).forEach(path->fields.add(path.substring("criteria.".length())));
         Map<String,Object> properties=new LinkedHashMap<>();
@@ -546,6 +547,10 @@ public class SemanticInterpreter {
         return userTurn.matches("(?s).*(?:预算不限|不限预算|不要预算限制|取消预算限制|去掉预算条件).*");
     }
     private boolean requiresCuisineCoverage(String userTurn, TurnSemantics semantics) {
+        if(semantics.taskDirective()==TaskDirective.START_NEW && !semantics.entityFeedback().isEmpty()) {
+            Matcher boundary=Pattern.compile("(?:对了|另外|此外|另一个|另一项)").matcher(userTurn);
+            if(boundary.find())userTurn=userTurn.substring(boundary.end());
+        }
         userTurn=DietaryRestrictionSource.withoutRestrictions(userTurn);
         boolean recommendation = semantics.requests().stream().anyMatch(UserRequest.RecommendationRequest.class::isInstance);
         boolean cuisineExpressed = semantics.requirementChanges().stream().filter(RequirementChange.CriteriaPatch.class::isInstance)
@@ -560,6 +565,7 @@ public class SemanticInterpreter {
                 .map(RequirementChange.CriteriaPatch.class::cast).filter(c->c.patch().cuisine()!=null)
                 .flatMap(c->c.patch().cuisine().acceptedCuisines().stream()).map(CuisineCanonicalizer::canonicalize)
                 .collect(java.util.stream.Collectors.toSet());
+        if(!included.containsAll(CuisineCanonicalizer.requestedCategories(userTurn)))return true;
         String aliases=CuisineCanonicalizer.knownAliases().stream().sorted(java.util.Comparator.comparingInt(String::length).reversed())
                 .map(Pattern::quote).collect(java.util.stream.Collectors.joining("|"));
         Matcher alternatives=Pattern.compile("("+aliases+")\\s*(?:或者|或是|或|/)\\s*("+aliases+")").matcher(userTurn);

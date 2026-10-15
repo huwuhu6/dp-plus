@@ -23,8 +23,9 @@ import java.util.Map;
  * Dianping app top-level categories): local cuisines (川湘粤...), hotpot/BBQ,
  * foreign cuisines, fast food / noodles / snacks, plus drinks/dessert/bakery and an
  * "其他" fallback (Rasa "other" principle for categorical slots). It is deliberately
- * one level of granularity — no 川式火锅/粤式火锅 sub-splits — so the set is complete
- * enough for common requests without exploding.
+ * a small closed vocabulary, not a complete menu ontology. Independently supported
+ * meal constraints such as 米线/酸菜鱼/炸鸡 retain their own keys: an upper-level
+ * merchant category alone cannot establish that a particular product is offered.
  */
 public class CuisineCanonicalizer {
 
@@ -111,10 +112,15 @@ public class CuisineCanonicalizer {
         CANONICAL_MAP.put("便当", "快餐简餐");
         CANONICAL_MAP.put("简餐", "快餐简餐");
         CANONICAL_MAP.put("汉堡", "快餐简餐");
-        CANONICAL_MAP.put("炸鸡", "快餐简餐");
+        // 具体餐品不能折叠成上位品类：快餐店/韩餐店不等于有炸鸡，粉面店不等于有米线。
+        CANONICAL_MAP.put("炸鸡", "炸鸡");
+        CANONICAL_MAP.put("韩式炸鸡", "韩式炸鸡");
+        CANONICAL_MAP.put("韩国炸鸡", "韩式炸鸡");
+        CANONICAL_MAP.put("酸菜鱼", "酸菜鱼");
         CANONICAL_MAP.put("盖浇饭", "快餐简餐");
         CANONICAL_MAP.put("盒饭", "快餐简餐");
         CANONICAL_MAP.put("面食", "面食");
+        CANONICAL_MAP.put("面馆", "面食");
         CANONICAL_MAP.put("面条", "面食");
         CANONICAL_MAP.put("拉面", "面食");
         CANONICAL_MAP.put("兰州拉面", "面食");
@@ -125,8 +131,9 @@ public class CuisineCanonicalizer {
         CANONICAL_MAP.put("米粉", "粉面");
         CANONICAL_MAP.put("螺蛳粉", "粉面");
         CANONICAL_MAP.put("桂林米粉", "粉面");
-        CANONICAL_MAP.put("过桥米线", "粉面");
-        CANONICAL_MAP.put("米线", "粉面");
+        CANONICAL_MAP.put("过桥米线", "米线");
+        CANONICAL_MAP.put("米线", "米线");
+        CANONICAL_MAP.put("粉面", "粉面");
         CANONICAL_MAP.put("河粉", "粉面");
         CANONICAL_MAP.put("饺子", "饺子馄饨");
         CANONICAL_MAP.put("馄饨", "饺子馄饨");
@@ -215,4 +222,19 @@ public class CuisineCanonicalizer {
     /** 单字食物需要用餐动作/量词边界，避免将“体面”“方便”等当成面食。 */
     public static boolean mentionsAlias(String text,String alias){return alias.length()>1?text.contains(alias):
             java.util.regex.Pattern.compile("(?:吃|来|要|点|或者|或是|或|和|、|/)(?:[一二两三四五六七八九十0-9]*[碗份盘个点])?\\s*"+java.util.regex.Pattern.quote(alias)+"(?=$|[，。！？?\\s])").matcher(text).find();}
+
+    /** 只定位明确的正向用餐请求，最长词优先，避免“韩式炸鸡”被拆为韩式或炸鸡。
+     * 返回覆盖校验证据，不代替模型填写语义，也不把商户标签/历史信息当作当前用户要求。 */
+    public static java.util.Set<String> requestedCategories(String text){
+        String aliases=CANONICAL_MAP.keySet().stream().sorted(java.util.Comparator.comparingInt(String::length).reversed())
+                .map(java.util.regex.Pattern::quote).collect(java.util.stream.Collectors.joining("|"));
+        var matcher=java.util.regex.Pattern.compile("(?:想吃|吃|找|要|来|换成|改成|推荐)(?:一家|家|点|碗|份|个|些|的|\\s)*("+aliases+")").matcher(text);
+        var result=new java.util.LinkedHashSet<String>();
+        while(matcher.find()) {
+            // 否定要求属于排除/清除，不能反向要求模型把它放入正向条件。
+            String before=text.substring(Math.max(0,matcher.start()-4),matcher.start());
+            if(!before.matches("(?s).*(?:不|别|不要|不能|取消|无需|不再)$"))result.add(canonicalize(matcher.group(1)));
+        }
+        return result;
+    }
 }

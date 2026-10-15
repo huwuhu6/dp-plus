@@ -41,15 +41,17 @@ class V2RealRetrievalDiagnosisTest {
     @Autowired ShopRetrievalEngine productionEngine;
     @Autowired V2ActionHandler productionActions;
     @Autowired LocationResolutionProvider locations;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     @Test void threeReadOnlyRequestsOnce() throws Exception {
         String run=System.getProperty("v2.pilot.runId","");assertTrue(run.matches("[A-Za-z0-9_-]+"));
         Path dir=Path.of("target/eval-pilot",run);Files.createDirectories(dir);
         Files.writeString(dir.resolve("STARTED.json"),"{}",StandardOpenOption.CREATE_NEW);
         boolean replay=Boolean.getBoolean("v2.retrievalDiagnosis.replay");
+        boolean singleCuisine=Boolean.getBoolean("v2.retrievalDiagnosis.singleCuisine");
         save(dir,"metadata",Map.of("repositorySha",V2ControlledFourRealModelTest.git("rev-parse","HEAD"),
                 "model",properties.getModel(),"timeoutMs",properties.getTimeoutMs(),"persistence","isolated test sessions; real DB SELECT only",
-                "locationAuthorization","user supplied 福州大学旗山校区附近; real geocoding, not measured device GPS",
+                "locationAuthorization",singleCuisine?"no device location; real POI from original user message":"user supplied 福州大学旗山校区附近; real geocoding, not measured device GPS",
                 "mode",replay?"archived validated semantics replay; zero new model calls":"real model once"));
         try {
             var rows=shops.selectList(new QueryWrapper<>());
@@ -64,13 +66,15 @@ class V2RealRetrievalDiagnosisTest {
         } catch(RuntimeException e) {
             save(dir,"inventory",Map.of("status","DEPENDENCY_BLOCKED","dependency","MYSQL","errorType",e.getClass().getName()));
         }
+        auditFuzhou(dir);
+        if(Boolean.getBoolean("v2.retrievalDiagnosis.auditOnly")){save(dir,"COMPLETED",Map.of("scope","MYSQL read-only audit; zero model calls"));return;}
         var model=new V2ModelCallEvidence(json);var observedClient=spy(client);
         doAnswer(i->model.observe(i.getArgument(0),i.getArgument(1),i.getArgument(2),i.getArgument(3),()->{
             try{return (JsonNode)i.callRealMethod();}catch(RuntimeException e){throw e;}catch(Throwable e){throw new AssertionError(e);}
         },observedClient::lastTransportAttempts)).when(observedClient).chatCompletion(anyList(),anyList(),anyMap(),eq("V2_SEMANTIC_INTERPRETATION"));
         ReflectionTestUtils.setField(interpreter,"aiClient",observedClient);
         ChatLocationInput authorized=null;
-        try {
+        if(!singleCuisine)try {
             LocationResolutionContext context=new LocationResolutionContext();context.setActiveCity("福州市");
             var candidates=locations.resolve(new LocationResolutionRequest("福州大学旗山校区",context,"POI"));
             save(dir,"authorized-location",Map.of("providerAvailable",locations.isAvailable(),"candidates",candidates,
@@ -85,6 +89,7 @@ class V2RealRetrievalDiagnosisTest {
         } catch(RuntimeException e){save(dir,"authorized-location",Map.of("status","DEPENDENCY_BLOCKED","errorType",e.getClass().getName()));}
         Map<String,String> inputs=new LinkedHashMap<>();inputs.put("A","在福州市三坊七巷附近找面馆，人均50元以内。");
         inputs.put("B","附近找餐厅");inputs.put("C-S03",V2ControlledPilotTest.messages().get("S03").getFirst());save(dir,"inputs",inputs);
+        if(singleCuisine){inputs.clear();inputs.put("first-food","福州市三坊七巷附近找面馆，人均50以内");save(dir,"inputs",inputs);}
         try {
             for(var input:inputs.entrySet()) {
                 model.calls.clear();var semantic=spy(interpreter);var h=new V2PilotHarness(semantic,"test-retrieval-"+run+"-"+input.getKey());
@@ -141,8 +146,41 @@ class V2RealRetrievalDiagnosisTest {
                 out.put("searches",searches);out.put("modelCalls",List.copyOf(model.calls));out.put("semanticAttempts",semantic.takeEvaluationAttempts());
                 out.put("commits",h.commits);out.put("events",h.events);save(dir,input.getKey(),out);
             }
-            save(dir,"COMPLETED",Map.of("requests",3));
+            save(dir,"COMPLETED",Map.of("requests",inputs.size()));
         }finally{ReflectionTestUtils.setField(interpreter,"aiClient",client);}
+    }
+    /** 独立读取数据库类别与描述证据，不回填到模型、搜索条件或商户画像。 */
+    void auditFuzhou(Path dir)throws Exception {
+        String scope="s.city IN ('福州市','福州')";
+        var rows=jdbc.queryForList("SELECT s.id,s.name,s.type_id,t.name AS category,s.district,s.avg_price,p.id AS profile_id,p.cuisine,p.scene_tags,p.ambience_tags,p.summary FROM tbl_shop s LEFT JOIN tbl_shop_type t ON t.id=s.type_id LEFT JOIN tbl_ai_shop_profile p ON p.shop_id=s.id WHERE "+scope);
+        var reviewRows=jdbc.queryForList("SELECT d.shop_id,d.content FROM tbl_ai_review_document d JOIN tbl_shop s ON s.id=d.shop_id WHERE "+scope);
+        Map<Long,String> reviewTexts=new HashMap<>();reviewRows.forEach(r->reviewTexts.merge(((Number)r.get("shop_id")).longValue(),Objects.toString(r.get("content"),""),(a,b)->a+"\n"+b));
+        Map<String,Long> cuisineDist=new TreeMap<>(),categoryDist=new TreeMap<>();
+        rows.forEach(r->{cuisineDist.merge(Objects.toString(r.get("cuisine"),"NULL"),1L,Long::sum);categoryDist.merge(Objects.toString(r.get("category"),"NULL"),1L,Long::sum);});
+        Map<String,Object> terms=new LinkedHashMap<>();
+        for(String term:List.of("面馆","面食","粉面","米线","酸菜鱼","炸鸡","韩式炸鸡")){
+            List<Long> name=new ArrayList<>(),category=new ArrayList<>(),cuisine=new ArrayList<>(),description=new ArrayList<>(),review=new ArrayList<>();
+            List<Map<String,Object>> evidence=new ArrayList<>();
+            for(var row:rows){long id=((Number)row.get("id")).longValue();var p=new AiShopProfile();p.setCuisine((String)row.get("cuisine"));
+                if(Objects.toString(row.get("name"),"").contains(term))name.add(id);
+                if(Objects.toString(row.get("category"),"").contains(term))category.add(id);
+                if(Boolean.TRUE.equals(ReflectionTestUtils.invokeMethod(productionEngine,"matchesCuisine",p,term)))cuisine.add(id);
+                if(List.of("scene_tags","ambience_tags","summary").stream().anyMatch(k->Objects.toString(row.get(k),"").contains(term)))description.add(id);
+                if(reviewTexts.getOrDefault(id,"").contains(term))review.add(id);
+                if(name.contains(id)||category.contains(id)||cuisine.contains(id)||description.contains(id)||review.contains(id)){
+                    Map<String,Object> item=new LinkedHashMap<>(row);item.put("reviewMentions",review.contains(id));
+                    item.put("reviewEvidence",reviewRows.stream().filter(r->((Number)r.get("shop_id")).longValue()==id && Objects.toString(r.get("content"),"").contains(term)).toList());
+                    evidence.add(item);
+                }
+            }
+            terms.put(term,Map.of("nameIds",name,"categoryIds",category,"productionCuisineMatchIds",cuisine,"profileDescriptionIds",description,"reviewMentionIds",review,"evidenceRows",evidence));
+        }
+        save(dir,"fuzhou-category-audit",Map.of("shops",rows.size(),"withProfile",rows.stream().filter(r->r.get("profile_id")!=null).count(),
+                "cuisineDistribution",cuisineDist,"shopCategoryDistribution",categoryDist,"termEvidence",terms,
+                "missingProfiles",rows.stream().filter(r->r.get("profile_id")==null).toList(),"withDescription",rows.stream().filter(r->!Objects.toString(r.get("summary"),"").isBlank()).count(),
+                "withSceneTags",rows.stream().filter(r->!Objects.toString(r.get("scene_tags"),"").isBlank()).count(),
+                "withAmbienceTags",rows.stream().filter(r->!Objects.toString(r.get("ambience_tags"),"").isBlank()).count(),
+                "scope","existing DB SELECT only; names/review mentions are clues, not verified current menus"));
     }
     Map<String,Object> predicateCounts(SearchSpec spec,List<Shop> initial){
         Map<Long,AiShopProfile> p=new HashMap<>();Map<Long,List<AiReviewDocument>> r=new HashMap<>();

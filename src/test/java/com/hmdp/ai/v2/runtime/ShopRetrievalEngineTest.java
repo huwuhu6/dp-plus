@@ -28,6 +28,19 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class ShopRetrievalEngineTest {
+    @Test void foodTypeSynonymMatchesButBroadCategoryDoesNotProveSpecificDish() {
+        ShopMapper shops=mock(ShopMapper.class);AiShopProfileMapper profiles=mock(AiShopProfileMapper.class);
+        AiReviewDocumentMapper reviews=mock(AiReviewDocumentMapper.class);
+        when(shops.selectList(any())).thenReturn(List.of(shop(1L,"TEST_ONLY面食店",40L),shop(2L,"TEST_ONLY快餐店",40L),shop(3L,"TEST_ONLY川菜店",40L)));
+        when(profiles.selectList(any())).thenReturn(List.of(profile(1L,"面食",""),profile(2L,"快餐",""),profile(3L,"川菜,水煮鱼","")));
+        when(reviews.selectList(any())).thenReturn(List.of());
+        var engine=engine(shops,profiles,reviews,null);
+        for(String food:List.of("面馆","炸鸡","酸菜鱼","韩式炸鸡","米线")){
+            var c=new DiningCriteria(null,new DiningCriteria.CuisineCriteria(food,List.of()),null,null,null,DiningCriteria.SemanticPreferences.empty());
+            var result=engine.retrieve(new SearchSpec(0,"test-food-evidence",ExecutionAction.SearchKind.RECOMMENDATIONS,3,c,List.of(),Set.of(),null,null));
+            assertEquals(food.equals("面馆")?List.of(1L):List.of(),result.candidates().stream().map(x->x.getShopId()).toList(),food);
+        }
+    }
     @Test void cuisineAlternativesHardFilterIsOrBeforeSemanticRecall() {
         ShopMapper shops=mock(ShopMapper.class);AiShopProfileMapper profiles=mock(AiShopProfileMapper.class);
         AiReviewDocumentMapper reviews=mock(AiReviewDocumentMapper.class);SemanticShopRetriever semantic=mock(SemanticShopRetriever.class);
